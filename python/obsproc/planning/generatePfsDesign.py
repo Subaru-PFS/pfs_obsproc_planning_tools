@@ -159,20 +159,23 @@ class GeneratePfsDesign(object):
         return None
 
 
-    def runQPlan(self, obs_dates):
+    def runQPlan(self, obs_dates, plotVisibility=False):
 
         ## import qPlanner module ##
         import qPlan
 
         outputDir = self.conf['qplan']['outputDir']
         ## read output from PPP ##
-        df=qPlan.run(os.path.join(self.outputDirPPP, 'ppcList.ecsv'), obs_dates, inputDirName=self.outputDirPPP, outputDirName=self.outputDirQplan)
+        self.df_qplan, self.sdlr, self.figs_qplan =qPlan.run(os.path.join(self.outputDirPPP, 'ppcList.ecsv'), obs_dates, inputDirName=self.outputDirPPP, outputDirName=self.outputDirQplan, plotVisibility=plotVisibility)
 
         ## qPlan result ##
-        self.resQPlan = {ppc_code: obstime for obstime, ppc_code in zip(df['obstime'], df['ppc_code'])}
+        self.resQPlan = {ppc_code: obstime for obstime, ppc_code in zip(self.df_qplan['obstime'], self.df_qplan['ppc_code'])}
         # print(len(self.resQPlan))
 
-        return None
+        if plotVisibility==True:
+            return self.figs_qplan
+        else:
+            return None
 
     def runSFA(self, clearOutput=False):
 

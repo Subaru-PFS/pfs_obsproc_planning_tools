@@ -7,6 +7,7 @@ import pandas as pd
 from astropy.table import Table
 from astropy import units as u
 from astropy.coordinates import SkyCoord
+from datetime import datetime, timedelta
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -22,9 +23,12 @@ from qplan.entity import (Program, Schedule, PPC_OB, StaticTarget, TelescopeConf
 from qplan.util.site import site_subaru as observer
 from ginga.misc.log import get_logger
 from ginga.misc.Bunch import Bunch
+from qplan.plots import airmass
+from io import BytesIO
+from IPython.display import Image
+from IPython.core.display import display
 
-
-def run(ppcList, obs_dates, inputDirName='.', outputDirName='.'):
+def run(ppcList, obs_dates, inputDirName='.', outputDirName='.', plotVisibility=False):
     # log file will let us debug scheduling, check it for error and debug messages
     # NOTE: any python (stdlib) logging compatible logger will work
     logger = get_logger('qplan', level=10, log_file=os.path.join(outputDirName, "sched.log"))    
@@ -142,6 +146,7 @@ def run(ppcList, obs_dates, inputDirName='.', outputDirName='.'):
     # set OB list to schedule from
     sdlr.set_oblist_info(obs)
 
+    # now scheduling...
     sdlr.schedule_all()
 
     # get a summary report of what happened
@@ -166,14 +171,19 @@ def run(ppcList, obs_dates, inputDirName='.', outputDirName='.'):
     # iterate over a schedule
     # if there is unused time at the end of a schedule, the "ob" attribute will be None
     slots = []
+    obs_allo = []
     for s in sch:
         #print(s.printed())
         for slot in s.slots:
             slots.append(slot)
             if slot.ob is not None:
                 print(slot.start_time, slot.stop_time, slot.ob, slot.ob.name, slot.ob.comment)
-    print('print slots...')
-    
+                obs_allo.append(slot.ob)
+    #print('print slots...')
+    #print(slots)
+    #print(dir(obs_allo[0]))
+    #print(type(slots[0].start_time))
+
     # the type of slot.ob will be a PPC_OB if it is not a delay or some other derived OB
     # for PPC_OBs, there will always be a setup and teardown part--these are normally used
     # by the OPE file generation code to properly set up status items, etc. on Gen2 for
@@ -185,8 +195,42 @@ def run(ppcList, obs_dates, inputDirName='.', outputDirName='.'):
         data = [(slot.start_time, slot.ob.name)
                 for slot in schedule
                 if slot.ob is not None and not slot.ob.derived]
+        targets = [(slot.start_time, slot.ob.target)
+                   for slot in schedule
+                   if slot.ob is not None and not slot.ob.derived]
         df = pd.DataFrame(data, columns=['obstime', 'ppc_code'])
-        return df
+        return df, targets
 
-    df = make_schedule_table(slots)
-    return df
+    df, targets = make_schedule_table(slots)
+    df.to_csv(os.path.join(outputDirName, 'result.csv'))
+    print(df)
+    
+    # plot visibility plots for each night
+    if plotVisibility==True:
+        figs = []
+        for obs_date in obs_dates:
+            t = observer.get_date(obs_date)
+            observer.set_date(t)
+            sunset = observer.sunset()
+            sunrise = observer.sunrise() + timedelta(days=1)
+            print(sunset, sunrise)
+
+            target_data = []
+            for (t, v) in targets:
+                if t > sunset and t < sunrise:
+                    info_list = observer.get_target_info(v)
+                    target_data.append(Bunch(history=info_list, target=v))
+
+            amp = airmass.AirMassPlot(800, 600, logger=logger)
+            from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+            canvas = FigureCanvas(amp.fig)
+            amp.plot_altitude(observer, target_data, observer.timezone)
+            buf2 = BytesIO()
+            canvas.print_figure(buf2, format='png')
+            Image(data=bytes(buf2.getvalue()), format='png', embed=True)
+            figs.append(amp)
+            display(amp.fig)
+    else:
+        figs = None
+
+    return df, sdlr, figs
