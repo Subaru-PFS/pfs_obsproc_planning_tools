@@ -1340,8 +1340,11 @@ def run(readsamp_con,TimeOnSource_l,TimeOnSource_m,iter1_on=False,iter2_on=False
     TraCollision=False
     printTF=True
     multiProcess=True
-    plotTF=False
-    
+    if show_plots == True:
+        plotTF=True
+    else:
+        plotTF=False
+        
     commode='compOFpsl_m1'
         
     if iter1_on:
