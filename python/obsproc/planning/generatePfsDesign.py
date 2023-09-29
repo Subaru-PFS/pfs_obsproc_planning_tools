@@ -25,7 +25,8 @@ class OpeFile(object):
         self.template = os.path.join(workDir, conf['ope']['template'])
         self.outfilePath = os.path.join(workDir, conf['ope']['outfilePath'])
         self.runName = conf['ope']['runName']
-        self.designPath = conf['ope']['designPath']
+        self.designPath = os.path.join(workDir, conf['ope']['designPath'])
+        self.exptime_ppp = conf['ppp']['TEXP_NOMINAL']
         #self.loadTemplate(self.template)
         return None
 
@@ -75,12 +76,19 @@ class OpeFile(object):
         repl2 = f'OBSERVATION_START_DATE={obsdate}'
         self.contents_updated = self.contents_updated.replace(repl1, repl2)
 
-        repl1 = 'OBSERVATION_END_DATE=2023.07.31'
-        repl2 = f'OBSERVATION_END_DATE={obsdate}'
-        self.contents_updated = self.contents_updated.replace(repl1, repl2)
-
         repl1 = 'OBSERVATION_START_TIME=17:00:00'
         repl2 = f'OBSERVATION_START_TIME={obstime}'
+        self.contents_updated = self.contents_updated.replace(repl1, repl2)
+
+        # OBSERVATION_END_DATE
+        dt1 = Time(observationTime)
+        dt2 = dt1 + self.exptime_ppp * u.second
+        observationTime2 = dt2.to_string()+'Z'
+        obsdate = observationTime2.split('T')[0].replace('-','.')
+        obstime = observationTime2.split('T')[1].split('.')[0]
+
+        repl1 = 'OBSERVATION_END_DATE=2023.07.31'
+        repl2 = f'OBSERVATION_END_DATE={obsdate}'
         self.contents_updated = self.contents_updated.replace(repl1, repl2)
 
         repl1 = 'OBSERVATION_END_TIME=06:00:00'
