@@ -220,16 +220,16 @@ def run(ppcList, obs_dates, inputDirName='.', outputDirName='.', plotVisibility=
                 if t > sunset and t < sunrise:
                     info_list = observer.get_target_info(v)
                     target_data.append(Bunch(history=info_list, target=v))
-
-            amp = airmass.AirMassPlot(800, 600, logger=logger)
-            from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
-            canvas = FigureCanvas(amp.fig)
-            amp.plot_altitude(observer, target_data, observer.timezone)
-            buf2 = BytesIO()
-            canvas.print_figure(buf2, format='png')
-            Image(data=bytes(buf2.getvalue()), format='png', embed=True)
-            figs.append(amp)
-            display(amp.fig)
+            if len(target_data)>0:
+                amp = airmass.AirMassPlot(800, 600, logger=logger)
+                from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+                canvas = FigureCanvas(amp.fig)
+                amp.plot_altitude(observer, target_data, observer.timezone)
+                buf2 = BytesIO()
+                canvas.print_figure(buf2, format='png')
+                Image(data=bytes(buf2.getvalue()), format='png', embed=True)
+                figs.append(amp)
+                display(amp.fig)
     else:
         figs = None
 
