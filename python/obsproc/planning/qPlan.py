@@ -24,10 +24,10 @@ from ginga.misc.log import get_logger
 from ginga.misc.Bunch import Bunch
 
 
-def run(ppcList, obs_dates, dirName='.'):
+def run(ppcList, obs_dates, inputDirName='.', outputDirName='.'):
     # log file will let us debug scheduling, check it for error and debug messages
     # NOTE: any python (stdlib) logging compatible logger will work
-    logger = get_logger('qplan', level=10, log_file=os.path.join(dirName, "output/qplan", "sched.log"))    
+    logger = get_logger('qplan', level=10, log_file=os.path.join(outputDirName, "sched.log"))    
 
     # create one fake program, for PPP, everything runs under one "program"
     proposal = 'S24B-QN017'
@@ -83,7 +83,7 @@ def run(ppcList, obs_dates, dirName='.'):
     #
 
     # get PPC list
-    tab = Table.read(os.path.join(dirName, ppcList))
+    tab = Table.read(os.path.join(inputDirName, ppcList))
     tgt_tbl = ""
     for t in tab:
         c = SkyCoord(t['ppc_ra'], t['ppc_dec'], unit="deg")

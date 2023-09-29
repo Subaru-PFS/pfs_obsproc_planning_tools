@@ -18,6 +18,7 @@ def run(conf, workDir='.', repoDir='.', clearOutput=False):
     import pointing_utils.nfutils as nfutils
     import pointing_utils.designutils as designutils
   
-    list_pointings, dict_pointing, design_ids = sfa.reconfigure(conf, workDir, clearOutput=clearOutput)
+    infile = os.path.join(workDir, conf['ppp']['outputDir'], 'ppp+qplan_outout.csv')
+    list_pointings, dict_pointing, design_ids = sfa.reconfigure(conf, workDir, infile=infile, clearOutput=clearOutput)
   
     return list_pointings, dict_pointing, design_ids

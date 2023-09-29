@@ -115,31 +115,38 @@ class GeneratePfsDesign(object):
         self.config = config
         self.workDir = workDir
         self.repoDir = repoDir
+
+        ## configuration file ##
+        self.conf = read_conf(os.path.join(self.workDir, self.config))
+
+        ## define directory of outputs from each component ##
+        self.inputDirPPP = os.path.join(self.workDir, self.conf['ppp']['inputDir'])
+        self.outputDirPPP = os.path.join(self.workDir, self.conf['ppp']['outputDir'])
+        self.outputDirQplan = os.path.join(self.workDir, self.conf['qplan']['outputDir'])
+
         return None
 
     def runPPP(self, n_pccs_l, n_pccs_m, show_plots=False):
         import PPP
-
-        conf = read_conf(os.path.join(self.workDir, self.config))
 
         ## check input target list ##
         #df = pd.read_csv(os.path.join(self.workDir, 'input/mock_sim.csv'))
         #print(df[:5])
 
         ## read sample from local path ##
-        if conf['ppp']['mode']=='local':
-            readsamp_con={'mode':'local', 'localPath':os.path.join(self.workDir, 'input/mock_sim.csv')}
+        if self.conf['ppp']['mode']=='local':
+            readsamp_con={'mode':'local', 'localPath':os.path.join(self.workDir, f'{self.inputDirPPP}/mock_sim.csv')}
         else:
-            readsamp_con={'mode':conf['ppp']['mode'], 'dialect':conf['targetdb']['db']['dialect'], 'user':conf['targetdb']['db']['user'], 'pwd':conf['targetdb']['db']['password'], 'host':conf['targetdb']['db']['host'], 'port':conf['targetdb']['db']['port'], 'dbname':conf['targetdb']['db']['dbname'], 'sql_query':conf['ppp']['sql_query']}
+            readsamp_con={'mode':self.conf['ppp']['mode'], 'dialect':self.conf['targetdb']['db']['dialect'], 'user':self.conf['targetdb']['db']['user'], 'pwd':self.conf['targetdb']['db']['password'], 'host':self.conf['targetdb']['db']['host'], 'port':self.conf['targetdb']['db']['port'], 'dbname':self.conf['targetdb']['db']['dbname'], 'sql_query':self.conf['ppp']['sql_query']}
 
         ## define exposure time ##
-        onsourceT_L=conf['ppp']['TEXP_NOMINAL']*n_pccs_l # in sec (assuming 300 PPCs given)  --  LR
-        onsourceT_M=conf['ppp']['TEXP_NOMINAL']*n_pccs_m # in sec (assuming 0 PPCs given)  --  MR
+        onsourceT_L=self.conf['ppp']['TEXP_NOMINAL']*n_pccs_l # in sec (assuming 300 PPCs given)  --  LR
+        onsourceT_M=self.conf['ppp']['TEXP_NOMINAL']*n_pccs_m # in sec (assuming 0 PPCs given)  --  MR
 
-        PPP.run(readsamp_con, onsourceT_L, onsourceT_M, iter1_on=False, dirName=self.workDir, show_plots=show_plots)
+        PPP.run(readsamp_con, onsourceT_L, onsourceT_M, iter1_on=False, dirName=self.outputDirPPP, show_plots=show_plots)
 
         ## check output ##
-        data_ppp = np.load(os.path.join(self.workDir, 'output/obj_allo_tot.npy'), allow_pickle=True)
+        data_ppp = np.load(os.path.join(self.outputDirPPP, 'obj_allo_tot.npy'), allow_pickle=True)
 
         return None
 
@@ -149,8 +156,9 @@ class GeneratePfsDesign(object):
         ## import qPlanner module ##
         import qPlan
 
+        outputDir = self.conf['qplan']['outputDir']
         ## read output from PPP ##
-        df=qPlan.run('output/ppcList.ecsv', obs_dates, dirName=self.workDir)
+        df=qPlan.run(os.path.join(self.outputDirPPP, 'ppcList.ecsv'), obs_dates, inputDirName=self.outputDirPPP, outputDirName=self.outputDirQplan)
 
         ## qPlan result ##
         self.resQPlan = {ppc_code: obstime for obstime, ppc_code in zip(df['obstime'], df['ppc_code'])}
@@ -160,9 +168,6 @@ class GeneratePfsDesign(object):
 
     def runSFA(self, clearOutput=False):
 
-        ## configuration file ##
-        conf = read_conf(os.path.join(self.workDir, self.config))
-
         ## setup python path ##
         sys.path.append(os.path.join(self.repoDir, 'ets_pointing/pfs_design_tool'))
         import pointing_utils.dbutils as dbutils
@@ -171,8 +176,13 @@ class GeneratePfsDesign(object):
 
         import SFA
 
+        ## define directory of outputs from each component ##
+
+        outputDirPPP = os.path.join(self.workDir, self.conf['ppp']['outputDir'])
+        outputDirQplan = os.path.join(self.workDir, self.conf['qplan']['outputDir'])
+
         ## get a list of OBs ##
-        t = Table.read(os.path.join(self.workDir, 'output/obList.ecsv'))
+        t = Table.read(os.path.join(outputDirPPP, 'obList.ecsv'))
         proposal_ids=t['proposal_id']
         ob_codes=t['ob_code']
         ob_obj_ids=t['ob_obj_id']
@@ -187,7 +197,7 @@ class GeneratePfsDesign(object):
         print(len(obList))
 
         ## get a list of assigned OBs ## FIXME (maybe we don't need to use this)
-        data_ppp = np.load(os.path.join(self.workDir, 'output/obj_allo_tot.npy'), allow_pickle=True)
+        data_ppp = np.load(os.path.join(outputDirPPP, 'obj_allo_tot.npy'), allow_pickle=True)
         #print(len(data_ppp))
         #print(t[:4])
 
@@ -212,14 +222,14 @@ class GeneratePfsDesign(object):
         ## write to csv ##
         filename = 'ppp+qplan_outout.csv'
         header='pointing,ra_center,dec_center,pa_center,ob_unique_code,proposal_id,ob_code,obj_id,ra_target,dec_target,pmra_target,pmdec_target,parallax_target,equinox_target,target_class,obstime'
-        np.savetxt(os.path.join(self.workDir, 'output', filename), data , fmt='%s', 
+        np.savetxt(os.path.join(outputDirPPP, filename), data , fmt='%s', 
         delimiter=',', comments='', header=header)
 
         ## run SFA ##
-        listPointings, dictPointings, pfsDesignIds = SFA.run(conf, workDir=self.workDir, repoDir=self.repoDir, clearOutput=clearOutput)
+        listPointings, dictPointings, pfsDesignIds = SFA.run(self.conf, workDir=self.workDir, repoDir=self.repoDir, clearOutput=clearOutput)
 
         ## ope file generation ##
-        ope = OpeFile(conf=conf, workDir=self.workDir)
+        ope = OpeFile(conf=self.conf, workDir=self.workDir)
         for pointing, (k,v) in zip(listPointings, pfsDesignIds.items()):
             ope.loadTemplate() # initialize
             ope.update(pointing=pointing, dictPointings=dictPointings, designId=v, observationTime=k) # update contents

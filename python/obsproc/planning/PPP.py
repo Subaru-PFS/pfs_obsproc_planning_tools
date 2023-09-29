@@ -1246,7 +1246,7 @@ def output(obj_allo_tot, uS_tot, dirName='.'):
                  names=["ppc_code","ppc_ra","ppc_dec","ppc_pa","ppc_equinox","ppc_priority","ppc_exptime",\
                         "ppc_totaltime","ppc_resolution","ppc_fibAlloFrac","ppc_comment"])
     
-    ppcList.write(os.path.join(dirName, 'output/ppcList.ecsv'), format='ascii.ecsv', overwrite=True)
+    ppcList.write(os.path.join(dirName, 'ppcList.ecsv'), format='ascii.ecsv', overwrite=True)
     
     ob_code=uS_tot['ob_code'].data
     ob_obj_id=uS_tot['obj_id'].data
@@ -1270,9 +1270,9 @@ def output(obj_allo_tot, uS_tot, dirName='.'):
                 names=["ob_code","ob_obj_id","ob_ra","ob_dec","ob_pmra", "ob_pmdec","ob_parallax","ob_equinox","ob_priority","ob_exptime","ob_resolution",\
                        "proposal_id","proposal_rank","ob_weight_best","ob_allocate_time_netflow", "ob_ppc_code"])
     
-    obList.write(os.path.join(dirName, 'output/obList.ecsv'),format='ascii.ecsv',overwrite=True)
+    obList.write(os.path.join(dirName, 'obList.ecsv'),format='ascii.ecsv',overwrite=True)
     
-    np.save(os.path.join(dirName, 'output/obj_allo_tot.npy'), obj_allo_tot)
+    np.save(os.path.join(dirName, 'obj_allo_tot.npy'), obj_allo_tot)
 
 def plotCR(cR, sub, obj_allo, dirName='.', show_plots=False): 
     '''plot completion rate and fiber allocation efficiency
@@ -1323,7 +1323,7 @@ def plotCR(cR, sub, obj_allo, dirName='.', show_plots=False):
     plt.xticks(fontsize=16)
     plt.yticks(fontsize=16)
     plt.grid()
-    plt.savefig(os.path.join(dirName, 'output/ppp_result.jpg'),dpi=300,bbox_inches='tight')
+    plt.savefig(os.path.join(dirName, 'ppp_result.jpg'),dpi=300,bbox_inches='tight')
     if show_plots==True:
         plt.show()
 
