@@ -11,118 +11,24 @@ from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.time import Time
 import argparse
+from datetime import timedelta
 
 import warnings
 warnings.filterwarnings('ignore')
+
+from opefile import OpeFile
 
 def read_conf(conf):
     config = toml.load(conf)
     return config
 
-class OpeFile(object):
-
-    def __init__(self, conf, workDir):
-        self.template = os.path.join(workDir, conf['ope']['template'])
-        self.outfilePath = os.path.join(workDir, conf['ope']['outfilePath'])
-        self.runName = conf['ope']['runName']
-        self.designPath = os.path.join(workDir, conf['ope']['designPath'])
-        self.exptime_ppp = conf['ppp']['TEXP_NOMINAL']
-        #self.loadTemplate(self.template)
-        return None
-
-    def loadTemplate(self, filename=None):
-        if filename == None:
-            filename = self.template
-        self.contents = ""
-        with open(filename, 'r') as file:
-            for line in file:
-                self.contents += line
-
-    def update(self, pointing, dictPointings, designId, observationTime):
-        def convRaDec(ra, dec):
-            if dec>0:
-                decsgn = '+'
-            else:
-                decsgn = '-'
-            ra /= 15
-            ra1 = int(ra)
-            ra2 = int((ra - ra1) * 60)
-            ra3 = (ra - ra1 - ra2/60.) * 3600.
-            ra_new = '%02d%02d%.3f' % (ra1, ra2, ra3)
-            dec = abs(dec)
-            dec1 = int(dec)
-            dec2 = int((dec-dec1) * 60)
-            dec3 = (dec - dec1 - dec2 / 60.) * 3600.
-            dec_new = '%s%02d%02d%.2f' % (decsgn, dec1, dec2, dec3)
-            return ra_new, dec_new
-
-        # name of OPE file
-        self.outfile = os.path.join(self.outfilePath, f'{pointing}.ope')
-      
-        # update PFSDSGNDIR
-        self.contents_updated = self.contents.replace('PFSDSGNDIR="/data/pfsDesign/"', f'PFSDSGNDIR="{self.designPath}"')
-
-        # update HEADER
-        # OBSERVATION_FILE_NAME
-        repl1 = 'OBSERVATION_FILE_NAME=template_pfs.ope'
-        repl2 = f'OBSERVATION_FILE_NAME=pointing.ope'
-        self.contents_updated = self.contents_updated.replace(repl1, repl2)
-
-        # OBSERVATION_START_DATE
-        obsdate = observationTime.split('T')[0].replace('-','.')
-        obstime = observationTime.split('T')[1].replace('Z','')
-
-        repl1 = 'OBSERVATION_START_DATE=2023.07.01'
-        repl2 = f'OBSERVATION_START_DATE={obsdate}'
-        self.contents_updated = self.contents_updated.replace(repl1, repl2)
-
-        repl1 = 'OBSERVATION_START_TIME=17:00:00'
-        repl2 = f'OBSERVATION_START_TIME={obstime}'
-        self.contents_updated = self.contents_updated.replace(repl1, repl2)
-
-        # OBSERVATION_END_DATE
-        dt1 = Time(observationTime)
-        dt2 = dt1 + self.exptime_ppp * u.second
-        observationTime2 = dt2.to_string()+'Z'
-        obsdate = observationTime2.split('T')[0].replace('-','.')
-        obstime = observationTime2.split('T')[1].split('.')[0]
-
-        repl1 = 'OBSERVATION_END_DATE=2023.07.31'
-        repl2 = f'OBSERVATION_END_DATE={obsdate}'
-        self.contents_updated = self.contents_updated.replace(repl1, repl2)
-
-        repl1 = 'OBSERVATION_END_TIME=06:00:00'
-        repl2 = f'OBSERVATION_END_TIME={obstime}'
-        self.contents_updated = self.contents_updated.replace(repl1, repl2)
-
-        # update FIELD NAME (header part)
-        repl1 = '# [FIELD_NAME] 05:28:40.1 +35:49:26'
-        repl2 = f'# [{pointing}] 05:28:40.1 +35:49:26'
-        self.contents_updated = self.contents_updated.replace(repl1, repl2)
-
-        # update FIELD NAME (contents part)
-        repl1 = 'FIELD_NAME=OBJECT="FIELD_NAME" RA=FIELD_RA DEC=FIELD_DEC EQUINOX=2000.0'
-        ra = float(dictPointings[pointing.lower()]["ra_center"])
-        dec = float(dictPointings[pointing.lower()]["dec_center"])
-        ra_new, dec_new = convRaDec(ra, dec)
-        repl2 = f'{pointing}=OBJECT="{pointing}" RA={ra_new} DEC={dec_new} EQUINOX=2000.0'
-        self.contents_updated = self.contents_updated.replace(repl1, repl2)
-
-        # update SETUPFIELD part
-        repl1 = 'SetupField $DEF_PFSENG DESIGN_ID="designId" AG=OFF OFFSET_RA=0 OFFSET_DEC=0'
-        repl2 = f'SetupField $DEF_PFSENG DESIGN_ID="{designId}" AG=OFF OFFSET_RA=0 OFFSET_DEC=0'
-        self.contents_updated = self.contents_updated.replace(repl1, repl2)
-
-    def write(self):
-        with open(self.outfile, 'w') as file:
-            file.write(self.contents_updated)
-            
 class GeneratePfsDesign(object):
 
     def __init__(self, config, workDir, repoDir):
         self.config = config
         self.workDir = workDir
         self.repoDir = repoDir
+        self.obs_dates = ['2023-05-20']
 
         ## configuration file ##
         self.conf = read_conf(os.path.join(self.workDir, self.config))
@@ -134,6 +40,12 @@ class GeneratePfsDesign(object):
 
         return None
 
+    def update_obs_dates(self, obs_dates):
+        if type(obs_dates)==list:
+            self.obs_dates = obs_dates
+        else:
+            raise('specify obs_dates as a list')
+        
     def runPPP(self, n_pccs_l, n_pccs_m, show_plots=False):
         import PPP
 
@@ -159,17 +71,20 @@ class GeneratePfsDesign(object):
         return None
 
 
-    def runQPlan(self, obs_dates, plotVisibility=False):
+    def runQPlan(self, obs_dates=['2023-05-20'], plotVisibility=False):
 
+        if obs_dates is not ['2023-05-20']:
+            self.update_obs_dates(obs_dates)
+        
         ## import qPlanner module ##
         import qPlan
 
         outputDir = self.conf['qplan']['outputDir']
         ## read output from PPP ##
         self.df_qplan, self.sdlr, self.figs_qplan =qPlan.run(os.path.join(self.outputDirPPP, 'ppcList.ecsv'), obs_dates, inputDirName=self.outputDirPPP, outputDirName=self.outputDirQplan, plotVisibility=plotVisibility)
-
+        
         ## qPlan result ##
-        self.resQPlan = {ppc_code: obstime for obstime, ppc_code in zip(self.df_qplan['obstime'], self.df_qplan['ppc_code'])}
+        self.resQPlan = {ppc_code: (obstime, ppc_ra, ppc_dec) for obstime, ppc_code, ppc_ra, ppc_dec in zip(self.df_qplan['obstime'], self.df_qplan['ppc_code'], self.df_qplan['ppc_ra'], self.df_qplan['ppc_dec'])}
         # print(len(self.resQPlan))
 
         if plotVisibility==True:
@@ -226,25 +141,40 @@ class GeneratePfsDesign(object):
             ppc_pa = data_ppp[i][4]
             ob_unique_id = data_ppp[i][7]
             if ppc_code in self.resQPlan.keys():
-                obstime=self.resQPlan[ppc_code].tz_convert('UTC')
+                res = self.resQPlan[ppc_code]
+                obstime = res[0].tz_convert('UTC')
+                obsdate_in_hst = (obstime.date() - timedelta(days=1))
                 for oid in ob_unique_id:
-                    data.append([ppc_code, ppc_ra, ppc_dec, ppc_pa, oid] + obList[oid] + [obstime.strftime('%Y-%m-%d %X')])
+                    data.append([ppc_code, ppc_ra, ppc_dec, ppc_pa, oid] + obList[oid] + [obstime.strftime('%Y-%m-%d %X')] + [obsdate_in_hst.strftime('%Y-%m-%d')])
 
         ## write to csv ##
         filename = 'ppp+qplan_outout.csv'
-        header='pointing,ra_center,dec_center,pa_center,ob_unique_code,proposal_id,ob_code,obj_id,ra_target,dec_target,pmra_target,pmdec_target,parallax_target,equinox_target,target_class,obstime'
+        header='pointing,ra_center,dec_center,pa_center,ob_unique_code,proposal_id,ob_code,obj_id,ra_target,dec_target,pmra_target,pmdec_target,parallax_target,equinox_target,target_class,obstime,obsdate_in_hst'
         np.savetxt(os.path.join(outputDirPPP, filename), data , fmt='%s', 
         delimiter=',', comments='', header=header)
 
         ## run SFA ##
-        listPointings, dictPointings, pfsDesignIds = SFA.run(self.conf, workDir=self.workDir, repoDir=self.repoDir, clearOutput=clearOutput)
+        filename = 'ppp+qplan_outout.csv'
+        df = pd.read_csv(os.path.join(outputDirPPP, filename))
+
+        listPointings, dictPointings, pfsDesignIds, observation_dates_in_hst = SFA.run(self.conf, workDir=self.workDir, repoDir=self.repoDir, clearOutput=clearOutput)
 
         ## ope file generation ##
         ope = OpeFile(conf=self.conf, workDir=self.workDir)
-        for pointing, (k,v) in zip(listPointings, pfsDesignIds.items()):
+        for obsdate in self.obs_dates:
             ope.loadTemplate() # initialize
-            ope.update(pointing=pointing, dictPointings=dictPointings, designId=v, observationTime=k) # update contents
+            ope.update_obsdate(obsdate) # update observation date
+            info = []
+            for pointing, (k,v), observation_date_in_hst in zip(listPointings, pfsDesignIds.items(), observation_dates_in_hst):
+                if observation_date_in_hst == obsdate:
+                    res = self.resQPlan[pointing]
+                    info.append([pointing, obsdate, k, v, res[1], res[2]])
+            ope.update_design(info)
             ope.write() # save file
+        #for pointing, (k,v) in zip(listPointings, pfsDesignIds.items()):
+        #    ope.loadTemplate() # initialize
+        #    ope.update(pointing=pointing, dictPointings=dictPointings, designId=v, observationTime=k) # update contents
+        #    ope.write() # save file
 
         return None
 
@@ -293,6 +223,18 @@ def get_arguments():
         action="store_true",
         help="skip the PPP processing? (default: False)",
     )
+    # skip_qplan
+    parser.add_argument(
+        "--skip_qplan",
+        action="store_true",
+        help="skip the qPlan processing? (default: False)",
+    )
+    # skip_sfa
+    parser.add_argument(
+        "--skip_sfa",
+        action="store_true",
+        help="skip the SFA processing? (default: False)",
+    )
     # obs_dates
     parser.add_argument(
         "--obs_dates",
@@ -324,10 +266,13 @@ def main():
         gpd.runPPP(args.n_pccs_l, args.n_pccs_m, args.show_plots)
 
     ## run queuePlanner ##
-    gpd.runQPlan(args.obs_dates)
+    
+    if args.skip_qplan == False:
+        gpd.runQPlan(args.obs_dates)
 
     ## run SFA.py
-    gpd.runSFA()
+    if args.skip_sfa == False:
+        gpd.runSFA()
 
     return 0
 

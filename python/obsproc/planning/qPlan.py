@@ -192,13 +192,13 @@ def run(ppcList, obs_dates, inputDirName='.', outputDirName='.', plotVisibility=
     # schedules are reasonably accurate in time            
 
     def make_schedule_table(schedule):
-        data = [(slot.start_time, slot.ob.name)
+        data = [(slot.start_time, slot.ob.name, slot.ob.target.ra, slot.ob.target.dec)
                 for slot in schedule
                 if slot.ob is not None and not slot.ob.derived]
         targets = [(slot.start_time, slot.ob.target)
                    for slot in schedule
                    if slot.ob is not None and not slot.ob.derived]
-        df = pd.DataFrame(data, columns=['obstime', 'ppc_code'])
+        df = pd.DataFrame(data, columns=['obstime', 'ppc_code', 'ppc_ra', 'ppc_dec'])
         return df, targets
 
     df, targets = make_schedule_table(slots)

@@ -19,6 +19,6 @@ def run(conf, workDir='.', repoDir='.', clearOutput=False):
     import pointing_utils.designutils as designutils
   
     infile = os.path.join(workDir, conf['ppp']['outputDir'], 'ppp+qplan_outout.csv')
-    list_pointings, dict_pointing, design_ids = sfa.reconfigure(conf, workDir, infile=infile, clearOutput=clearOutput)
+    list_pointings, dict_pointing, design_ids, observation_dates_in_hst = sfa.reconfigure(conf, workDir, infile=infile, clearOutput=clearOutput)
   
-    return list_pointings, dict_pointing, design_ids
+    return list_pointings, dict_pointing, design_ids, observation_dates_in_hst
