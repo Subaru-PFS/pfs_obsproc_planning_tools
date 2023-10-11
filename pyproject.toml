@@ -1,0 +1,58 @@
+[project]
+authors = [
+    { name = "Kiyoto Yabe" },
+    { name = "Wanqiu He" },
+    { name = "Eric Jeschke" },
+    { name = "Masato Onodera", email = "monodera@naoj.org" },
+]
+name = "pfs_obsproc_planning"
+version = "0.1.0"
+description = ""
+dependencies = [
+    "jupyter>=1.0.0",
+    "astropy>=5.3.3",
+    "toml>=0.10.2",
+    "pandas>=2.1.0",
+    "numpy>=1.25.2",
+    "matplotlib>=3.8.0",
+    "seaborn>=0.13.0",
+    "colorcet>=3.0.1",
+    "ipython>=8.16.0",
+    "scikit-learn>=1.3.1",
+    "scipy>=1.9.3",
+    "psycopg2>=2.9.8",
+    "sqlalchemy>=2.0.21",
+    "logzero>=1.7.0",
+    "pybind11>=2.11.1",
+    "setuptools>=68.2.2",
+    "wheel>=0.41.2",
+    "gurobipy>=10.0.3",
+    "qplan @ git+https://github.com/naojsoft/qplan.git",
+    "ics-cobraOps @ git+https://github.com/Subaru-PFS/ics_cobraOps.git",
+    "ets-fiber-assigner @ git+https://github.com/Subaru-PFS/ets_fiberalloc.git",
+    "pfs-utils @ git+https://github.com/Subaru-PFS/pfs_utils.git",
+    "shapely>=2.0.1",
+]
+requires-python = ">=3.9"
+readme = "README.md"
+license = { text = "MIT" }
+
+
+[build-system]
+requires = ["setuptools", "wheel", "pybind11"]
+build-backend = "setuptools.build_meta"
+
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+include-package-data = true
+
+[tool.pdm.dev-dependencies]
+dev = [
+    "-e git+https://github.com/Subaru-PFS/ics_cobraCharmer.git#egg=ics-cobraCharmer",
+    "-e git+https://github.com/Subaru-PFS/ets_pointing.git#egg=ets-pointing",
+]
+
+[tool.pdm.options]
+add = ["--no-isolation"]
+install = ["--no-isolation"]
