@@ -1,29 +1,30 @@
 #!/usr/bin/env python3
 # generatePfsDesign.py : PPP+qPlan+SFR
 
+import argparse
 import os
 import sys
+import warnings
+from datetime import timedelta
+
 import numpy as np
 import pandas as pd
 import toml
-from astropy.table import Table
 from astropy import units as u
 from astropy.coordinates import SkyCoord
+from astropy.table import Table
 from astropy.time import Time
-import argparse
-from datetime import timedelta
 
-import warnings
 warnings.filterwarnings('ignore')
 
 from opefile import OpeFile
+
 
 def read_conf(conf):
     config = toml.load(conf)
     return config
 
 class GeneratePfsDesign(object):
-
     def __init__(self, config, workDir, repoDir):
         self.config = config
         self.workDir = workDir
@@ -34,9 +35,11 @@ class GeneratePfsDesign(object):
         self.conf = read_conf(os.path.join(self.workDir, self.config))
 
         ## define directory of outputs from each component ##
-        self.inputDirPPP = os.path.join(self.workDir, self.conf['ppp']['inputDir'])
-        self.outputDirPPP = os.path.join(self.workDir, self.conf['ppp']['outputDir'])
-        self.outputDirQplan = os.path.join(self.workDir, self.conf['qplan']['outputDir'])
+        self.inputDirPPP = os.path.join(self.workDir, self.conf["ppp"]["inputDir"])
+        self.outputDirPPP = os.path.join(self.workDir, self.conf["ppp"]["outputDir"])
+        self.outputDirQplan = os.path.join(
+            self.workDir, self.conf["qplan"]["outputDir"]
+        )
 
         return None
 
@@ -45,28 +48,55 @@ class GeneratePfsDesign(object):
             self.obs_dates = obs_dates
         else:
             raise('specify obs_dates as a list')
-        
+
     def runPPP(self, n_pccs_l, n_pccs_m, show_plots=False):
         import PPP
 
         ## check input target list ##
-        #df = pd.read_csv(os.path.join(self.workDir, 'input/mock_sim.csv'))
-        #print(df[:5])
+        # df = pd.read_csv(os.path.join(self.workDir, 'input/mock_sim.csv'))
+        # print(df[:5])
 
         ## read sample from local path ##
-        if self.conf['ppp']['mode']=='local':
-            readsamp_con={'mode':'local', 'localPath':os.path.join(self.workDir, f'{self.inputDirPPP}/mock_sim.csv')}
+        if self.conf["ppp"]["mode"] == "local":
+            readsamp_con = {
+                "mode": "local",
+                "localPath": os.path.join(
+                    self.workDir, f"{self.inputDirPPP}/mock_sim.csv"
+                ),
+            }
         else:
-            readsamp_con={'mode':self.conf['ppp']['mode'], 'dialect':self.conf['targetdb']['db']['dialect'], 'user':self.conf['targetdb']['db']['user'], 'pwd':self.conf['targetdb']['db']['password'], 'host':self.conf['targetdb']['db']['host'], 'port':self.conf['targetdb']['db']['port'], 'dbname':self.conf['targetdb']['db']['dbname'], 'sql_query':self.conf['ppp']['sql_query']}
+            readsamp_con = {
+                "mode": self.conf["ppp"]["mode"],
+                "dialect": self.conf["targetdb"]["db"]["dialect"],
+                "user": self.conf["targetdb"]["db"]["user"],
+                "pwd": self.conf["targetdb"]["db"]["password"],
+                "host": self.conf["targetdb"]["db"]["host"],
+                "port": self.conf["targetdb"]["db"]["port"],
+                "dbname": self.conf["targetdb"]["db"]["dbname"],
+                "sql_query": self.conf["ppp"]["sql_query"],
+            }
 
         ## define exposure time ##
-        onsourceT_L=self.conf['ppp']['TEXP_NOMINAL']*n_pccs_l # in sec (assuming 300 PPCs given)  --  LR
-        onsourceT_M=self.conf['ppp']['TEXP_NOMINAL']*n_pccs_m # in sec (assuming 0 PPCs given)  --  MR
+        onsourceT_L = (
+            self.conf["ppp"]["TEXP_NOMINAL"] * n_pccs_l
+        )  # in sec (assuming 300 PPCs given)  --  LR
+        onsourceT_M = (
+            self.conf["ppp"]["TEXP_NOMINAL"] * n_pccs_m
+        )  # in sec (assuming 0 PPCs given)  --  MR
 
-        PPP.run(readsamp_con, onsourceT_L, onsourceT_M, iter1_on=False, dirName=self.outputDirPPP, show_plots=show_plots)
+        PPP.run(
+            readsamp_con,
+            onsourceT_L,
+            onsourceT_M,
+            iter1_on=False,
+            dirName=self.outputDirPPP,
+            show_plots=show_plots,
+        )
 
         ## check output ##
-        data_ppp = np.load(os.path.join(self.outputDirPPP, 'obj_allo_tot.npy'), allow_pickle=True)
+        data_ppp = np.load(
+            os.path.join(self.outputDirPPP, "obj_allo_tot.npy"), allow_pickle=True
+        )
 
         return None
 
@@ -75,62 +105,87 @@ class GeneratePfsDesign(object):
 
         if obs_dates is not ['2023-05-20']:
             self.update_obs_dates(obs_dates)
-        
+
         ## import qPlanner module ##
         import qPlan
 
-        outputDir = self.conf['qplan']['outputDir']
+        outputDir = self.conf["qplan"]["outputDir"]
         ## read output from PPP ##
         self.df_qplan, self.sdlr, self.figs_qplan =qPlan.run(os.path.join(self.outputDirPPP, 'ppcList.ecsv'), obs_dates, inputDirName=self.outputDirPPP, outputDirName=self.outputDirQplan, plotVisibility=plotVisibility)
-        
+
         ## qPlan result ##
         self.resQPlan = {ppc_code: (obstime, ppc_ra, ppc_dec) for obstime, ppc_code, ppc_ra, ppc_dec in zip(self.df_qplan['obstime'], self.df_qplan['ppc_code'], self.df_qplan['ppc_ra'], self.df_qplan['ppc_dec'])}
         # print(len(self.resQPlan))
 
-        if plotVisibility==True:
+        if plotVisibility is True:
             return self.figs_qplan
         else:
             return None
 
     def runSFA(self, clearOutput=False):
-
         ## setup python path ##
-        sys.path.append(os.path.join(self.repoDir, 'ets_pointing/pfs_design_tool'))
+        sys.path.append(os.path.join(self.repoDir, "ets_pointing/pfs_design_tool"))
         import pointing_utils.dbutils as dbutils
-        import pointing_utils.nfutils as nfutils
         import pointing_utils.designutils as designutils
-
+        import pointing_utils.nfutils as nfutils
         import SFA
 
         ## define directory of outputs from each component ##
 
-        outputDirPPP = os.path.join(self.workDir, self.conf['ppp']['outputDir'])
-        outputDirQplan = os.path.join(self.workDir, self.conf['qplan']['outputDir'])
+        outputDirPPP = os.path.join(self.workDir, self.conf["ppp"]["outputDir"])
+        outputDirQplan = os.path.join(self.workDir, self.conf["qplan"]["outputDir"])
 
         ## get a list of OBs ##
-        t = Table.read(os.path.join(outputDirPPP, 'obList.ecsv'))
-        proposal_ids=t['proposal_id']
-        ob_codes=t['ob_code']
-        ob_obj_ids=t['ob_obj_id']
-        ob_ras=t['ob_ra']
-        ob_decs=t['ob_dec']
-        ob_pmras = t['ob_pmra']
-        ob_pmdecs = t['ob_pmdec']
-        ob_parallaxs = t['ob_parallax']
-        ob_equinoxs = t['ob_equinox']
-        ob_priorities=t['ob_priority']
-        obList = {f'{proposal_id}{ob_code}': [proposal_id, ob_code, ob_obj_id, ob_ra, ob_dec, ob_pmra, ob_pmdec, ob_parallax, ob_equinox, 'sci_P%d' % (int(ob_priority))] for proposal_id, ob_code, ob_obj_id, ob_ra, ob_dec, ob_pmra, ob_pmdec, ob_parallax, ob_equinox, ob_priority in zip(proposal_ids, ob_codes, ob_obj_ids, ob_ras, ob_decs, ob_pmras, ob_pmdecs, ob_parallaxs, ob_equinoxs, ob_priorities)}
+        t = Table.read(os.path.join(outputDirPPP, "obList.ecsv"))
+        proposal_ids = t["proposal_id"]
+        ob_codes = t["ob_code"]
+        ob_obj_ids = t["ob_obj_id"]
+        ob_ras = t["ob_ra"]
+        ob_decs = t["ob_dec"]
+        ob_pmras = t["ob_pmra"]
+        ob_pmdecs = t["ob_pmdec"]
+        ob_parallaxs = t["ob_parallax"]
+        ob_equinoxs = t["ob_equinox"]
+        ob_priorities = t["ob_priority"]
+        obList = {
+            f"{proposal_id}{ob_code}": [
+                proposal_id,
+                ob_code,
+                ob_obj_id,
+                ob_ra,
+                ob_dec,
+                ob_pmra,
+                ob_pmdec,
+                ob_parallax,
+                ob_equinox,
+                "sci_P%d" % (int(ob_priority)),
+            ]
+            for proposal_id, ob_code, ob_obj_id, ob_ra, ob_dec, ob_pmra, ob_pmdec, ob_parallax, ob_equinox, ob_priority in zip(
+                proposal_ids,
+                ob_codes,
+                ob_obj_ids,
+                ob_ras,
+                ob_decs,
+                ob_pmras,
+                ob_pmdecs,
+                ob_parallaxs,
+                ob_equinoxs,
+                ob_priorities,
+            )
+        }
         print(len(obList))
 
         ## get a list of assigned OBs ## FIXME (maybe we don't need to use this)
-        data_ppp = np.load(os.path.join(outputDirPPP, 'obj_allo_tot.npy'), allow_pickle=True)
-        #print(len(data_ppp))
-        #print(t[:4])
+        data_ppp = np.load(
+            os.path.join(outputDirPPP, "obj_allo_tot.npy"), allow_pickle=True
+        )
+        # print(len(data_ppp))
+        # print(t[:4])
 
         ## check the number of assigned fibers ##
         for i in range(len(data_ppp)):
             print(data_ppp[i][0], len(data_ppp[i][7]))
-            #print(data_ppp[0])
+            # print(data_ppp[0])
 
         ## get a list of assigned targets combined with qPlan info ##
         data = []
@@ -150,7 +205,7 @@ class GeneratePfsDesign(object):
         ## write to csv ##
         filename = 'ppp+qplan_outout.csv'
         header='pointing,ra_center,dec_center,pa_center,ob_unique_code,proposal_id,ob_code,obj_id,ra_target,dec_target,pmra_target,pmdec_target,parallax_target,equinox_target,target_class,obstime,obsdate_in_hst'
-        np.savetxt(os.path.join(outputDirPPP, filename), data , fmt='%s', 
+        np.savetxt(os.path.join(outputDirPPP, filename), data , fmt='%s',
         delimiter=',', comments='', header=header)
 
         ## run SFA ##
@@ -186,21 +241,21 @@ def get_arguments():
     parser.add_argument(
         "--workDir",
         type=str,
-        default='.',
+        default=".",
         help="directory for working (default: current directory)",
     )
     # repoDir
     parser.add_argument(
         "--repoDir",
         type=str,
-        default='.',
+        default=".",
         help="directory for repository (default: current directory)",
     )
     # config
     parser.add_argument(
         "--config",
         type=str,
-        default='config.toml',
+        default="config.toml",
         help="configuration file (default: config.toml)",
     )
     # n_pccs_l
@@ -255,6 +310,7 @@ def get_arguments():
 
     return args
 
+
 def main():
     args = get_arguments()
     # print(args)
@@ -262,11 +318,11 @@ def main():
     gpd = GeneratePfsDesign(args.config, args.workDir, args.repoDir)
 
     ## run PPP ##
-    if args.skip_ppp == False:
+    if args.skip_ppp is False:
         gpd.runPPP(args.n_pccs_l, args.n_pccs_m, args.show_plots)
 
     ## run queuePlanner ##
-    
+
     if args.skip_qplan == False:
         gpd.runQPlan(args.obs_dates)
 
@@ -275,6 +331,7 @@ def main():
         gpd.runSFA()
 
     return 0
+
 
 if __name__ == "__main__":
     main()

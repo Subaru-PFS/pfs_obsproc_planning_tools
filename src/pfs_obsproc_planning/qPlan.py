@@ -2,14 +2,15 @@
 # qPlan.py : queuePlanner
 
 import os
-import numpy as np
-import pandas as pd
-from astropy.table import Table
-from astropy import units as u
-from astropy.coordinates import SkyCoord
+import warnings
 from datetime import datetime, timedelta
 
-import warnings
+import numpy as np
+import pandas as pd
+from astropy import units as u
+from astropy.coordinates import SkyCoord
+from astropy.table import Table
+
 warnings.filterwarnings('ignore')
 
 def make_schedule_table(schedule):
@@ -18,20 +19,30 @@ def make_schedule_table(schedule):
              if slot.ob is not None and not slot.ob.derived]
     df = pd.DataFrame(data, columns=['datetime', 'ob_code'])
     return df
-from qplan.Scheduler import Scheduler
-from qplan.entity import (Program, Schedule, PPC_OB, StaticTarget, TelescopeConfiguration, PPCConfiguration, EnvironmentConfiguration)
-from qplan.util.site import site_subaru as observer
-from ginga.misc.log import get_logger
-from ginga.misc.Bunch import Bunch
-from qplan.plots import airmass
 from io import BytesIO
-from IPython.display import Image
+
+from ginga.misc.Bunch import Bunch
+from ginga.misc.log import get_logger
 from IPython.core.display import display
+from IPython.display import Image
+from qplan.entity import (
+    PPC_OB,
+    EnvironmentConfiguration,
+    PPCConfiguration,
+    Program,
+    Schedule,
+    StaticTarget,
+    TelescopeConfiguration,
+)
+from qplan.plots import airmass
+from qplan.Scheduler import Scheduler
+from qplan.util.site import site_subaru as observer
+
 
 def run(ppcList, obs_dates, inputDirName='.', outputDirName='.', plotVisibility=False):
     # log file will let us debug scheduling, check it for error and debug messages
     # NOTE: any python (stdlib) logging compatible logger will work
-    logger = get_logger('qplan', level=10, log_file=os.path.join(outputDirName, "sched.log"))    
+    logger = get_logger('qplan', level=10, log_file=os.path.join(outputDirName, "sched.log"))
 
     # create one fake program, for PPP, everything runs under one "program"
     proposal = 'S24B-QN017'
@@ -43,7 +54,7 @@ def run(ppcList, obs_dates, inputDirName='.', outputDirName='.', plotVisibility=
     #print(apriori_info)
 
     # These  be used for all PPCs ("BOB"s)
-    telcfg = TelescopeConfiguration(focus='P_OPT2')
+    telcfg = TelescopeConfiguration(focus='P_OPT2', min_rot_deg=-174.0, max_rot_deg=174.0)
     telcfg.min_el = 30.0
     telcfg.max_el = 85.0
     # PPCConfiguration -- PFS Pointing Center
@@ -58,7 +69,7 @@ def run(ppcList, obs_dates, inputDirName='.', outputDirName='.', plotVisibility=
     # sometimes.
     # weights indicate "how important" something is to the scheduler
     # slew: 0 any slew is ok between OBs, >0 preference for shorter slews
-    # delay: 0 any delay is ok between OBs, may delay to observe a higher ranked OB 
+    # delay: 0 any delay is ok between OBs, may delay to observe a higher ranked OB
     #        that will become visible shortly, >0 preference for smaller or no delays
     # rank: 0 rank not important, >0 preference for higher ranked programs
     # priority: (*only considered when looking at two OBs from the same program*)
@@ -76,6 +87,7 @@ def run(ppcList, obs_dates, inputDirName='.', outputDirName='.', plotVisibility=
     # telescope parked, dome open, current sky conditions, etc.
     cur_data = Bunch(filters=[],
                     cur_az=-90.0, cur_el=89.0,
+                    cur_rot=0.0,
                     seeing=1.0, transparency=0.9,
                     dome='open', categories=['open'],
                     instruments=['PPC'])
@@ -95,16 +107,16 @@ def run(ppcList, obs_dates, inputDirName='.', outputDirName='.', plotVisibility=
         dec = c.dec.dms
         line="  "
         line += f"{t['ppc_code']}\t"
-        line += f"0\t"
-        line += f"15\t"
-        line += f"L\t"
+        line += "0\t"
+        line += "15\t"
+        line += "L\t"
         line += f"{int(ra.h)}:{int(abs(ra.m))}:{abs(ra.s)}\t"
         line += f"{int(dec.d)}:{int(abs(dec.m))}:{abs(dec.s)}\t"
-        line += f"2000\t"
+        line += "2000\t"
         line += f"design_{t['ppc_code']}\t"
         line += f"catalog_{t['ppc_code']}\t"
         line += f"{proposal}  extracted from ppcList"
-        line += f"\n"
+        line += "\n"
         tgt_tbl += line
 
     obs = []
@@ -167,7 +179,7 @@ def run(ppcList, obs_dates, inputDirName='.', outputDirName='.', plotVisibility=
 
     # individual schedules are available at `schedules`
     sch = sdlr.schedules
-   
+
     # iterate over a schedule
     # if there is unused time at the end of a schedule, the "ob" attribute will be None
     slots = []
@@ -189,7 +201,7 @@ def run(ppcList, obs_dates, inputDirName='.', outputDirName='.', plotVisibility=
     # by the OPE file generation code to properly set up status items, etc. on Gen2 for
     # the instrument to read and populate its FITS headers with queue keywords
     # We need to accurately set the proper setup and teardown times in qplan so that the
-    # schedules are reasonably accurate in time            
+    # schedules are reasonably accurate in time
 
     def make_schedule_table(schedule):
         data = [(slot.start_time, slot.ob.name)
@@ -204,9 +216,9 @@ def run(ppcList, obs_dates, inputDirName='.', outputDirName='.', plotVisibility=
     df, targets = make_schedule_table(slots)
     df.to_csv(os.path.join(outputDirName, 'result.csv'))
     print(df)
-    
+
     # plot visibility plots for each night
-    if plotVisibility==True:
+    if plotVisibility is True:
         figs = []
         for obs_date in obs_dates:
             t = observer.get_date(obs_date)
@@ -222,7 +234,9 @@ def run(ppcList, obs_dates, inputDirName='.', outputDirName='.', plotVisibility=
                     target_data.append(Bunch(history=info_list, target=v))
             if len(target_data)>0:
                 amp = airmass.AirMassPlot(800, 600, logger=logger)
-                from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+                from matplotlib.backends.backend_agg import (
+                    FigureCanvasAgg as FigureCanvas,
+                )
                 canvas = FigureCanvas(amp.fig)
                 amp.plot_altitude(observer, target_data, observer.timezone)
                 buf2 = BytesIO()
