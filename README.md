@@ -90,6 +90,22 @@ Other parameters will be documentend later. Please let us know if you want to kn
 
 ## Run
 
+Before running the program, the following environment parameters are recommended to be unset
+by using `unset` shell command if you intentionally want to use `EUPS` and pre-installed `pfs_utils`
+and other specially installed packages with the `pfs_obsproc_planning`.
+
+```shell
+unset EUPS_DIR
+unset EUPS_PATH
+unset RUBIN_EUPS_PATH
+unset EUPS_PKGROOT
+
+unset PFS_UTILS_DIR
+unset PFS_INSTDATA_DIR
+
+unset PYTHONPATH
+```
+
 A simple example (`example.py`) is the following.
 
 ```python
