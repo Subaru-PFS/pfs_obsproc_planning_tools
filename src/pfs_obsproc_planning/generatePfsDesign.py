@@ -139,7 +139,7 @@ class GeneratePfsDesign(object):
 
         # outputDir = self.conf["qplan"]["outputDir"]
         ## read output from PPP ##
-        self.df_qplan, self.sdlr, self.figs_qplan =qPlan.run(os.path.join(self.outputDirPPP, 'ppcList.ecsv'), obs_dates, inputDirName=self.outputDirPPP, outputDirName=self.outputDirQplan, plotVisibility=plotVisibility)
+        self.df_qplan, self.sdlr, self.figs_qplan =qPlan.run('ppcList.ecsv', obs_dates, inputDirName=self.outputDirPPP, outputDirName=self.outputDirQplan, plotVisibility=plotVisibility)
 
         ## qPlan result ##
         self.resQPlan = {ppc_code: (obstime, ppc_ra, ppc_dec) for obstime, ppc_code, ppc_ra, ppc_dec in zip(self.df_qplan['obstime'], self.df_qplan['ppc_code'], self.df_qplan['ppc_ra'], self.df_qplan['ppc_dec'])}
