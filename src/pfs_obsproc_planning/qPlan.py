@@ -19,6 +19,7 @@ def make_schedule_table(schedule):
              if slot.ob is not None and not slot.ob.derived]
     df = pd.DataFrame(data, columns=['datetime', 'ob_code'])
     return df
+
 from io import BytesIO
 
 from ginga.misc.Bunch import Bunch
@@ -54,9 +55,11 @@ def run(ppcList, obs_dates, inputDirName='.', outputDirName='.', plotVisibility=
     #print(apriori_info)
 
     # These  be used for all PPCs ("BOB"s)
-    telcfg = TelescopeConfiguration(focus='P_OPT2', min_rot_deg=-174.0, max_rot_deg=174.0)
-    telcfg.min_el = 30.0
-    telcfg.max_el = 85.0
+    telcfg = TelescopeConfiguration(focus='P_OPT2')
+    telcfg.min_el_deg = 30.0
+    telcfg.max_el_deg = 85.0
+    telcfg.min_rot_deg = -174.0
+    telcfg.max_rot_deg = 174.0
     # PPCConfiguration -- PFS Pointing Center
     # if you have different times for your pointing centers, create a different one
     # for each exp_time, PA or resolution
@@ -204,13 +207,13 @@ def run(ppcList, obs_dates, inputDirName='.', outputDirName='.', plotVisibility=
     # schedules are reasonably accurate in time
 
     def make_schedule_table(schedule):
-        data = [(slot.start_time, slot.ob.name)
+        data = [(slot.start_time, slot.ob.name, slot.ob.target.ra, slot.ob.target.dec)
                 for slot in schedule
                 if slot.ob is not None and not slot.ob.derived]
         targets = [(slot.start_time, slot.ob.target)
                    for slot in schedule
                    if slot.ob is not None and not slot.ob.derived]
-        df = pd.DataFrame(data, columns=['obstime', 'ppc_code'])
+        df = pd.DataFrame(data, columns=['obstime', 'ppc_code', 'ppc_ra', 'ppc_dec'])
         return df, targets
 
     df, targets = make_schedule_table(slots)
@@ -218,7 +221,7 @@ def run(ppcList, obs_dates, inputDirName='.', outputDirName='.', plotVisibility=
     print(df)
 
     # plot visibility plots for each night
-    if plotVisibility is True:
+    if plotVisibility==True:
         figs = []
         for obs_date in obs_dates:
             t = observer.get_date(obs_date)

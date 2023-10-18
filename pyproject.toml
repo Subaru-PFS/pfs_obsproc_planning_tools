@@ -16,7 +16,7 @@ dependencies = [
     "jupyter>=1.0.0",
     "logzero>=1.7.0",
     "matplotlib>=3.8.0",
-    "numpy>=1.25.2",
+    "numpy<1.24.0", # np.complex in cobraCharmer
     "pandas>=2.1.0",
     "psycopg2>=2.9.8",
     "pybind11>=2.11.1",
@@ -32,8 +32,10 @@ dependencies = [
     "astroplan>=0.9.1",
     "sep>=1.2.1",
     "bokeh>=3.3.0",
+    "pyyaml==5.3.1",  # need to fix it to this version
+    "gitpython>=3.1.38",
     "pfs-datamodel @ git+https://github.com/Subaru-PFS/datamodel.git",
-    "ets-fiber-assigner @ git+https://github.com/Subaru-PFS/ets_fiberalloc.git",
+    "ets-fiber-assigner @ git+https://github.com/Subaru-PFS/ets_fiberalloc.git@u/kiyoyabe/e2e_test_2023oct",
     "pfs-design-tool @ git+https://github.com/Subaru-PFS/ets_pointing.git@u/monodera/reconfigure-20230620-pyproject",
     "ets-shuffle @ git+https://github.com/Subaru-PFS/ets_shuffle.git",
     "pfs-target-database @ git+https://github.com/Subaru-PFS/ets_target_database.git",
@@ -56,7 +58,7 @@ include-package-data = true
 
 [tool.pdm.dev-dependencies]
 dev = [
-    "-e git+https://github.com/Subaru-PFS/pfs_utils.git#egg=pfs-utils",
+    "-e git+https://github.com/Subaru-PFS/pfs_utils.git@u/monodera/add_path_gfm#egg=pfs-utils",
     "-e git+https://github.com/Subaru-PFS/ics_cobraCharmer.git@1af21d85a0af309cc57c939b78d625e884ece404#egg=ics-cobraCharmer",
     "-e git+https://github.com/Subaru-PFS/ics_fpsActor.git@u/monodera/tweak_sdss3tools_dep#egg=ics-fpsActor",
 ]
