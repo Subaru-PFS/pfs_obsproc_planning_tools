@@ -16,7 +16,7 @@ from astropy.coordinates import SkyCoord
 from astropy.table import Table
 from astropy.time import Time
 
-warnings.filterwarnings('ignore')
+warnings.filterwarnings("ignore")
 
 from .opefile import OpeFile
 
@@ -25,12 +25,13 @@ def read_conf(conf):
     config = toml.load(conf)
     return config
 
+
 class GeneratePfsDesign(object):
     def __init__(self, config, workDir=".", repoDir=None):
         self.config = config
         self.workDir = workDir
         self.repoDir = repoDir
-        self.obs_dates = ['2023-05-20']
+        self.obs_dates = ["2023-05-20"]
 
         ## configuration file ##
         self.conf = read_conf(os.path.join(self.workDir, self.config))
@@ -41,12 +42,18 @@ class GeneratePfsDesign(object):
         self.outputDirQplan = os.path.join(
             self.workDir, self.conf["qplan"]["outputDir"]
         )
-        self.cobraCoachDir = os.path.join(self.workDir, self.conf['sfa']['cobra_coach_dir'])
+        self.cobraCoachDir = os.path.join(
+            self.workDir, self.conf["sfa"]["cobra_coach_dir"]
+        )
 
         # create input/output directories when not exist
-        for d in [self.inputDirPPP, self.outputDirPPP, self.outputDirQplan,
-                  self.cobraCoachDir,
-                  os.path.join(self.workDir, self.conf['ope']['designPath'])]:
+        for d in [
+            self.inputDirPPP,
+            self.outputDirPPP,
+            self.outputDirQplan,
+            self.cobraCoachDir,
+            os.path.join(self.workDir, self.conf["ope"]["designPath"]),
+        ]:
             if not os.path.exists(d):
                 print(f"{d} is not found and created")
                 os.makedirs(d, exist_ok=True)
@@ -54,32 +61,44 @@ class GeneratePfsDesign(object):
                 print(f"{d} exists")
 
         # looks like cobra_coach_dir must be in a full absolute path
-        self.conf['sfa']['cobra_coach_dir_orig'] = self.conf['sfa']['cobra_coach_dir']
-        self.conf['sfa']['cobra_coach_dir'] = self.cobraCoachDir
+        self.conf["sfa"]["cobra_coach_dir_orig"] = self.conf["sfa"]["cobra_coach_dir"]
+        self.conf["sfa"]["cobra_coach_dir"] = self.cobraCoachDir
 
         # check if pfs_instdata exists and clone from GitHub when not found
-        instdata_dir = self.conf['sfa']['pfs_instdata_dir']
+        instdata_dir = self.conf["sfa"]["pfs_instdata_dir"]
         if os.path.exists(instdata_dir):
             print(f"pfs_instdata found: {instdata_dir}")
         else:
-            if not os.path.exists(os.path.join(self.workDir, os.path.basename(instdata_dir))):
-                print(f"pfs_instdata not found at {instdata_dir}, clone from GitHub as {os.path.join(self.workDir, os.path.basename(instdata_dir))}")
-                _ = git.Repo.clone_from("https://github.com/Subaru-PFS/pfs_instdata.git",
-                                       os.path.join(self.workDir, os.path.basename(instdata_dir)),
-                                       branch='master')
+            if not os.path.exists(
+                os.path.join(self.workDir, os.path.basename(instdata_dir))
+            ):
+                print(
+                    f"pfs_instdata not found at {instdata_dir}, clone from GitHub as {os.path.join(self.workDir, os.path.basename(instdata_dir))}"
+                )
+                _ = git.Repo.clone_from(
+                    "https://github.com/Subaru-PFS/pfs_instdata.git",
+                    os.path.join(self.workDir, os.path.basename(instdata_dir)),
+                    branch="master",
+                )
             else:
-                print(f"pfs_instdata found at {os.path.join(self.workDir, os.path.basename(instdata_dir))}, reuse it")
+                print(
+                    f"pfs_instdata found at {os.path.join(self.workDir, os.path.basename(instdata_dir))}, reuse it"
+                )
 
-            self.conf['sfa']['pfs_instdata_dir_orig'] = self.conf['sfa']['pfs_instdata_dir']
-            self.conf['sfa']['pfs_instdata_dir'] = os.path.join(self.workDir, os.path.basename(instdata_dir))
+            self.conf["sfa"]["pfs_instdata_dir_orig"] = self.conf["sfa"][
+                "pfs_instdata_dir"
+            ]
+            self.conf["sfa"]["pfs_instdata_dir"] = os.path.join(
+                self.workDir, os.path.basename(instdata_dir)
+            )
 
         return None
 
     def update_obs_dates(self, obs_dates):
-        if type(obs_dates)==list:
+        if type(obs_dates) == list:
             self.obs_dates = obs_dates
         else:
-            raise('specify obs_dates as a list')
+            raise ("specify obs_dates as a list")
 
     def runPPP(self, n_pccs_l, n_pccs_m, show_plots=False):
         from . import PPP
@@ -132,10 +151,8 @@ class GeneratePfsDesign(object):
 
         return None
 
-
-    def runQPlan(self, obs_dates=['2023-05-20'], plotVisibility=False):
-
-        if obs_dates is not ['2023-05-20']:
+    def runQPlan(self, obs_dates=["2023-05-20"], plotVisibility=False):
+        if obs_dates is not ["2023-05-20"]:
             self.update_obs_dates(obs_dates)
 
         ## import qPlanner module ##
@@ -143,10 +160,24 @@ class GeneratePfsDesign(object):
 
         # outputDir = self.conf["qplan"]["outputDir"]
         ## read output from PPP ##
-        self.df_qplan, self.sdlr, self.figs_qplan =qPlan.run('ppcList.ecsv', obs_dates, inputDirName=self.outputDirPPP, outputDirName=self.outputDirQplan, plotVisibility=plotVisibility)
+        self.df_qplan, self.sdlr, self.figs_qplan = qPlan.run(
+            "ppcList.ecsv",
+            obs_dates,
+            inputDirName=self.outputDirPPP,
+            outputDirName=self.outputDirQplan,
+            plotVisibility=plotVisibility,
+        )
 
         ## qPlan result ##
-        self.resQPlan = {ppc_code: (obstime, ppc_ra, ppc_dec) for obstime, ppc_code, ppc_ra, ppc_dec in zip(self.df_qplan['obstime'], self.df_qplan['ppc_code'], self.df_qplan['ppc_ra'], self.df_qplan['ppc_dec'])}
+        self.resQPlan = {
+            ppc_code: (obstime, ppc_ra, ppc_dec)
+            for obstime, ppc_code, ppc_ra, ppc_dec in zip(
+                self.df_qplan["obstime"],
+                self.df_qplan["ppc_code"],
+                self.df_qplan["ppc_ra"],
+                self.df_qplan["ppc_dec"],
+            )
+        }
         # print(len(self.resQPlan))
 
         if plotVisibility is True:
@@ -162,7 +193,6 @@ class GeneratePfsDesign(object):
         from . import SFA
 
         ## define directory of outputs from each component ##
-
 
         ## get a list of OBs ##
         t = Table.read(os.path.join(self.outputDirPPP, "obList.ecsv"))
@@ -226,36 +256,54 @@ class GeneratePfsDesign(object):
             ob_unique_id = data_ppp[i][7]
             if ppc_code in self.resQPlan.keys():
                 res = self.resQPlan[ppc_code]
-                obstime = res[0].tz_convert('UTC')
-                obsdate_in_hst = (obstime.date() - timedelta(days=1))
+                obstime = res[0].tz_convert("UTC")
+                obsdate_in_hst = obstime.date() - timedelta(days=1)
                 for oid in ob_unique_id:
-                    data.append([ppc_code, ppc_ra, ppc_dec, ppc_pa, oid] + obList[oid] + [obstime.strftime('%Y-%m-%d %X')] + [obsdate_in_hst.strftime('%Y-%m-%d')])
+                    data.append(
+                        [ppc_code, ppc_ra, ppc_dec, ppc_pa, oid]
+                        + obList[oid]
+                        + [obstime.strftime("%Y-%m-%d %X")]
+                        + [obsdate_in_hst.strftime("%Y-%m-%d")]
+                    )
 
         ## write to csv ##
-        filename = 'ppp+qplan_outout.csv'
-        header='pointing,ra_center,dec_center,pa_center,ob_unique_code,proposal_id,ob_code,obj_id,ra_target,dec_target,pmra_target,pmdec_target,parallax_target,equinox_target,target_class,obstime,obsdate_in_hst'
-        np.savetxt(os.path.join(self.outputDirPPP, filename), data , fmt='%s',
-        delimiter=',', comments='', header=header)
+        filename = "ppp+qplan_outout.csv"
+        header = "pointing,ra_center,dec_center,pa_center,ob_unique_code,proposal_id,ob_code,obj_id,ra_target,dec_target,pmra_target,pmdec_target,parallax_target,equinox_target,target_class,obstime,obsdate_in_hst"
+        np.savetxt(
+            os.path.join(self.outputDirPPP, filename),
+            data,
+            fmt="%s",
+            delimiter=",",
+            comments="",
+            header=header,
+        )
 
         ## run SFA ##
-        filename = 'ppp+qplan_outout.csv'
+        filename = "ppp+qplan_outout.csv"
         df = pd.read_csv(os.path.join(self.outputDirPPP, filename))
 
-        listPointings, dictPointings, pfsDesignIds, observation_dates_in_hst = SFA.run(self.conf, workDir=self.workDir, repoDir=self.repoDir, clearOutput=clearOutput)
+        listPointings, dictPointings, pfsDesignIds, observation_dates_in_hst = SFA.run(
+            self.conf,
+            workDir=self.workDir,
+            repoDir=self.repoDir,
+            clearOutput=clearOutput,
+        )
 
         ## ope file generation ##
         ope = OpeFile(conf=self.conf, workDir=self.workDir)
         for obsdate in self.obs_dates:
-            ope.loadTemplate() # initialize
-            ope.update_obsdate(obsdate) # update observation date
+            ope.loadTemplate()  # initialize
+            ope.update_obsdate(obsdate)  # update observation date
             info = []
-            for pointing, (k,v), observation_date_in_hst in zip(listPointings, pfsDesignIds.items(), observation_dates_in_hst):
+            for pointing, (k, v), observation_date_in_hst in zip(
+                listPointings, pfsDesignIds.items(), observation_dates_in_hst
+            ):
                 if observation_date_in_hst == obsdate:
                     res = self.resQPlan[pointing]
                     info.append([pointing, obsdate, k, v, res[1], res[2]])
             ope.update_design(info)
-            ope.write() # save file
-        #for pointing, (k,v) in zip(listPointings, pfsDesignIds.items()):
+            ope.write()  # save file
+        # for pointing, (k,v) in zip(listPointings, pfsDesignIds.items()):
         #    ope.loadTemplate() # initialize
         #    ope.update(pointing=pointing, dictPointings=dictPointings, designId=v, observationTime=k) # update contents
         #    ope.write() # save file

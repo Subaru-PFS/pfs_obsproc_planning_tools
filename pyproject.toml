@@ -9,35 +9,34 @@ name = "pfs_obsproc_planning"
 version = "0.1.0"
 description = ""
 dependencies = [
+    "astroplan>=0.9.1",
     "astropy>=5.3",
+    "bokeh>=3.3.0",
     "colorcet>=3.0.1",
+    "gitpython>=3.1.38",
     "gurobipy>=10.0.3",
     "ipython>=8.16.0",
     "jupyter>=1.0.0",
     "logzero>=1.7.0",
     "matplotlib>=3.8.0",
-    "numpy<1.24.0", # np.complex in cobraCharmer
+    "numpy<1.24.0",
     "pandas>=2.1.0",
     "psycopg2>=2.9.8",
     "pybind11>=2.11.1",
-    "qplan @ git+https://github.com/naojsoft/qplan.git",
+    "pyyaml==5.3.1",
     "scikit-learn>=1.3.1",
     "scipy>=1.9.3",
     "seaborn>=0.13.0",
+    "sep>=1.2.1",
     "setuptools>=68.2.2",
     "shapely>=2.0.1",
     "sqlalchemy>=2.0.21",
     "toml>=0.10.2",
     "wheel>=0.41.2",
-    "astroplan>=0.9.1",
-    "sep>=1.2.1",
-    "bokeh>=3.3.0",
-    "pyyaml==5.3.1",  # need to fix it to this version
-    "gitpython>=3.1.38",
+    "qplan @ git+https://github.com/naojsoft/qplan.git",
     "pfs-datamodel @ git+https://github.com/Subaru-PFS/datamodel.git",
     "ets-fiber-assigner @ git+https://github.com/Subaru-PFS/ets_fiberalloc.git@u/kiyoyabe/e2e_test_2023oct",
     "pfs-design-tool @ git+https://github.com/Subaru-PFS/ets_pointing.git@u/monodera/reconfigure-20230620-pyproject",
-    # "ets-shuffle @ git+https://github.com/Subaru-PFS/ets_shuffle.git",
     "pfs-target-database @ git+https://github.com/Subaru-PFS/ets_target_database.git",
     "ics-cobraOps @ git+https://github.com/Subaru-PFS/ics_cobraOps.git",
     "opdb @ git+https://github.com/Subaru-PFS/spt_operational_database.git",
@@ -53,7 +52,6 @@ build-backend = "setuptools.build_meta"
 
 
 [tool.setuptools]
-# package-dir = { "" = "src" }
 include-package-data = true
 
 [tool.setuptools.package-dir]
@@ -70,3 +68,18 @@ dev = [
 [tool.pdm.options]
 add = ["--no-isolation"]
 install = ["--no-isolation"]
+
+
+[tool.pdm.scripts]
+gen-requirements = { cmd = [
+    "pdm",
+    "export",
+    "--format",
+    "requirements",
+    "--without-hashes",
+    "--pyproject",
+    "--dev",
+    "--output",
+    "requirements.txt",
+    "--verbose",
+], help = "Generate requirements.txt" }
