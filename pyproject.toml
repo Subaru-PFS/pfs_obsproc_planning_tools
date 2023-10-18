@@ -53,8 +53,12 @@ build-backend = "setuptools.build_meta"
 
 
 [tool.setuptools]
-package-dir = { "" = "src" }
+# package-dir = { "" = "src" }
 include-package-data = true
+
+[tool.setuptools.package-dir]
+pfs_obsproc_planning = "src/pfs_obsproc_planning"
+ets_shuffle = "src/ets_shuffle/ets_shuffle"
 
 [tool.pdm.dev-dependencies]
 dev = [

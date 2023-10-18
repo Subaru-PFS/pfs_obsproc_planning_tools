@@ -20,6 +20,7 @@ cd pfs_obsproc_planning_tools
 
 # switch to the branch (will be merged into main at some point)
 git switch u/monodera/pip_compatible
+git submodule update --init
 
 # create a python virtual environment (recommended)
 python3 -m venv .venv
@@ -109,6 +110,8 @@ gpd.runSFA(clearOutput=True)
 
 ## Notes on some dependencies
 
+Some of the following constraints are also applied to `ets_pointing`.
+
 ### `numpy`
 The `numpy` version has to be `<1.24.0`. `ets_fiberalloc` uses `np.complex` which was deprecated and removed.
 
@@ -132,3 +135,6 @@ We use the branch `u/monodera/tweak_sdss3tools_dep` to avoid `sdss3tools` depend
 ### `ets_pointing`
 
 `ets_pointing` is installed as `pfs_design_tool` (name TBD) and the `u/monodera/reconfigure-20230620-pyproject` branch is used as a installable repository.
+
+### `ets_shuffle`
+`ets_shuffle` is a repository without `setup.py` or `pyproject.toml`. Therefore, it cannot be installed via `pip`.  In the meantime, it is included as a submodule under `src` directory.

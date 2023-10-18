@@ -62,10 +62,14 @@ class GeneratePfsDesign(object):
         if os.path.exists(instdata_dir):
             print(f"pfs_instdata found: {instdata_dir}")
         else:
-            print(f"pfs_instdata not found at {instdata_dir}, clone from GitHub as {os.path.join(self.workDir, os.path.basename(instdata_dir))}")
-            _ = git.Repo.clone_from("https://github.com/Subaru-PFS/pfs_instdata.git",
+            if not os.path.exists(os.path.join(self.workDir, os.path.basename(instdata_dir))):
+                print(f"pfs_instdata not found at {instdata_dir}, clone from GitHub as {os.path.join(self.workDir, os.path.basename(instdata_dir))}")
+                _ = git.Repo.clone_from("https://github.com/Subaru-PFS/pfs_instdata.git",
                                        os.path.join(self.workDir, os.path.basename(instdata_dir)),
                                        branch='master')
+            else:
+                print(f"pfs_instdata found at {os.path.join(self.workDir, os.path.basename(instdata_dir))}, reuse it")
+
             self.conf['sfa']['pfs_instdata_dir_orig'] = self.conf['sfa']['pfs_instdata_dir']
             self.conf['sfa']['pfs_instdata_dir'] = os.path.join(self.workDir, os.path.basename(instdata_dir))
 
