@@ -33,6 +33,9 @@ python3 -m pip install -r requirements.txt
 
 # install this package itself as editable
 python3 -m pip install -e .
+
+# # it seems that you need to force reinstall when one of packages installed directly via GitHub repositories
+# python3 -m pip install --upgrade --force-reinstall pfs_design_tool
 ```
 
 ## Configuration
@@ -44,8 +47,17 @@ A work directory has to be set. A template directory is provided as `examples/wo
 cp -a examples/workdir_template examples/workdir_example
 ```
 
+The structure of the work directory should look like the following.
+
+```
+workdir_template/
+├── config.toml
+└── templates
+    └── template_pfs_v2023-09-12.ope
+```
+
 ### Config file
-Then you need to create a file as a `toml` file. You can find an example in `examples/workdir_example/config.toml.
+Then you need to create a file as a `toml` file. You can find an example in `examples/workdir_example/config.toml`.
 
 The following sections correspond to the database configuration. Please ask Yabe-san or myself if you need to access the databases.
 
@@ -78,7 +90,7 @@ Other parameters will be documentend later. Please let us know if you want to kn
 
 ## Run
 
-A simple example is the following.
+A simple example (`example.py`) is the following.
 
 ```python
 from pfs_obsproc_planning import generatePfsDesign
@@ -129,7 +141,7 @@ We use `u/kiyoyabe/e2e_test_2023oct`.
 
 
 ### `ics_cobraCharmer`
-We use the commit `1af21d85a0af309cc57c939b78d625e884ece404` to be consistent with other packages. We hope that the other ics packages become consistent at some point. Also, it appears that the package needs to be installed as editable.
+We use the commit `1af21d85a0af309cc57c939b78d625e884ece404` to be consistent with other packages. We hope that the other ics packages become consistent at some point. Also, it appears that the package needs to be installed as editable. Special treatment can be found in `__init__.py`.
 
 ### `ics_fpsActor`
 We use the branch `u/monodera/tweak_sdss3tools_dep` to avoid `sdss3tools` dependency. It shouldn't be difficult to be merged into master. We should discuss with the developer of `ics_fpsActor`. It appears that the package needs to be installed as editable.

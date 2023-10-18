@@ -3,7 +3,6 @@
 
 import argparse
 import os
-import sys
 import warnings
 from datetime import timedelta
 
@@ -11,10 +10,8 @@ import git
 import numpy as np
 import pandas as pd
 import toml
-from astropy import units as u
-from astropy.coordinates import SkyCoord
 from astropy.table import Table
-from astropy.time import Time
+from logzero import logger
 
 warnings.filterwarnings("ignore")
 
@@ -55,10 +52,10 @@ class GeneratePfsDesign(object):
             os.path.join(self.workDir, self.conf["ope"]["designPath"]),
         ]:
             if not os.path.exists(d):
-                print(f"{d} is not found and created")
+                logger.info(f"{d} is not found and created")
                 os.makedirs(d, exist_ok=True)
             else:
-                print(f"{d} exists")
+                logger.info(f"{d} exists")
 
         # looks like cobra_coach_dir must be in a full absolute path
         self.conf["sfa"]["cobra_coach_dir_orig"] = self.conf["sfa"]["cobra_coach_dir"]
@@ -67,12 +64,12 @@ class GeneratePfsDesign(object):
         # check if pfs_instdata exists and clone from GitHub when not found
         instdata_dir = self.conf["sfa"]["pfs_instdata_dir"]
         if os.path.exists(instdata_dir):
-            print(f"pfs_instdata found: {instdata_dir}")
+            logger.info(f"pfs_instdata found: {instdata_dir}")
         else:
             if not os.path.exists(
                 os.path.join(self.workDir, os.path.basename(instdata_dir))
             ):
-                print(
+                logger.info(
                     f"pfs_instdata not found at {instdata_dir}, clone from GitHub as {os.path.join(self.workDir, os.path.basename(instdata_dir))}"
                 )
                 _ = git.Repo.clone_from(
@@ -81,7 +78,7 @@ class GeneratePfsDesign(object):
                     branch="master",
                 )
             else:
-                print(
+                logger.info(
                     f"pfs_instdata found at {os.path.join(self.workDir, os.path.basename(instdata_dir))}, reuse it"
                 )
 
@@ -102,10 +99,6 @@ class GeneratePfsDesign(object):
 
     def runPPP(self, n_pccs_l, n_pccs_m, show_plots=False):
         from . import PPP
-
-        ## check input target list ##
-        # df = pd.read_csv(os.path.join(self.workDir, 'input/mock_sim.csv'))
-        # print(df[:5])
 
         ## read sample from local path ##
         if self.conf["ppp"]["mode"] == "local":
@@ -158,7 +151,6 @@ class GeneratePfsDesign(object):
         ## import qPlanner module ##
         from . import qPlan
 
-        # outputDir = self.conf["qplan"]["outputDir"]
         ## read output from PPP ##
         self.df_qplan, self.sdlr, self.figs_qplan = qPlan.run(
             "ppcList.ecsv",
@@ -178,7 +170,6 @@ class GeneratePfsDesign(object):
                 self.df_qplan["ppc_dec"],
             )
         }
-        # print(len(self.resQPlan))
 
         if plotVisibility is True:
             return self.figs_qplan
@@ -186,10 +177,6 @@ class GeneratePfsDesign(object):
             return None
 
     def runSFA(self, clearOutput=False):
-        ## setup python path ##
-        # sys.path.append(os.path.join(self.repoDir, "ets_pointing/pfs_design_tool"))
-        from pfs_design_tool.pointing_utils import dbutils, designutils, nfutils
-
         from . import SFA
 
         ## define directory of outputs from each component ##
@@ -232,7 +219,7 @@ class GeneratePfsDesign(object):
                 ob_priorities,
             )
         }
-        print(len(obList))
+        logger.info(len(obList))
 
         ## get a list of assigned OBs ## FIXME (maybe we don't need to use this)
         data_ppp = np.load(
