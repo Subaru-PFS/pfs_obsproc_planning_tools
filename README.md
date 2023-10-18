@@ -43,7 +43,7 @@ A work directory has to be set. A template directory is provided as `examples/wo
 cp -a examples/workdir_template examples/workdir_example
 ```
 
-### Config files
+### Config file
 Then you need to create a file as a `toml` file. You can find an example in `examples/workdir_example/config.toml.
 
 The following sections correspond to the database configuration. Please ask Yabe-san or myself if you need to access the databases.

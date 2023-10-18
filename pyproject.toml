@@ -37,7 +37,7 @@ dependencies = [
     "pfs-datamodel @ git+https://github.com/Subaru-PFS/datamodel.git",
     "ets-fiber-assigner @ git+https://github.com/Subaru-PFS/ets_fiberalloc.git@u/kiyoyabe/e2e_test_2023oct",
     "pfs-design-tool @ git+https://github.com/Subaru-PFS/ets_pointing.git@u/monodera/reconfigure-20230620-pyproject",
-    "ets-shuffle @ git+https://github.com/Subaru-PFS/ets_shuffle.git",
+    # "ets-shuffle @ git+https://github.com/Subaru-PFS/ets_shuffle.git",
     "pfs-target-database @ git+https://github.com/Subaru-PFS/ets_target_database.git",
     "ics-cobraOps @ git+https://github.com/Subaru-PFS/ics_cobraOps.git",
     "opdb @ git+https://github.com/Subaru-PFS/spt_operational_database.git",

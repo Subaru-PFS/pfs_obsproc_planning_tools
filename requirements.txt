@@ -6,7 +6,6 @@ astropy>=5.3.3
 bokeh>=3.3.0
 colorcet>=3.0.1
 ets-fiber-assigner @ git+https://github.com/Subaru-PFS/ets_fiberalloc.git@u/kiyoyabe/e2e_test_2023oct
-ets-shuffle @ git+https://github.com/Subaru-PFS/ets_shuffle.git
 gitpython>=3.1.38
 gurobipy>=10.0.3
 -e git+https://github.com/Subaru-PFS/ics_cobraCharmer.git@1af21d85a0af309cc57c939b78d625e884ece404#egg=ics-cobraCharmer

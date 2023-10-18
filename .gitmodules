@@ -1,0 +1,4 @@
+[submodule "src/ets_shuffle"]
+	path = src/ets_shuffle
+	url = https://github.com/Subaru-PFS/ets_shuffle.git
+	branch = master
