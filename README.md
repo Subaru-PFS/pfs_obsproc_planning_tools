@@ -107,6 +107,8 @@ gpd.runQPlan(obs_dates)
 gpd.runSFA(clearOutput=True)
 ```
 
+You can also try `notebooks/example_notebook.ipynb` in Jupyter Notebook or JupyterLab.
+
 
 ## Notes on some dependencies
 

@@ -7,10 +7,11 @@ import warnings
 warnings.filterwarnings("ignore")
 
 
-def run(conf, workDir=".", repoDir=".", clearOutput=False):
+def run(
+    conf, workDir=".", repoDir=".", infile="ppp+qplan_outout.csv", clearOutput=False
+):
     from pfs_design_tool import reconfigure_fibers_ppp as sfa
 
-    infile = os.path.join(workDir, conf["ppp"]["outputDir"], "ppp+qplan_outout.csv")
     (
         list_pointings,
         dict_pointing,
