@@ -4,7 +4,7 @@ Tools for planning of PFS observations using PPP, queue planner, and pfsDesign g
 
 ## Requirements
 
-- Python >= 3.9 (MO uses Python 3.9 for development)
+- Python >= 3.9,\<3.12 (MO uses Python 3.9 for development)
 - Need to access the target database and Gaia database in Hilo.
 - A valid Gurobi license is required and `GRB_LICENSE_FILE` environment valiable must be set correctly.
 - A number of Python pakcages are required, and will be installed by using `pyproject.toml` or `requirements.txt`.
@@ -145,17 +145,6 @@ Some of the following constraints are also applied to `ets_pointing`.
 ### `numpy`
 The `numpy` version has to be `<1.24.0`. `ets_fiberalloc` uses `np.complex` which was deprecated and removed.
 
-### `pyyaml`
-The `pyyaml` version has to be `<=5.3.1`. The more recent versions require to use `safe_load()` to read the `yaml` file (https://github.com/yaml/pyyaml/wiki/PyYAML-yaml.load(input)-Deprecation)
-
-### `ets_fiberalloc`
-We use `u/kiyoyabe/e2e_test_2023oct`.
-
-
-### `pfs_utils`
-`pfs_utils` asuumes that EUPS is installed, but it's not easy to install only the EUPS package in non EUPS environment. As workaround `FiberIds()` can accept `path` keyword, but it is hard-coded in several places. The `u/monodera/add_path_gfm` fixes it for our purpose without disturbing others. This can also be merged into master, but needs some discussion with others.
-
-
 ### `ics_cobraCharmer`
 We use the commit `1af21d85a0af309cc57c939b78d625e884ece404` to be consistent with other packages. We hope that the other ics packages become consistent at some point. Also, it appears that the package needs to be installed as editable. Special treatment can be found in `__init__.py`.
 
@@ -164,7 +153,7 @@ We use the branch `u/monodera/tweak_sdss3tools_dep` to avoid `sdss3tools` depend
 
 ### `ets_pointing`
 
-`ets_pointing` is installed as `pfs_design_tool` (name TBD) and the `u/monodera/reconfigure-20230620-pyproject` branch is used as a installable repository.
+`ets_pointing` is installed as `pfs_design_tool` (name TBD).
 
 ### `ets_shuffle`
 `ets_shuffle` is a repository without `setup.py` or `pyproject.toml`. Therefore, it cannot be installed via `pip`.  In the meantime, it is included as a submodule under `src` directory.

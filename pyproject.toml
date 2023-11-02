@@ -6,7 +6,7 @@ authors = [
     { name = "Masato Onodera", email = "monodera@naoj.org" },
 ]
 name = "pfs_obsproc_planning"
-version = "0.1.0"
+version = "0.2.0"
 description = ""
 dependencies = [
     "astroplan>=0.9.1",
@@ -35,13 +35,13 @@ dependencies = [
     "wheel>=0.41.2",
     "qplan @ git+https://github.com/naojsoft/qplan.git",
     "pfs-datamodel @ git+https://github.com/Subaru-PFS/datamodel.git",
-    "ets-fiber-assigner @ git+https://github.com/Subaru-PFS/ets_fiberalloc.git@u/kiyoyabe/e2e_test_2023oct",
-    "pfs-design-tool @ git+https://github.com/Subaru-PFS/ets_pointing.git@u/monodera/reconfigure-20230620-pyproject",
+    "ets-fiber-assigner @ git+https://github.com/Subaru-PFS/ets_fiberalloc.git",
+    "pfs-design-tool @ git+https://github.com/Subaru-PFS/ets_pointing.git",
     "pfs-target-database @ git+https://github.com/Subaru-PFS/ets_target_database.git",
     "ics-cobraOps @ git+https://github.com/Subaru-PFS/ics_cobraOps.git",
     "opdb @ git+https://github.com/Subaru-PFS/spt_operational_database.git",
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.9,<3.12"
 readme = "README.md"
 license = { text = "MIT" }
 
@@ -55,16 +55,19 @@ build-backend = "setuptools.build_meta"
 packages = ["pfs_obsproc_planning", "ets_shuffle"]
 include-package-data = true
 
+
 [tool.setuptools.package-dir]
 pfs_obsproc_planning = "src/pfs_obsproc_planning"
 ets_shuffle = "src/ets_shuffle/ets_shuffle"
 
+
 [tool.pdm.dev-dependencies]
 dev = [
-    "-e git+https://github.com/Subaru-PFS/pfs_utils.git@u/monodera/add_path_gfm#egg=pfs-utils",
     "-e git+https://github.com/Subaru-PFS/ics_cobraCharmer.git@1af21d85a0af309cc57c939b78d625e884ece404#egg=ics-cobraCharmer",
     "-e git+https://github.com/Subaru-PFS/ics_fpsActor.git@u/monodera/tweak_sdss3tools_dep#egg=ics-fpsActor",
+    "-e git+https://github.com/Subaru-PFS/pfs_utils.git#egg=pfs-utils",
 ]
+
 
 [tool.pdm.options]
 add = ["--no-isolation"]
