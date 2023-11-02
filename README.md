@@ -18,8 +18,7 @@ git clone https://github.com/Subaru-PFS/pfs_obsproc_planning_tools.git
 # move to the directory
 cd pfs_obsproc_planning_tools
 
-# switch to the branch (will be merged into main at some point)
-git switch u/monodera/pip_compatible
+# update submodule
 git submodule update --init
 
 # create a python virtual environment (recommended)
