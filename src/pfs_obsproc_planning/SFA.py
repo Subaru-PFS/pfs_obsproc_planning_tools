@@ -9,7 +9,7 @@ warnings.filterwarnings("ignore")
 
 
 def run(
-    conf, workDir=".", repoDir=".", infile="ppp+qplan_outout.csv", clearOutput=False
+    conf, workDir=".", repoDir=".", infile="ppp+qplan_output.csv", clearOutput=False
 ):
     (
         list_pointings,

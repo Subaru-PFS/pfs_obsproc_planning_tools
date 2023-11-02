@@ -150,7 +150,7 @@ def run(conf, ppcList, obs_dates, inputDirName=".", outputDirName=".", plotVisib
             comment,
         ) = line.split("\t")
         exp_time = float(exp_time) * 60.0  # assume table is in MINUTES
-        print(dec)
+
         tgt = StaticTarget(
             name=ob_code, ra=ra, dec=dec, equinox=float(eq), comment=comment
         )
