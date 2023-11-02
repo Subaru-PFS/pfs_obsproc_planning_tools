@@ -1,0 +1,89 @@
+[project]
+authors = [
+    { name = "Wanqiu He" },
+    { name = "Kiyoto Yabe" },
+    { name = "Eric Jeschke" },
+    { name = "Masato Onodera", email = "monodera@naoj.org" },
+]
+name = "pfs_obsproc_planning"
+version = "0.2.0"
+description = ""
+dependencies = [
+    "astroplan>=0.9.1",
+    "astropy>=5.3",
+    "bokeh>=3.3.0",
+    "colorcet>=3.0.1",
+    "gitpython>=3.1.38",
+    "gurobipy>=10.0.3",
+    "ipython>=8.16.0",
+    "jupyter>=1.0.0",
+    "logzero>=1.7.0",
+    "matplotlib>=3.8.0",
+    "numpy<1.24.0",
+    "pandas>=2.1.0",
+    "psycopg2>=2.9.8",
+    "pybind11>=2.11.1",
+    "pyyaml==5.3.1",
+    "scikit-learn>=1.3.1",
+    "scipy>=1.9.3",
+    "seaborn>=0.13.0",
+    "sep>=1.2.1",
+    "setuptools>=68.2.2",
+    "shapely>=2.0.1",
+    "sqlalchemy>=2.0.21",
+    "toml>=0.10.2",
+    "wheel>=0.41.2",
+    "qplan @ git+https://github.com/naojsoft/qplan.git",
+    "pfs-datamodel @ git+https://github.com/Subaru-PFS/datamodel.git",
+    "ets-fiber-assigner @ git+https://github.com/Subaru-PFS/ets_fiberalloc.git",
+    "pfs-design-tool @ git+https://github.com/Subaru-PFS/ets_pointing.git",
+    "pfs-target-database @ git+https://github.com/Subaru-PFS/ets_target_database.git",
+    "ics-cobraOps @ git+https://github.com/Subaru-PFS/ics_cobraOps.git",
+    "opdb @ git+https://github.com/Subaru-PFS/spt_operational_database.git",
+]
+requires-python = ">=3.9,<3.12"
+readme = "README.md"
+license = { text = "MIT" }
+
+
+[build-system]
+requires = ["setuptools", "wheel", "pybind11"]
+build-backend = "setuptools.build_meta"
+
+
+[tool.setuptools]
+packages = ["pfs_obsproc_planning", "ets_shuffle"]
+include-package-data = true
+
+
+[tool.setuptools.package-dir]
+pfs_obsproc_planning = "src/pfs_obsproc_planning"
+ets_shuffle = "src/ets_shuffle/ets_shuffle"
+
+
+[tool.pdm.dev-dependencies]
+dev = [
+    "-e git+https://github.com/Subaru-PFS/ics_cobraCharmer.git@1af21d85a0af309cc57c939b78d625e884ece404#egg=ics-cobraCharmer",
+    "-e git+https://github.com/Subaru-PFS/ics_fpsActor.git@u/monodera/tweak_sdss3tools_dep#egg=ics-fpsActor",
+    "-e git+https://github.com/Subaru-PFS/pfs_utils.git#egg=pfs-utils",
+]
+
+
+[tool.pdm.options]
+add = ["--no-isolation"]
+install = ["--no-isolation"]
+
+
+[tool.pdm.scripts]
+gen-requirements = { cmd = [
+    "pdm",
+    "export",
+    "--format",
+    "requirements",
+    "--without-hashes",
+    "--pyproject",
+    "--dev",
+    "--output",
+    "requirements.txt",
+    "--verbose",
+], help = "Generate requirements.txt" }

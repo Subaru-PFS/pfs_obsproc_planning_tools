@@ -1,0 +1,90 @@
+[ppp]
+mode = 'db'
+localPath = ''
+TEXP_NOMINAL = 900.0
+sql_query = "SELECT ob_code,ra,dec,pmra,pmdec,parallax,epoch,priority,effective_exptime,is_medium_resolution,proposal.proposal_id,rank,grade FROM target JOIN proposal ON target.proposal_id=proposal.proposal_id;"
+inputDir = 'input'
+outputDir = 'output/ppp'
+
+[qplan]
+outputDir = 'output/qplan'
+
+[qplan.weight]
+slew = 0.2
+delay = 3.0
+filter = 0.0
+rank = 0.85
+priority = 0.1
+
+[targetdb.db]
+host = "example.com"
+port = 5432
+dbname = "dbname"
+user = "username"
+password = "password"
+dialect = "postgresql"
+
+[targetdb.sky]
+version = ["20221031"]
+
+[targetdb.fluxstd]
+version = ["2.1"]
+
+[gaiadb]
+host = "example.com"
+port = 5432
+dbname = "dbname"
+user = "username"
+password = "password"
+
+[schemacrawler]
+SCHEMACRAWLERDIR = "../../../schemacrawler-16.15.7-distribution/"
+
+[netflow]
+use_gurobi = true
+
+[gurobi]
+seed = 0
+presolve = 1
+method = 0
+degenmoves = 0
+heuristics = 0.6
+mipfocus = 0
+mipgap = 5.0e-3
+PreSOS2Encoding = 0
+PreSOS1Encoding = 0
+threads = 4
+
+[sfa]
+n_sky = 100
+sky_random = false
+n_sky_random = 1000
+reduce_sky_targets = true
+pfs_instdata_dir = "pfs_instdata"
+cobra_coach_dir = "cobracoach"
+cobra_coach_module_version = "None"
+sm = [1, 2, 3, 4]
+dot_margin = 1.0
+dot_penalty = "None"
+arms = 'brn'
+guidestar_mag_min = 12.0
+guidestar_mag_max = 19.0
+guidestar_neighbor_mag_min = 21.0
+guidestar_minsep_deg = 0.0002778
+n_fluxstd = 100
+fluxstd_mag_max = 18.0
+fluxstd_mag_min = 15.0
+fluxstd_mag_filter = "g"
+good_fluxstd = false
+fluxstd_min_prob_f_star = 0.5
+fluxstd_flags_dist = false
+fluxstd_flags_ebv = false
+raster = true
+raster_mag_min = 16.0
+raster_mag_max = 20.0
+
+[ope]
+template = "templates/template_pfs_v2023-09-12.ope"
+outfilePath = "output/ope"
+designPath = "output/design"
+runName = "example"

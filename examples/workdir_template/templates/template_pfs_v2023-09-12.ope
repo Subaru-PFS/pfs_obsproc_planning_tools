@@ -1,0 +1,107 @@
+### template ope file for PFS operations
+### v2023-09-12:  created based on v2023-06-27
+
+:Header
+
+OBSERVATION_FILE_NAME=template_pfs.ope
+OBSERVATION_FILE_TYPE=OPE
+OBSERVATION_START_DATE=2023.07.01
+OBSERVATION_START_TIME=17:00:00
+OBSERVATION_END_DATE=2023.07.31
+OBSERVATION_END_TIME=06:00:00
+
+
+:Parameter
+
+## Common parameters (No need to touch)
+DEF_PFSENG=OBE_ID=PFS OBE_MODE=SPEC_ENG
+DEF_CMNTOOL=OBE_ID=COMMON OBE_MODE=TOOL
+DEF_CMNLAN=OBE_ID=COMMON OBE_MODE=LAUNCHER F_SELECT="P_Opt2"
+# pfsDesign path directory
+PFSDSGNDIR="/data/pfsDesign/"
+
+## Objects 
+# [FIELD_NAME] 05:28:40.1 +35:49:26
+FIELD_NAME=OBJECT="FIELD_NAME" RA=FIELD_RA DEC=FIELD_DEC EQUINOX=2000.0
+
+
+
+
+:Command
+
+### Preparations ###
+# (To be updated after the test exposure commands are revised)
+
+### Focusing ###
+# (To be updated after the July run)
+
+
+### Basic commands for science exposure ###
+
+# SETUPFIELD WITH cobra convergence
+SetupField $DEF_PFSENG DESIGN_ID="designId" AG=OFF OFFSET_RA=0 OFFSET_DEC=0
+
+# Field acquisition
+EXEC pfs pfscmd actor="iic" cmd='acquireField exptime=3000 fit_dScale=yes fit_dInR=yes'
+
+# Autoguide start
+EXEC pfs pfscmd actor="iic" cmd='autoguideStart exptime=3000 cadence=5000 fit_dScale=yes fit_dInR=yes'
+EXEC TSC AG_TRACKING CALC_REGION=PFS MOTOR=ON
+
+# Assign GroupId
+SETUP_ENG_GROUPID $DEF_PFSENG GROUP_NAME="GROUP_NAME"
+
+## Get spectrum
+PFS_SPS_EXPOSURE $DEF_PFSENG EXPTYPE="object" SEQ_NAME="RUN_NAME" EXPTIME=900 NFRAME=1 CAMERA="b1,r1,b2,r2,b3,r3,b4,r4,n1,n2,n3,n4"
+
+
+
+### Calibrations ###
+
+### Dark/test
+EXEC PFS PFSCMD ACTOR="iic" CMD='dark expTime=1 duplicate=1 arm=b,r name="fromGen" comments="test command"' TIMELIM=100 
+
+
+### Arc
+# Move Cobras to home position before arc and flat data acquisiton.
+exec pfs pfscmd actor="iic" cmd='moveToHome all' TIMELIM=600
+
+# arc for blue 
+pfs_sps_exposure obe_id=pfs obe_mode=spec_eng exptype="arc" HGCD=60 exptime=60 nframe=1 arm="b,r" seq_name="HgCd"
+
+# arc for red (low resolution)
+#change from med to low resolution
+exec pfs pfscmd actor="iic" cmd="sps rdaMove low"  TIMELIM=180
+pfs_sps_exposure obe_id=pfs obe_mode=spec_eng exptype="arc" NE=10 exptime=10 nframe=3 camera="b1, r1, b3, r3" seq_name="Neon"
+pfs_sps_exposure obe_id=pfs obe_mode=spec_eng exptype="arc" KR=30 exptime=30 nframe=3 camera="b1, r1, b3, r3" seq_name="Krypton"
+pfs_sps_exposure obe_id=pfs obe_mode=spec_eng exptype="arc" XE=45 exptime=45 nframe=3 camera="b1, r1, b3, r3" seq_name="Xenon"
+pfs_sps_exposure obe_id=pfs obe_mode=spec_eng exptype="arc" AR=60 exptime=60 nframe=3 camera="b1, r1, b3, r3" seq_name="Argon"
+
+# arc for red (med resolution)
+#change to low to med resolution
+exec pfs pfscmd actor="iic" cmd="sps rdaMove med"  TIMELIM=180
+pfs_sps_exposure obe_id=pfs obe_mode=spec_eng exptype="arc" NE=20 exptime=20 nframe=1 camera="b1, r1, b3, r3" seq_name="Neon"
+pfs_sps_exposure obe_id=pfs obe_mode=spec_eng exptype="arc" KR=60 exptime=60 nframe=1 camera="b1, r1, b3, r3" seq_name="Krypton"
+pfs_sps_exposure obe_id=pfs obe_mode=spec_eng exptype="arc" XE=90 exptime=90 nframe=1 camera="b1, r1, b3, r3" seq_name="Xenon"
+pfs_sps_exposure obe_id=pfs obe_mode=spec_eng exptype="arc" AR=120 exptime=120 nframe=1 camera="b1, r1, b3, r3" seq_name="Argon"
+
+
+
+### Flat
+# dome flat (ring lamp: 100V)
+
+# Move Cobras to home position before arc and flat data acquisiton.
+exec pfs pfscmd actor="iic" cmd='moveToHome all' TIMELIM=600
+
+## flat for red (low resolution)
+#change from med to low resolution
+exec pfs pfscmd actor="iic" cmd="sps rdaMove low"  TIMELIM=180
+PFS_SPS_EXPOSURE obe_id=pfs obe_mode=spec_eng exptype="flat" exptime=4 nframe=1 arm="b,r" seq_name="100V"
+PFS_SPS_EXPOSURE obe_id=pfs obe_mode=spec_eng exptype="flat" exptime=4 nframe=9 arm="b,r" seq_name="100V"
+
+#change to low to med resolution
+exec pfs pfscmd actor="iic" cmd="sps rdaMove med"  TIMELIM=180
+PFS_SPS_EXPOSURE obe_id=pfs obe_mode=spec_eng exptype="flat" exptime=8 nframe=1 camera="b1, r1, b3, r3" seq_name="100V"
+PFS_SPS_EXPOSURE obe_id=pfs obe_mode=spec_eng exptype="flat" exptime=12 nframe=10 camera="b1, r1, b3, r3" seq_name="100V"
+exec pfs pfscmd actor="iic" cmd="sps rdaMove low"  TIMELIM=180
+
