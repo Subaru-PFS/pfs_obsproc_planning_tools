@@ -153,6 +153,7 @@ class GeneratePfsDesign(object):
 
         ## read output from PPP ##
         self.df_qplan, self.sdlr, self.figs_qplan = qPlan.run(
+            self.conf,
             "ppcList.ecsv",
             obs_dates,
             inputDirName=self.outputDirPPP,
