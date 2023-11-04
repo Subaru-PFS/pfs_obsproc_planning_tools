@@ -1747,7 +1747,7 @@ def plotCR(cR, sub, obj_allo, dirName=".", show_plots=False):
         fontsize=12,
     )
 
-    plt.xlim(0, len(fib_eff) + 1)
+    plt.xlim(-0.5, len(fib_eff) + 1)
     plt.ylim(0, max(fib_eff) * 1.1)
     plt.xlabel("PPC", fontsize=18)
     plt.ylabel("fiber alloc fraction (%)", fontsize=18)
