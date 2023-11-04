@@ -38,6 +38,14 @@ from ics.cobraOps.CobrasCalibrationProduct import CobrasCalibrationProduct
 from ics.cobraOps.CollisionSimulator import CollisionSimulator
 from ics.cobraOps.TargetGroup import TargetGroup
 
+# netflow configuration (FIXME; should be load from config file)
+cobra_location_group = None
+min_sky_targets_per_location = None
+location_group_penalty = None
+cobra_instrument_region = None
+min_sky_targets_per_instrument_region = None
+instrument_region_penalty = None
+black_dot_penalty_cost = None
 
 def DBconnect(dialect, user, pwd, host, port, dbname):
     """create the link of DB to connect
@@ -804,7 +812,7 @@ def cobraMoveCost(dist):
     return 0.1 * dist
 
 
-def netflowRun_single(Tel, sample, TraCollision=False):
+def netflowRun_single(Tel, sample, TraCollision=False, numReservedFibers=0, fiberNonAllocationCost=0.0):
     """run netflow (without iteration)
 
     Parameters
@@ -871,6 +879,15 @@ def netflowRun_single(Tel, sample, TraCollision=False):
                 gurobiOptions=gurobiOptions,
                 alreadyObserved=alreadyObserved,
                 forbiddenPairs=forbiddenPairs,
+                cobraLocationGroup=cobra_location_group,
+                minSkyTargetsPerLocation=min_sky_targets_per_location,
+                locationGroupPenalty=location_group_penalty,
+                cobraInstrumentRegion=cobra_instrument_region,
+                minSkyTargetsPerInstrumentRegion=min_sky_targets_per_instrument_region,
+                instrumentRegionPenalty=instrument_region_penalty,
+                blackDotPenalty=black_dot_penalty_cost,
+                numReservedFibers=numReservedFibers,
+                fiberNonAllocationCost=fiberNonAllocationCost,
             )
 
             prob.solve()
@@ -930,6 +947,15 @@ def netflowRun_single(Tel, sample, TraCollision=False):
             gurobiOptions=gurobiOptions,
             alreadyObserved=alreadyObserved,
             forbiddenPairs=forbiddenPairs,
+            cobraLocationGroup=cobra_location_group,
+            minSkyTargetsPerLocation=min_sky_targets_per_location,
+            locationGroupPenalty=location_group_penalty,
+            cobraInstrumentRegion=cobra_instrument_region,
+            minSkyTargetsPerInstrumentRegion=min_sky_targets_per_instrument_region,
+            instrumentRegionPenalty=instrument_region_penalty,
+            blackDotPenalty=black_dot_penalty_cost,
+            numReservedFibers=numReservedFibers,
+            fiberNonAllocationCost=fiberNonAllocationCost,
         )
 
         prob.solve()
@@ -945,7 +971,7 @@ def netflowRun_single(Tel, sample, TraCollision=False):
     return res, telescopes, tgt
 
 
-def netflowRun_nofibAssign(Tel, sample, randomseed, Print=True, TraCollision=False):
+def netflowRun_nofibAssign(Tel, sample, randomseed, Print=True, TraCollision=False, numReservedFibers=0, fiberNonAllocationCost=0.0):
     """run netflow (with iteration)
         if no fiber assignment in some PPCs, shift these PPCs with 0.15 deg
 
@@ -964,7 +990,7 @@ def netflowRun_nofibAssign(Tel, sample, randomseed, Print=True, TraCollision=Fal
 
     np.random.seed(randomseed)
 
-    res, telescope, tgt = netflowRun_single(Tel, sample, TraCollision)
+    res, telescope, tgt = netflowRun_single(Tel, sample, TraCollision, numReservedFibers, fiberNonAllocationCost)
 
     if sum(np.array([len(tt) for tt in res]) == 0) == 0:
         # All PPCs have fiber assignment
@@ -993,7 +1019,7 @@ def netflowRun_nofibAssign(Tel, sample, randomseed, Print=True, TraCollision=Fal
                 Tel_t[ind, 1] = Tel[ind, 1] + np.random.choice(shift, 1)[0]
                 Tel_t[ind, 2] = Tel[ind, 2] + np.random.choice(shift, 1)[0]
 
-            res, telescope, tgt = netflowRun_single(Tel_t, sample, TraCollision)
+            res, telescope, tgt = netflowRun_single(Tel_t, sample, TraCollision, numReservedFibers, fiberNonAllocationCost)
 
             index = np.where(np.array([len(tt) for tt in res]) == 0)[0]
 
@@ -1002,7 +1028,7 @@ def netflowRun_nofibAssign(Tel, sample, randomseed, Print=True, TraCollision=Fal
         return res, telescope, tgt
 
 
-def netflowRun(sample, randomseed, Print=True, TraCollision=False):
+def netflowRun(sample, randomseed, Print=True, TraCollision=False, numReservedFibers=0, fiberNonAllocationCost=0.0):
     """run netflow (with iteration and DBSCAN)
 
     Parameters
@@ -1051,7 +1077,7 @@ def netflowRun(sample, randomseed, Print=True, TraCollision=False):
             )
 
         res, telescope, tgt = netflowRun_nofibAssign(
-            ppc_g[uu], sample_inuse, randomseed, Print, TraCollision
+            ppc_g[uu], sample_inuse, randomseed, Print, TraCollision, numReservedFibers, fiberNonAllocationCost
         )
 
         for i, (vis, tel) in enumerate(zip(res, telescope)):
@@ -1171,6 +1197,8 @@ def netflow_iter(
     PrintTF=True,
     PlotTF=True,
     TraCollision=False,
+    numReservedFibers=0, 
+    fiberNonAllocationCost=0.0,
 ):
     """iterate the total procedure to re-assign fibers to targets which have not been assigned
         in the previous/first iteration
@@ -1228,7 +1256,7 @@ def netflow_iter(
                 PlotTF,
             )
 
-            obj_allo_t = netflowRun(uS_t2, randomseed, PrintTF, TraCollision)
+            obj_allo_t = netflowRun(uS_t2, randomseed, PrintTF, TraCollision, numReservedFibers, fiberNonAllocationCost)
 
             if len(obj_allo) >= nppc or iter_m2 >= 10:
                 # stop if n_ppc>200
@@ -1421,6 +1449,8 @@ def fun2opt(para, info):
 
     printTF = info["print"]
     TraCollision = info["checkTraCollision"]
+    numReservedFibers = info["numReservedFibers"]
+    fiberNonAllocationCost = info["fiberNonAllocationCost"]
 
     completeMode = info["comMode"]
 
@@ -1437,7 +1467,7 @@ def fun2opt(para, info):
             uS_L, nppc_l, conta, contb, contc, randomseed, True, False, False
         )
 
-        obj_allo_L = netflowRun(uS_L1, randomseed, False, TraCollision)
+        obj_allo_L = netflowRun(uS_L1, randomseed, False, TraCollision, numReservedFibers, fiberNonAllocationCost)
 
         uS_L1 = netflowAssign(uS_L1, obj_allo_L)
 
@@ -1451,7 +1481,7 @@ def fun2opt(para, info):
         uS_M1 = PPP_centers(
             uS_M, nppc_m, conta, contb, contc, randomseed, True, False, False
         )
-        obj_allo_M = netflowRun(uS_M1, randomseed, False, TraCollision)
+        obj_allo_M = netflowRun(uS_M1, randomseed, False, TraCollision, numReservedFibers, fiberNonAllocationCost)
 
         uS_M1 = netflowAssign(uS_M1, obj_allo_M)
 
@@ -1479,6 +1509,8 @@ def iter1(
     commode,
     randomSeed,
     TraCollision,
+    numReservedFibers,
+    fiberNonAllocationCost,
     printTF,
 ):
     """optimize the weighting scheme
@@ -1523,6 +1555,8 @@ def iter1(
                 "iter1_n": 0,
                 "randomSeed": randomSeed,
                 "checkTraCollision": TraCollision,
+                "numReservedFibers": numReservedFibers,
+                "fiberNonAllocationCost": fiberNonAllocationCost,
             },
         ),
         disp=True,
@@ -1767,6 +1801,8 @@ def run(
     iter2_on=False,
     iter3_on=False,
     dirName=".",
+    numReservedFibers=0,
+    fiberNonAllocationCost=0.0,
     show_plots=False,
 ):
 
@@ -1800,6 +1836,8 @@ def run(
             commode,
             randomseed,
             TraCollision,
+            numReservedFibers,
+            fiberNonAllocationCost,
             printTF,
         )
 
@@ -1819,7 +1857,7 @@ def run(
                 printTF,
                 plotTF,
             )
-            obj_allo_L = netflowRun(uS_L1, randomseed, printTF, TraCollision)
+            obj_allo_L = netflowRun(uS_L1, randomseed, printTF, TraCollision, numReservedFibers, fiberNonAllocationCost)
 
             uS_L1 = netflowAssign(uS_L1, obj_allo_L)
 
@@ -1834,6 +1872,8 @@ def run(
                 printTF,
                 plotTF,
                 TraCollision,
+                numReservedFibers,
+                fiberNonAllocationCost,
             )
             uS_L_fin = netflowAssign(uS_L1, obj_allo_L_fin)
 
@@ -1859,7 +1899,7 @@ def run(
                 printTF,
                 plotTF,
             )
-            obj_allo_M = netflowRun(uS_M1, randomseed, printTF, TraCollision)
+            obj_allo_M = netflowRun(uS_M1, randomseed, printTF, TraCollision, numReservedFibers, fiberNonAllocationCost)
 
             uS_M1 = netflowAssign(uS_M1, obj_allo_M)
 
@@ -1874,6 +1914,8 @@ def run(
                 printTF,
                 plotTF,
                 TraCollision,
+                numReservedFibers,
+                fiberNonAllocationCost,
             )
             uS_M_fin = netflowAssign(uS_M1, obj_allo_M_fin)
 
@@ -1899,7 +1941,7 @@ def run(
                 printTF,
                 plotTF,
             )
-            obj_allo_L = netflowRun(uS_L1, randomseed, printTF, TraCollision)
+            obj_allo_L = netflowRun(uS_L1, randomseed, printTF, TraCollision, numReservedFibers, fiberNonAllocationCost)
 
             uS_L1 = netflowAssign(uS_L1, obj_allo_L)
 
@@ -1914,6 +1956,8 @@ def run(
                 printTF,
                 plotTF,
                 TraCollision,
+                numReservedFibers,
+                fiberNonAllocationCost,
             )
             uS_L_fin = netflowAssign(uS_L1, obj_allo_L_fin)
         else:
@@ -1932,7 +1976,7 @@ def run(
                 printTF,
                 plotTF,
             )
-            obj_allo_M = netflowRun(uS_M1, randomseed, printTF, TraCollision)
+            obj_allo_M = netflowRun(uS_M1, randomseed, printTF, TraCollision, numReservedFibers, fiberNonAllocationCost)
 
             uS_M1 = netflowAssign(uS_M1, obj_allo_M)
 
@@ -1947,6 +1991,8 @@ def run(
                 printTF,
                 plotTF,
                 TraCollision,
+                numReservedFibers,
+                fiberNonAllocationCost,
             )
             uS_M_fin = netflowAssign(uS_M1, obj_allo_M_fin)
         else:

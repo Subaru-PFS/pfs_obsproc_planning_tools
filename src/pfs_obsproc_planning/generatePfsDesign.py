@@ -143,6 +143,15 @@ class GeneratePfsDesign(object):
             self.conf["sfa"]["dot_margin"],
         )
 
+        # reserve fibers for calibration targets?
+        if self.conf["ppp"]["reserveFibers"] == True:
+            num_reserved_fibers = int(self.conf["sfa"]["n_sky"] + self.conf["sfa"]["n_fluxstd"])
+            fiber_non_allocation_cost = self.conf["ppp"]["fiberNonAllocationCost"]
+        else:
+            num_reserved_fibers = 0
+            fiber_non_allocation_cost = 0.0
+        logger.info(f"{num_reserved_fibers} fibers reserved for calibration targets")
+
         PPP.run(
             bench_info,
             readsamp_con,
@@ -150,6 +159,8 @@ class GeneratePfsDesign(object):
             onsourceT_M,
             iter1_on=False,
             dirName=self.outputDirPPP,
+            numReservedFibers=num_reserved_fibers,
+            fiberNonAllocationCost=fiber_non_allocation_cost,
             show_plots=show_plots,
         )
 
