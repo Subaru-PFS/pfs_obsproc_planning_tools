@@ -16,6 +16,7 @@ from logzero import logger
 warnings.filterwarnings("ignore")
 
 from .opefile import OpeFile
+from pfs_design_tool.pointing_utils import nfutils
 
 
 def read_conf(conf):
@@ -134,7 +135,16 @@ class GeneratePfsDesign(object):
             self.conf["ppp"]["TEXP_NOMINAL"] * n_pccs_m
         )  # in sec (assuming 0 PPCs given)  --  MR
 
+        cobra_coach, bench_info = nfutils.getBench(
+            self.conf["sfa"]["pfs_instdata_dir"],
+            self.conf["sfa"]["cobra_coach_dir"],
+            None,
+            self.conf["sfa"]["sm"],
+            self.conf["sfa"]["dot_margin"],
+        )
+
         PPP.run(
+            bench_info,
             readsamp_con,
             onsourceT_L,
             onsourceT_M,

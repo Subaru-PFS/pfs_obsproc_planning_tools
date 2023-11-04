@@ -822,7 +822,6 @@ def netflowRun_single(Tel, sample, TraCollision=False):
     Teldec = Tel[:, 2]
     Telpa = Tel[:, 3]
 
-    bench = Bench(layout="full")
     tgt = sam2netflow(sample)
     classdict = NetflowPreparation(sample)
     otime = "2024-05-20T08:00:00Z"
@@ -1760,6 +1759,7 @@ def plotCR(cR, sub, obj_allo, dirName=".", show_plots=False):
 
 
 def run(
+    bench_info,
     readsamp_con,
     TimeOnSource_l,
     TimeOnSource_m,
@@ -1769,6 +1769,10 @@ def run(
     dirName=".",
     show_plots=False,
 ):
+
+    global bench
+    bench = bench_info
+
     sample = readUserSample(readsamp_con, True)
 
     nppc_l = int(np.ceil(TimeOnSource_l / 900.0))
