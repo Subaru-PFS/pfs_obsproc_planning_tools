@@ -102,22 +102,26 @@ class GeneratePfsDesign(object):
 
         ## read sample from local path ##
         if self.conf["ppp"]["mode"] == "local":
-            readsamp_con = {
+            readtgt_con = {
                 "mode": "local",
-                "localPath": os.path.join(
+                "para_readtgt": os.path.join(
                     self.workDir, f"{self.inputDirPPP}/mock_sim.csv"
                 ),
             }
         else:
-            readsamp_con = {
-                "mode": self.conf["ppp"]["mode"],
-                "dialect": self.conf["targetdb"]["db"]["dialect"],
-                "user": self.conf["targetdb"]["db"]["user"],
-                "pwd": self.conf["targetdb"]["db"]["password"],
-                "host": self.conf["targetdb"]["db"]["host"],
-                "port": self.conf["targetdb"]["db"]["port"],
-                "dbname": self.conf["targetdb"]["db"]["dbname"],
-                "sql_query": self.conf["ppp"]["sql_query"],
+            readtgt_con = {
+                "mode": "DB",
+                "para": {
+                    "para_tgtDB": [
+                        self.conf["targetdb"]["db"]["dialect"],
+                        self.conf["targetdb"]["db"]["user"],
+                        self.conf["targetdb"]["db"]["password"],
+                        self.conf["targetdb"]["db"]["host"],
+                        self.conf["targetdb"]["db"]["port"],
+                        self.conf["targetdb"]["db"]["dbname"],
+                    ],
+                    "sql_tgtDB": self.conf["ppp"]["sql_query"],
+                },
             }
 
         ## define exposure time ##
@@ -129,10 +133,9 @@ class GeneratePfsDesign(object):
         )  # in sec (assuming 0 PPCs given)  --  MR
 
         PPP.run(
-            readsamp_con,
+            readtgt_con,
             onsourceT_L,
             onsourceT_M,
-            iter1_on=False,
             dirName=self.outputDirPPP,
             show_plots=show_plots,
         )
