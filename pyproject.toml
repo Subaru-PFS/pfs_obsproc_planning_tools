@@ -14,7 +14,7 @@ dependencies = [
     "bokeh>=3.3.0",
     "colorcet>=3.0.1",
     "gitpython>=3.1.38",
-    "gurobipy>=10.0.3",
+    "gurobipy>=10.0.3,<11",
     "ipython>=8.16.0",
     "jupyter>=1.0.0",
     "logzero>=1.7.0",
@@ -37,9 +37,9 @@ dependencies = [
     "pfs-datamodel @ git+https://github.com/Subaru-PFS/datamodel.git",
     "ets-fiber-assigner @ git+https://github.com/Subaru-PFS/ets_fiberalloc.git",
     "pfs-design-tool @ git+https://github.com/Subaru-PFS/ets_pointing.git",
-    "pfs-target-database @ git+https://github.com/Subaru-PFS/ets_target_database.git",
     "ics-cobraOps @ git+https://github.com/Subaru-PFS/ics_cobraOps.git",
     "opdb @ git+https://github.com/Subaru-PFS/spt_operational_database.git",
+    "targetdb @ git+https://github.com/Subaru-PFS/ets_target_database.git",
 ]
 requires-python = ">=3.9,<3.12"
 readme = "README.md"
