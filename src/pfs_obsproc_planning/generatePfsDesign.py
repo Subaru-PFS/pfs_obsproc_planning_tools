@@ -246,25 +246,25 @@ class GeneratePfsDesign(object):
         logger.info(len(obList))
 
         ## get a list of assigned OBs ## FIXME (maybe we don't need to use this)
-        data_ppp = np.load(
-            os.path.join(self.outputDirPPP, "obj_allo_tot.npy"), allow_pickle=True
+        data_ppp = Table.read(
+            os.path.join(self.outputDirPPP, "ppcList.ecsv")
         )
         # print(len(data_ppp))
         # print(t[:4])
 
         ## check the number of assigned fibers ##
         for i in range(len(data_ppp)):
-            print(data_ppp[i][1], len(data_ppp[i][8]))
+            print(data_ppp[i]["ppc_code"], len(data_ppp[i]["ppc_allocated_targets"]))
             # print(data_ppp[0])
 
         ## get a list of assigned targets combined with qPlan info ##
         data = []
         for i in range(len(data_ppp)):
-            ppc_code = data_ppp[i][1]
-            ppc_ra = data_ppp[i][3]
-            ppc_dec = data_ppp[i][4]
-            ppc_pa = data_ppp[i][5]
-            ob_unique_id = data_ppp[i][8]
+            ppc_code = data_ppp[i]["ppc_code"]
+            ppc_ra = data_ppp[i]["ppc_ra"]
+            ppc_dec = data_ppp[i]["ppc_dec"]
+            ppc_pa = data_ppp[i]["ppc_pa"]
+            ob_unique_id = data_ppp[i]["ppc_allocated_targets"]
             if ppc_code in self.resQPlan.keys():
                 res = self.resQPlan[ppc_code]
                 obstime = res[0].tz_convert("UTC")
