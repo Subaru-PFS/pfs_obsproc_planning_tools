@@ -218,7 +218,7 @@ class GeneratePfsDesign(object):
         ob_equinoxs = t["ob_equinox"]
         ob_priorities = t["ob_priority"]
         obList = {
-            f"{proposal_id}{ob_code}": [
+            f"{proposal_id}_{ob_code}": [
                 proposal_id,
                 ob_code,
                 ob_obj_id,
@@ -254,17 +254,17 @@ class GeneratePfsDesign(object):
 
         ## check the number of assigned fibers ##
         for i in range(len(data_ppp)):
-            print(data_ppp[i][0], len(data_ppp[i][7]))
+            print(data_ppp[i][1], len(data_ppp[i][8]))
             # print(data_ppp[0])
 
         ## get a list of assigned targets combined with qPlan info ##
         data = []
         for i in range(len(data_ppp)):
-            ppc_code = data_ppp[i][0]
-            ppc_ra = data_ppp[i][2]
-            ppc_dec = data_ppp[i][3]
-            ppc_pa = data_ppp[i][4]
-            ob_unique_id = data_ppp[i][7]
+            ppc_code = data_ppp[i][1]
+            ppc_ra = data_ppp[i][3]
+            ppc_dec = data_ppp[i][4]
+            ppc_pa = data_ppp[i][5]
+            ob_unique_id = data_ppp[i][8]
             if ppc_code in self.resQPlan.keys():
                 res = self.resQPlan[ppc_code]
                 obstime = res[0].tz_convert("UTC")
