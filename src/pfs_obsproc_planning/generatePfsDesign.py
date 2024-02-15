@@ -16,6 +16,7 @@ from logzero import logger
 warnings.filterwarnings("ignore")
 
 from .opefile import OpeFile
+from pfs_design_tool.pointing_utils import nfutils
 
 
 def read_conf(conf):
@@ -103,16 +104,16 @@ class GeneratePfsDesign(object):
         ## read sample from local path ##
         if self.conf["ppp"]["mode"] == "local":
             readtgt_con = {
-                "mode": "local",
+                "mode_readtgt": "local",
                 "para_readtgt": os.path.join(
                     self.workDir, f"{self.inputDirPPP}/mock_sim.csv"
                 ),
             }
         else:
             readtgt_con = {
-                "mode": "DB",
-                "para": {
-                    "para_tgtDB": [
+                "mode_readtgt": "DB",
+                "para_readtgt": {
+                    "DBPath_tgt": [
                         self.conf["targetdb"]["db"]["dialect"],
                         self.conf["targetdb"]["db"]["user"],
                         self.conf["targetdb"]["db"]["password"],
@@ -120,7 +121,7 @@ class GeneratePfsDesign(object):
                         self.conf["targetdb"]["db"]["port"],
                         self.conf["targetdb"]["db"]["dbname"],
                     ],
-                    "sql_tgtDB": self.conf["ppp"]["sql_query"],
+                    "sql_query": self.conf["ppp"]["sql_query"],
                 },
             }
 
@@ -132,7 +133,27 @@ class GeneratePfsDesign(object):
             self.conf["ppp"]["TEXP_NOMINAL"] * n_pccs_m
         )  # in sec (assuming 0 PPCs given)  --  MR
 
+        cobra_coach, bench_info = nfutils.getBench(
+            self.conf["sfa"]["pfs_instdata_dir"],
+            self.conf["sfa"]["cobra_coach_dir"],
+            None,
+            self.conf["sfa"]["sm"],
+            self.conf["sfa"]["dot_margin"],
+        )
+
+        # reserve fibers for calibration targets?
+        if self.conf["ppp"]["reserveFibers"] == True:
+            num_reserved_fibers = int(
+                self.conf["sfa"]["n_sky"] + self.conf["sfa"]["n_fluxstd"]
+            )
+            fiber_non_allocation_cost = self.conf["ppp"]["fiberNonAllocationCost"]
+        else:
+            num_reserved_fibers = 0
+            fiber_non_allocation_cost = 0.0
+        logger.info(f"{num_reserved_fibers} fibers reserved for calibration targets")
+
         PPP.run(
+            bench_info,
             readtgt_con,
             onsourceT_L,
             onsourceT_M,

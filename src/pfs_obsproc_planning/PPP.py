@@ -111,10 +111,14 @@ def readTarget(mode, para):
             query.fetchall(),
             columns=[
                 "ob_code",
+                "obj_id",
                 "ra",
                 "dec",
                 "epoch",
                 "priority",
+                "pmra",
+                "pmdec",
+                "parallax",
                 "effective_exptime",
                 "is_medium_resolution",
                 "proposal_id",
@@ -187,7 +191,7 @@ def readTarget(mode, para):
                 )
                 psl_pri_l = pri_ / sum(pri_)
                 if len(tb_tgt_tem_l) < size_step:
-                    size_ = len(tb_tgt_tem_m)
+                    size_ = len(tb_tgt_tem_l)
                 index_t = np.random.choice(
                     np.arange(0, len(tb_tgt_tem_l), 1),
                     size=size_,
@@ -199,6 +203,9 @@ def readTarget(mode, para):
                 [_tgt_select_l.append(_tb_tem_) for _tb_tem_ in _tb_tem[index_t]]
                 FH_select += sum(tb_tgt_tem_l[index_t]["exptime"])
                 tb_tgt_tem_l.remove_rows(index_t)
+
+                if len(tb_tgt_tem_l) == 0:
+                    break
 
         if len(tb_tgt_tem_m) > 0:
             FH_select = 0
@@ -226,6 +233,9 @@ def readTarget(mode, para):
                 [_tgt_select_m.append(_tb_tem_) for _tb_tem_ in _tb_tem[index_t]]
                 FH_select += sum(tb_tgt_tem_m[index_t]["exptime"])
                 tb_tgt_tem_m.remove_rows(index_t)
+
+                if len(tb_tgt_tem_m) == 0:
+                    break
 
     if len(_tgt_select_l) > 0:
         tgt_select_l = vstack(_tgt_select_l)
@@ -1470,9 +1480,13 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
     )
 
     ob_code = _tb_tgt_tot["ob_code"].data
+    ob_obj_id = _tb_tgt_tot["obj_id"].data
     ob_ra = _tb_tgt_tot["ra"].data
     ob_dec = _tb_tgt_tot["dec"].data
     ob_equinox = ["J2000"] * len(_tb_tgt_tot)
+    ob_pmras = _tb_tgt_tot["pmra"].data
+    ob_pmdecs = _tb_tgt_tot["pmdec"].data
+    ob_parallaxs = _tb_tgt_tot["parallax"].data
     ob_priority = _tb_tgt_tot["priority"].data
     ob_exptime = _tb_tgt_tot["exptime"].data
     ob_resolution = _tb_tgt_tot["resolution"].data
@@ -1484,9 +1498,13 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
     obList = Table(
         [
             ob_code,
+            ob_obj_id,
             ob_ra,
             ob_dec,
             ob_equinox,
+            ob_pmras,
+            ob_pmdecs,
+            ob_parallaxs,
             ob_priority,
             ob_exptime,
             ob_resolution,
@@ -1497,9 +1515,13 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
         ],
         names=[
             "ob_code",
+            "ob_obj_id",
             "ob_ra",
             "ob_dec",
             "ob_equinox",
+            "ob_pmra",
+            "ob_pmdec",
+            "ob_parallax",
             "ob_priority",
             "ob_exptime",
             "ob_resolution",
