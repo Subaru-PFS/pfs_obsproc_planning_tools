@@ -1,25 +1,22 @@
 #!/usr/bin/env python3
 # PPP.py : PPP full version
 
-import collections
 import multiprocessing
 import os
 import random
-import sys
 import time
 import warnings
-from functools import partial
-from itertools import chain
 
-import colorcet as cc
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.optimize as opt
-import seaborn as sns
+
 from astropy import units as u
-from astropy.coordinates import Angle, SkyCoord
+from astropy.coordinates import SkyCoord
 from astropy.table import Table, vstack
-from IPython.display import clear_output
+from functools import partial
+from itertools import chain
+from loguru import logger
 from matplotlib.path import Path
 from sklearn.cluster import DBSCAN, AgglomerativeClustering
 from sklearn.neighbors import KernelDensity
@@ -27,72 +24,82 @@ from sklearn.neighbors import KernelDensity
 warnings.filterwarnings("ignore")
 
 # below for netflow
-
-from collections import defaultdict
-
 import ets_fiber_assigner.netflow as nf
-from ics.cobraOps import plotUtils
 from ics.cobraOps.Bench import Bench
 from ics.cobraOps.cobraConstants import NULL_TARGET_ID, NULL_TARGET_POSITION
-from ics.cobraOps.CobrasCalibrationProduct import CobrasCalibrationProduct
 from ics.cobraOps.CollisionSimulator import CollisionSimulator
 from ics.cobraOps.TargetGroup import TargetGroup
 
+# netflow configuration (FIXME; should be load from config file)
+cobra_location_group = None
+min_sky_targets_per_location = None
+location_group_penalty = None
+cobra_instrument_region = None
+min_sky_targets_per_instrument_region = None
+instrument_region_penalty = None
+black_dot_penalty_cost = None
 
-def DBconnect(dialect, user, pwd, host, port, dbname):
-    """create the link of DB to connect
 
-    Parameters
-    ==========
-    dialect,user,pwd,host,port,dbname : string
-
-    Returns
-    =======
-    the link of DB to connect
-    """
+def DBinfo(para_db):
+    # the link of DB to connect
+    dialect, user, pwd, host, port, dbname = para_db
     return "{0}://{1}:{2}@{3}:{4}/{5}".format(dialect, user, pwd, host, port, dbname)
 
 
-def readUserSample(para, Print=True):
+def count_N_overlap(_tb_tgt_psl, _tb_tgt):
+    # calculate local count of targets (bin_width is 1 deg in ra&dec)
+    # lower limit of dec is -40
+    count_bin = [[0 for i in np.arange(0, 361, 1)] for j in np.arange(-40, 91, 1)]
+
+    n_tgt = len(_tb_tgt)
+    for ii in range(n_tgt):
+        m = int(_tb_tgt["ra"][ii])
+        n = int(_tb_tgt["dec"][ii] + 40)  # dec>-40
+        count_bin[n][m] += 1
+    den_local = [
+        count_bin[int(_tb_tgt_psl["dec"][ii] + 40)][int(_tb_tgt_psl["ra"][ii])]
+        for ii in range(len(_tb_tgt_psl))
+    ]
+
+    _tb_tgt_psl["local_count"] = den_local
+
+    return _tb_tgt_psl
+
+
+def readTarget(mode, para):
     """Read target list including:
-       'ob_code' 'ra' 'dec', 'pmra', 'pmdec', 'parallax', 'equinox' 'priority' 'exptime' 'resolution' 'proposal_id' 'rank' 'grade'
+       'ob_code' 'ra' 'dec' 'priority' 'exptime' 'exptime_tac' 'resolution' 'proposal_id' 'rank' 'grade' 'allocated_time'
 
     Parameters
     ==========
     para : dict
         mode:
             'local' -- read target list from local machine
-            'db' -- read target list from Database
+            'DB' -- read target list from Database
 
         localPath:
             (if mode == local) the path of the target list
-        dialect,user,pwd,host,port,dbname:
-            (if mode == db) used to create the link to connect DB
+        DBPath_tgt(dialect,user,pwd,host,port,dbname):
+            (if mode == DB) used to create the link to connect DB
         sql_query:
-            (if mode == db) used to query necessary information of targets from DB
+            (if mode == DB) used to query necessary information of targets from DB
 
     Returns
     =======
     target sample (all), target sample (low-resolution mode), target sample (medium-resolution mode)
     """
     time_start = time.time()
+    logger.info(f"[S1] Read targets started")
 
-    if para["mode"] == "local":
-        uSamp = Table.read(para["localPath"])
+    if mode == "local":
+        tb_tgt = Table.read(para["localPath_tgt"])
 
-    elif para["mode"] == "db":
+    elif mode == "DB":
         import pandas as pd
         import psycopg2
         import sqlalchemy as sa
 
-        DBads = DBconnect(
-            para["dialect"],
-            para["user"],
-            para["pwd"],
-            para["host"],
-            para["port"],
-            para["dbname"],
-        )
+        DBads = DBinfo(para["DBPath_tgt"])
         tgtDB = sa.create_engine(DBads)
 
         sql = para["sql_query"]
@@ -100,121 +107,188 @@ def readUserSample(para, Print=True):
         conn = tgtDB.connect()
         query = conn.execute(sa.sql.text(sql))
 
-        df = pd.DataFrame(
+        df_tgt = pd.DataFrame(
             query.fetchall(),
             columns=[
                 "ob_code",
+                "obj_id",
                 "ra",
                 "dec",
+                "epoch",
+                "priority",
                 "pmra",
                 "pmdec",
                 "parallax",
-                "epoch",
-                "priority",
                 "effective_exptime",
                 "is_medium_resolution",
                 "proposal_id",
                 "rank",
                 "grade",
+                "allocated_time",
+                "allocated_time_lr",
+                "allocated_time_mr",
             ],
         )
         # convert column names
-        df = df.rename(columns={"epoch": "equinox"})
-        df = df.rename(columns={"effective_exptime": "exptime"})
-        df = df.rename(columns={"is_medium_resolution": "resolution"})
+        df_tgt = df_tgt.rename(columns={"epoch": "equinox"})
+        df_tgt = df_tgt.rename(columns={"effective_exptime": "exptime"})
+        df_tgt = df_tgt.rename(columns={"is_medium_resolution": "resolution"})
 
         # convert Boolean to String
-        df["resolution"] = ["M" if v == True else "L" for v in df["resolution"]]
+        df_tgt["resolution"] = ["M" if v == True else "L" for v in df_tgt["resolution"]]
+        df_tgt["allocated_time"] = [
+            df_tgt["allocated_time_lr"][ii]
+            if df_tgt["resolution"][ii] == "L"
+            else df_tgt["allocated_time_mr"][ii]
+            for ii in range(len(df_tgt))
+        ]
+        df_tgt = df_tgt.drop(columns=["allocated_time_lr", "allocated_time_mr"])
 
-        # df = pd.DataFrame(query.fetchall(), \
-        #                   columns=['ob_code' ,'ra' ,'dec' ,'equinox' ,'priority' ,'exptime', \
-        #                            'resolution' , "proposal_id", "rank" , "grade"])
-
-        uSamp = Table.from_pandas(df)
+        tb_tgt = Table.from_pandas(df_tgt)
 
         conn.close()
 
-    uSamp["ra"] = uSamp["ra"].astype(float)
-    uSamp["dec"] = uSamp["dec"].astype(float)
-    uSamp["ob_code"] = uSamp["ob_code"].astype(str)
+    tb_tgt["ra"] = tb_tgt["ra"].astype(float)
+    tb_tgt["dec"] = tb_tgt["dec"].astype(float)
+    tb_tgt["ob_code"] = tb_tgt["ob_code"].astype(str)
+    tb_tgt["identify_code"] = [tt["proposal_id"] + "_" + tt["ob_code"] for tt in tb_tgt]
+    tb_tgt["exptime_assign"] = 0
 
     # exptime needs to be multiples of 900s so netflow can be successfully executed
-    exptime_ppp = np.ceil(uSamp["exptime"] / 900) * 900
-    uSamp.add_column(exptime_ppp, name="exptime_PPP")
-
-    uSamp["identify_code"] = [
-        uSamp["proposal_id"][tt] + uSamp["ob_code"][tt] for tt in range(len(uSamp))
-    ]
+    tb_tgt["exptime_PPP"] = np.ceil(tb_tgt["exptime"] / 900) * 900
 
     # separete the sample by 'resolution' (L/M)
-    allSamp = uSamp.group_by("resolution")
-    allSamp_L = allSamp[allSamp["resolution"] == "L"]
-    allSamp_M = allSamp[allSamp["resolution"] == "M"]
+    tb_tgt_l = tb_tgt[tb_tgt["resolution"] == "L"]
+    tb_tgt_m = tb_tgt[tb_tgt["resolution"] == "M"]
 
-    # print info of reading in sample if necessary
-    if Print:
-        print("######### Read sample")
-        print(
-            "#There are {:5d} proposals loaded.".format(
-                len(set(allSamp["proposal_id"]))
-            )
-        )
-        print("  #{:8d} targets require the LOW resolution".format(len(allSamp_L)))
-        print("  #{:8d} targets require the MEDIUM resolution".format(len(allSamp_M)))
-        print(
-            "######### Read sample DONE! (takes",
-            round(time.time() - time_start, 3),
-            "sec)",
-        )
+    # select targets based on the allocated FH (for determining PPC)
+    psl_id = sorted(set(tb_tgt["proposal_id"]))
+    _tgt_select_l = []
+    _tgt_select_m = []
 
-    return allSamp, allSamp_L, allSamp_M
+    for psl_id_ in psl_id:
+        tb_tgt_tem_l = tb_tgt[
+            (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "L")
+        ]
+        tb_tgt_tem_m = tb_tgt[
+            (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "M")
+        ]
+
+        size_step = 50
+        size_ = 50
+
+        if len(tb_tgt_tem_l) > 0:
+            FH_select = 0
+            FH_tac = tb_tgt_tem_l["allocated_time"][0] * 3600.0
+
+            while FH_select < FH_tac:
+                tb_tgt_tem_l = count_N_overlap(tb_tgt_tem_l, tb_tgt_l)
+                pri_ = (
+                    (10 - tb_tgt_tem_l["priority"])
+                    + 10
+                    * (tb_tgt_tem_l["local_count"] / max(tb_tgt_tem_l["local_count"]))
+                    + 10 * (1 - tb_tgt_tem_l["exptime"] / max(tb_tgt_tem_l["exptime"]))
+                )
+                psl_pri_l = pri_ / sum(pri_)
+                if len(tb_tgt_tem_l) < size_step:
+                    size_ = len(tb_tgt_tem_l)
+                index_t = np.random.choice(
+                    np.arange(0, len(tb_tgt_tem_l), 1),
+                    size=size_,
+                    replace=False,
+                    p=psl_pri_l,
+                )
+
+                _tb_tem = Table.copy(tb_tgt_tem_l)
+                [_tgt_select_l.append(_tb_tem_) for _tb_tem_ in _tb_tem[index_t]]
+                FH_select += sum(tb_tgt_tem_l[index_t]["exptime"])
+                tb_tgt_tem_l.remove_rows(index_t)
+
+                if len(tb_tgt_tem_l) == 0:
+                    break
+
+        if len(tb_tgt_tem_m) > 0:
+            FH_select = 0
+            FH_tac = tb_tgt_tem_m["allocated_time"][0] * 3600.0
+
+            while FH_select < FH_tac:
+                tb_tgt_tem_m = count_N_overlap(tb_tgt_tem_m, tb_tgt_m)
+                pri_ = (
+                    (10 - tb_tgt_tem_m["priority"])
+                    + 10
+                    * (tb_tgt_tem_m["local_count"] / max(tb_tgt_tem_m["local_count"]))
+                    + 10 * (1 - tb_tgt_tem_m["exptime"] / max(tb_tgt_tem_m["exptime"]))
+                )
+                psl_pri_m = pri_ / sum(pri_)
+                if len(tb_tgt_tem_m) < size_step:
+                    size_ = len(tb_tgt_tem_m)
+                index_t = np.random.choice(
+                    np.arange(0, len(tb_tgt_tem_m), 1),
+                    size=size_,
+                    replace=False,
+                    p=psl_pri_m,
+                )
+
+                _tb_tem = Table.copy(tb_tgt_tem_m)
+                [_tgt_select_m.append(_tb_tem_) for _tb_tem_ in _tb_tem[index_t]]
+                FH_select += sum(tb_tgt_tem_m[index_t]["exptime"])
+                tb_tgt_tem_m.remove_rows(index_t)
+
+                if len(tb_tgt_tem_m) == 0:
+                    break
+
+    if len(_tgt_select_l) > 0:
+        tgt_select_l = vstack(_tgt_select_l)
+    else:
+        tgt_select_l = Table()
+
+    if len(_tgt_select_m) > 0:
+        tgt_select_m = vstack(_tgt_select_m)
+    else:
+        tgt_select_m = Table()
+    # """
+
+    logger.info(
+        f"[S1] Read targets done (takes {round(time.time()-time_start,3):.2f} sec)."
+    )
+    logger.info(f"[S1] There are {len(set(tb_tgt['proposal_id'])):.0f} proposals.")
+    logger.info(
+        f"n_tgt_low = {len(tb_tgt_l):.0f} ({len(tgt_select_l):.0f}), n_tgt_medium = {len(tb_tgt_m):.0f} ({len(tgt_select_m):.0f})"
+    )
+
+    return tb_tgt, tgt_select_l, tgt_select_m, tb_tgt_l, tb_tgt_m
 
 
-def count_N(sample):
-    """calculate local count of targets
-
-    Parameters
-    ==========
-    sample : table
-
-    Returns
-    =======
-    sample added with local density (bin_width is 1 deg in ra&dec)
-    """
+def count_N(_tb_tgt):
+    # calculate local count of targets (bin_width is 1 deg in ra&dec)
     # lower limit of dec is -40
+    if len(_tb_tgt) == 0:
+        return _tb_tgt
+
     count_bin = [[0 for i in np.arange(0, 361, 1)] for j in np.arange(-40, 91, 1)]
 
-    for ii in range(len(sample["ra"])):
-        m = int(sample["ra"][ii])
-        n = int(sample["dec"][ii] + 40)  # dec>-40
+    n_tgt = len(_tb_tgt)
+    for ii in range(n_tgt):
+        m = int(_tb_tgt["ra"][ii])
+        n = int(_tb_tgt["dec"][ii] + 40)  # dec>-40
         count_bin[n][m] += 1
     den_local = [
-        count_bin[int(sample["dec"][ii] + 40)][int(sample["ra"][ii])]
-        for ii in range(len(sample["ra"]))
+        count_bin[int(_tb_tgt["dec"][ii] + 40)][int(_tb_tgt["ra"][ii])]
+        for ii in range(n_tgt)
     ]
 
-    if "local_count" not in sample.colnames:
-        sample.add_column(den_local, name="local_count")
+    _tb_tgt["local_count"] = den_local
 
-    else:
-        sample["local_count"] = den_local
-
-    return sample
+    return _tb_tgt
 
 
-def sciRank_pri(sample):
-    """calculate rank+priority of targets (higher value means more important)
-
-    Parameters
-    ==========
-    sample : table
-
-    Returns
-    =======
-    sample: table added with rank_fin col
-    """
+def sciRank_pri(_tb_tgt):
+    # calculate rank+priority of targets (higher value means more important)
     # re-order the rank (starting from 0)
-    SciRank = [0.0] + sorted(list(set(sample["rank"])))
+    if len(_tb_tgt) == 0:
+        return _tb_tgt
+
+    SciRank = [0.0] + sorted(list(set(_tb_tgt["rank"])))
 
     # give each user priority a rank in the interval of the two ranks
     # (0-9, with 0=rank_i, 9=0.5*(rank_[i-1]+rank_i))
@@ -230,156 +304,68 @@ def sciRank_pri(sample):
     SciUsr_Ranktot = np.array(
         [
             SciRank_usrPri[i2 - 1][9 - j2]
-            for s_tem in sample
+            for s_tem in _tb_tgt
             for i2 in range(1, len(SciRank))
             for j2 in range(0, 10, 1)
             if s_tem["rank"] == SciRank[i2] and s_tem["priority"] == j2
         ]
     )
 
-    if "rank_fin" not in sample.colnames:
-        sample.add_column(SciUsr_Ranktot, name="rank_fin")
+    _tb_tgt["rank_fin"] = SciUsr_Ranktot
 
-    else:
-        sample["rank_fin"] = SciUsr_Ranktot
-
-    return sample
+    return _tb_tgt
 
 
-def weight(sample, conta, contb, contc):
-    """calculate weights of targets (higher weights mean more important)
-
-    Parameters
-    ==========
-    sample : table
-    conta,contb,contc: float
-        parameters of weighting scheme:
-            conta--> science grade,>0; contb--> remaining time; contc--> local density
-
-    Returns
-    =======
-    sample: table added with weight col
-    """
+def weight(_tb_tgt, para_sci, para_exp, para_n):
+    # calculate weights of targets (higher weights mean more important)
+    if len(_tb_tgt) == 0:
+        return _tb_tgt
 
     weight_t = (
-        pow(conta, sample["rank_fin"])
-        * pow(sample["exptime_PPP"] / 900.0, contb)
-        * pow(sample["local_count"], contc)
+        pow(para_sci, _tb_tgt["rank_fin"])
+        * pow(_tb_tgt["exptime_PPP"] / 900.0, para_exp)
+        * pow(_tb_tgt["local_count"], para_n)
     )
 
-    if "weight" not in sample.colnames:
-        sample.add_column(weight_t, name="weight")
+    _tb_tgt["weight"] = weight_t
 
-    else:
-        sample["weight"] = weight_t
-
-    return sample
+    return _tb_tgt
 
 
-def target_DBSCAN(sample, sep=1.38, Print=True):
-    """separate targets into different groups
-
-    Parameters
-    ==========
-    sample:table
-    sep: float
-        angular separation set to group, degree
-    Print:boolean
-
-    Returns
-    =======
-    list of pointing centers in different group
-    """
+def target_DBSCAN(_tb_tgt, sep=1.38):
+    # separate targets into different groups
     # haversine uses (dec,ra) in radian;
-    db = DBSCAN(eps=np.radians(sep), min_samples=1, metric="haversine").fit(
-        np.radians([sample["dec"], sample["ra"]]).T
+    tgt_cluster = DBSCAN(eps=np.radians(sep), min_samples=1, metric="haversine").fit(
+        np.radians([_tb_tgt["dec"], _tb_tgt["ra"]]).T
     )
 
-    labels = db.labels_
+    labels = tgt_cluster.labels_
     unique_labels = set(labels)
     n_clusters = len(unique_labels)
 
-    if Print:
-        print(
-            f"#There are {len(sample):d} targets, they are grouped into {n_clusters:d} clusters."
-        )
-
     tgt_group = []
+    tgt_pri_ord = []
 
     for ii in range(n_clusters):
-        tgt_t = sample[labels == ii]
+        tgt_t_pri_tot = sum(_tb_tgt[labels == ii]["weight"])
+        tgt_pri_ord.append([ii, tgt_t_pri_tot])
+
+    tgt_pri_ord.sort(key=lambda x: x[1], reverse=True)
+
+    for ii in np.array(tgt_pri_ord)[:, 0]:
+        tgt_t = _tb_tgt[labels == ii]
         tgt_group.append(tgt_t)
 
     return tgt_group
 
 
-def target_collision(sample, sep=2 / 3600.0, Print=True):
-    """check targets collide with each other
-
-    Parameters
-    ==========
-    sample:table
-    sep: float
-        angular separation set define collided targets, degree, default=2 arcsec
-    Print:boolean
-
-    Returns
-    =======
-    list of pointing centers in different group
-    """
-    # haversine uses (dec,ra) in radian;
-    db = AgglomerativeClustering(
-        distance_threshold=np.radians(sep),
-        n_clusters=None,
-        affinity="haversine",
-        linkage="single",
-    ).fit(np.radians([sample["dec"], sample["ra"]]).T)
-
-    labels = db.labels_
-    unique_labels = set(labels)
-    labels_c = [lab for lab in unique_labels if list(labels).count(lab) > 1]
-
-    if len(labels_c) == 0:
-        index = np.arange(0, len(sample), 1)
-        return index
-
-    else:
-        if Print:
-            print(f"#There are {len(labels_c):d} collision regions.")
-
-        index = list(np.where(np.in1d(labels, labels_c) == False)[0]) + [
-            np.where(np.in1d(labels, kk) == True)[0][0] for kk in labels_c
-        ]
-        return sorted(index)
-
-
-def PFS_FoV(ppc_ra, ppc_dec, PA, sample, mode=None):
-    """pick up targets in the pointing
-
-    Parameters
-    ==========
-    ppc_ra,ppc_dec,PA : float
-        ra,dec,PA of the pointing center
-    sample : table
-    mode: default=None
-        if "KDE_collision", consider collision avoid in KDE part (separation=2 arcsec)
-
-
-    Returns
-    =======
-    list of index of targets, which fall into the pointing, in the input sample
-    """
-    if len(sample) > 1 and mode == "KDE_collision":
-        index = target_collision(sample)
-        point = np.vstack((sample[index]["ra"], sample[index]["dec"])).T
-
-    else:
-        point = np.vstack((sample["ra"], sample["dec"])).T
-
-    center = SkyCoord(ppc_ra * u.deg, ppc_dec * u.deg)
+def PFS_FoV(ppc_ra, ppc_dec, PA, _tb_tgt):
+    # pick up targets in the ppcs
+    tgt_lst = np.vstack((_tb_tgt["ra"], _tb_tgt["dec"])).T
+    ppc_lst = SkyCoord(ppc_ra * u.deg, ppc_dec * u.deg)
 
     # PA=0 along y-axis, PA=90 along x-axis, PA=180 along -y-axis...
-    hexagon = center.directional_offset_by(
+    hexagon = ppc_lst.directional_offset_by(
         [30 + PA, 90 + PA, 150 + PA, 210 + PA, 270 + PA, 330 + PA, 30 + PA] * u.deg,
         1.38 / 2.0 * u.deg,
     )
@@ -396,93 +382,21 @@ def PFS_FoV(ppc_ra, ppc_dec, PA, sample, mode=None):
             ra_h[ra_h_in[0]] += 360
 
     polygon = Path([(ra_h[t], dec_h[t]) for t in range(len(ra_h))])
-    index_ = np.where(polygon.contains_points(point) == True)[0]
+    index_ = np.where(polygon.contains_points(tgt_lst))[0]
 
     return index_
 
 
-def PFS_FoV_plot(ppc_ra, ppc_dec, PA, line_color, line_width, line_st):
-    """plot PFS FoV (hexagon)
-
-    Parameters
-    ==========
-    ppc_ra,ppc_dec,PA : float
-        ra,dec,PA of the pointing center
-    line_color,line_st: string
-        color and style of the plotting
-    line_width: float
-        width of the edge of the pointing
-
-    Returns
-    =======
-    plot a hexagon at the pointing center with diameter=1.38 deg
-    """
-    if type(ppc_ra) not in [list, np.ndarray]:
-        # the input should be given as ndarray, but if it is in the format of float or int, change it to list
-        ppc_ra, ppc_dec, PA = [ppc_ra], [ppc_dec], [PA]
-
-    # PA=0 along y-axis, PA=90 along x-axis, PA=180 along -y-axis...
-    for ii in range(len(ppc_ra)):
-        ppc_ra_t, ppc_dec_t, pa_t = ppc_ra[ii], ppc_dec[ii], PA[ii]
-
-        center = SkyCoord(ppc_ra_t * u.deg, ppc_dec_t * u.deg)
-        hexagon = center.directional_offset_by(
-            [
-                30 + pa_t,
-                90 + pa_t,
-                150 + pa_t,
-                210 + pa_t,
-                270 + pa_t,
-                330 + pa_t,
-                30 + pa_t,
-            ]
-            * u.deg,
-            1.38 / 2.0 * u.deg,
-        )
-
-        ra_h = hexagon.ra.deg
-        dec_h = hexagon.dec.deg
-
-        # for pointings around RA~0 or 360, parts of it will move to the opposite side (e.g., [[1,0],[-1,0]] -->[[1,0],[359,0]])
-        # correct for it
-        ra_h_in = np.where(np.fabs(ra_h - center.ra.deg) > 180)
-        if len(ra_h_in[0]) > 0:
-            if ra_h[ra_h_in[0][0]] > 180:
-                ra_h[ra_h_in[0]] -= 360
-            elif ra_h[ra_h_in[0][0]] < 180:
-                ra_h[ra_h_in[0]] += 360
-
-        plt.plot(
-            ra_h,
-            dec_h,
-            color=line_color,
-            lw=line_width,
-            ls=line_st,
-            alpha=0.5,
-            zorder=5,
-        )
-
-
-def KDE_xy(sample, X, Y):
-    """calculate a single KDE
-
-    Parameters
-    ==========
-    sample: table
-    X,Y: grid to calculate KDE
-
-    Returns
-    =======
-    Z: KDE estimate
-    """
-    values = np.vstack((np.deg2rad(sample["dec"]), np.deg2rad(sample["ra"])))
+def KDE_xy(_tb_tgt, X, Y):
+    # calculate a single KDE
+    tgt_values = np.vstack((np.deg2rad(_tb_tgt["dec"]), np.deg2rad(_tb_tgt["ra"])))
     kde = KernelDensity(
         bandwidth=np.deg2rad(1.38 / 2.0),
         kernel="linear",
         algorithm="ball_tree",
         metric="haversine",
     )
-    kde.fit(values.T, sample_weight=sample["weight"])
+    kde.fit(tgt_values.T, sample_weight=_tb_tgt["weight"])
 
     X1 = np.deg2rad(X)
     Y1 = np.deg2rad(Y)
@@ -492,70 +406,53 @@ def KDE_xy(sample, X, Y):
     return Z
 
 
-def KDE(sample, multiProcesing):
-    """define binning and calculate KDE
-
-    Parameters
-    ==========
-    sample: table
-    multiProcesing: boolean
-        allow multiprocessing or not
-        (n_thread set to be the maximal threads allowed in the machine)
-
-    Returns
-    =======
-    ra_bin, dec_bin, significance of KDE over the field, ra of peak in KDE, dec of peak in KDE
-    """
-    if len(sample) == 1:
+def KDE(_tb_tgt, multiProcesing):
+    # define binning and calculate KDE
+    if len(_tb_tgt) == 1:
         # if only one target, set it as the peak
         return (
-            sample["ra"].data[0],
-            sample["dec"].data[0],
+            _tb_tgt["ra"].data[0],
+            _tb_tgt["dec"].data[0],
             np.nan,
-            sample["ra"].data[0],
-            sample["dec"].data[0],
+            _tb_tgt["ra"].data[0],
+            _tb_tgt["dec"].data[0],
         )
-
     else:
         # determine the binning for the KDE cal.
         # set a bin width of 0.5 deg in ra&dec if the sample spans over a wide area (>50 degree)
         # give some blank spaces in binning, otherwide KDE will be wrongly calculated
-        ra_low = min(min(sample["ra"]) * 0.9, min(sample["ra"]) - 1)
-        ra_up = max(max(sample["ra"]) * 1.1, max(sample["ra"]) + 1)
-        dec_up = max(max(sample["dec"]) * 1.1, max(sample["dec"]) + 1)
-        dec_low = min(min(sample["dec"]) * 0.9, min(sample["dec"]) - 1)
+        ra_low = min(min(_tb_tgt["ra"]) * 0.9, min(_tb_tgt["ra"]) - 1)
+        ra_up = max(max(_tb_tgt["ra"]) * 1.1, max(_tb_tgt["ra"]) + 1)
+        dec_up = max(max(_tb_tgt["dec"]) * 1.1, max(_tb_tgt["dec"]) + 1)
+        dec_low = min(min(_tb_tgt["dec"]) * 0.9, min(_tb_tgt["dec"]) - 1)
 
-        if (max(sample["ra"]) - min(sample["ra"])) / 100 < 0.5 and (
-            max(sample["dec"]) - min(sample["dec"])
+        if (max(_tb_tgt["ra"]) - min(_tb_tgt["ra"])) / 100 < 0.5 and (
+            max(_tb_tgt["dec"]) - min(_tb_tgt["dec"])
         ) / 100 < 0.5:
             X_, Y_ = np.mgrid[ra_low:ra_up:101j, dec_low:dec_up:101j]
-
-        elif (max(sample["dec"]) - min(sample["dec"])) / 100 < 0.5:
+        elif (max(_tb_tgt["dec"]) - min(_tb_tgt["dec"])) / 100 < 0.5:
             X_, Y_ = np.mgrid[0:360:721j, dec_low:dec_up:101j]
-
-        elif (max(sample["ra"]) - min(sample["ra"])) / 100 < 0.5:
+        elif (max(_tb_tgt["ra"]) - min(_tb_tgt["ra"])) / 100 < 0.5:
             X_, Y_ = np.mgrid[ra_low:ra_up:101j, -40:90:261j]
-
         else:
             X_, Y_ = np.mgrid[0:360:721j, -40:90:261j]
-
         positions1 = np.vstack([Y_.ravel(), X_.ravel()])
 
         if multiProcesing:
             threads_count = round(multiprocessing.cpu_count() / 2)
             thread_n = min(
-                threads_count, round(len(sample) * 0.5)
+                threads_count, round(len(_tb_tgt) * 0.5)
             )  # threads_count=10 in this machine
 
             with multiprocessing.Pool(thread_n) as p:
                 dMap_ = p.map(
-                    partial(KDE_xy, X=X_, Y=Y_), np.array_split(sample, thread_n)
+                    partial(KDE_xy, X=X_, Y=Y_), np.array_split(_tb_tgt, thread_n)
                 )
 
             Z = sum(dMap_)
 
         else:
-            Z = KDE_xy(sample, X_, Y_)
+            Z = KDE_xy(_tb_tgt, X_, Y_)
 
         # calculate significance level of KDE
         obj_dis_sig_ = (Z - np.mean(Z)) / np.std(Z)
@@ -569,57 +466,48 @@ def KDE(sample, multiProcesing):
         return X_, Y_, obj_dis_sig_, peak_x, peak_y
 
 
-def PPP_centers(
-    sample_f, nPPC, conta, contb, contc, randomseed, mutiPro=True, Print=True, Plot=True
-):
-    """determine pointing centers
-
-    Parameters
-    ==========
-    sample_f : table
-    mutiPro : boolean
-        allow multiprocessing to calculate KDE or not
-    conta,contb,contc: float
-        parameters of weighting scheme: conta--> science grade,>0;
-                                        contb--> remaining time;
-                                        contc--> local density
-
-    Returns
-    =======
-    sample with list of pointing centers in meta
-    """
-    np.random.seed(randomseed)
-    if Print:
-        print("######### Determine pointing centers")
-
+def PPP_centers(_tb_tgt, nPPC, weight_para, randomseed=0, mutiPro=True):
+    # determine pointing centers
     time_start = time.time()
-    Nfiber = int(2394 - 200)  # 200 for calibrators
-    sample_f = sciRank_pri(sample_f)
-    sample_f = count_N(sample_f)
-    sample_f = weight(sample_f, conta, contb, contc)
+    logger.info(f"[S2] Determine pointing centers started")
 
-    peak = []
-    peak_totPri = []
+    para_sci, para_exp, para_n = weight_para
 
-    for sample in target_DBSCAN(sample_f, 1.38, Print):
-        sample_s = sample[sample["exptime_PPP"] > 0]  # targets not finished
+    ppc_lst = []
 
-        while (
-            any(sample_s["exptime_PPP"] > 0) and len(peak) < nPPC
-        ):  # only for quick testing!!!
-            # while any(sample_s['exptime_PPP']>0):
-            # -------------------------------
-            ####peak_xy from KDE peak with weights
-            X_, Y_, obj_dis_sig_, peak_x, peak_y = KDE(sample_s, mutiPro)
+    if "PPC_origin" in _tb_tgt.meta.keys():
+        logger.warning(
+            f"[S2] PPCs from uploader adopted (takes {round(time.time()-time_start,3):.2f} sec)."
+        )
+        ppc_lst = _tb_tgt.meta["PPC"]
+        return ppc_lst
 
-            # -------------------------------
+    if len(_tb_tgt) == 0:
+        logger.warning(f"[S2] no targets")
+        return np.array(ppc_lst)
+
+    _tb_tgt = sciRank_pri(_tb_tgt)
+    _tb_tgt = count_N(_tb_tgt)
+    _tb_tgt = weight(_tb_tgt, para_sci, para_exp, para_n)
+
+    ppc_totPri = []
+
+    for _tb_tgt_t in target_DBSCAN(_tb_tgt, 1.38):
+        _tb_tgt_t_ = _tb_tgt_t[_tb_tgt_t["exptime_PPP"] > 0]  # targets not finished
+
+        ppc_totPri_sub = []
+        while any(_tb_tgt_t_["exptime_PPP"] > 0):
+            # peak_xy from KDE peak with weights -------------------------------
+            X_, Y_, obj_dis_sig_, peak_x, peak_y = KDE(_tb_tgt_t_, mutiPro)
+
+            # select targets falling in the PPC-------------------------------
             index_ = PFS_FoV(
-                peak_x, peak_y, 0, sample_s
+                peak_x, peak_y, 0, _tb_tgt_t_
             )  # all PA set to be 0 for simplicity
 
             if len(index_) > 0:
-                peak.append(
-                    [len(peak), peak_x, peak_y, 0]
+                ppc_lst.append(
+                    [len(ppc_lst), peak_x, peak_y, 0]
                 )  # ppc_id,ppc_ra,ppc_dec,ppc_PA=0
 
             else:
@@ -627,212 +515,190 @@ def PPP_centers(
                 while len(index_) == 0:
                     peak_x_t = peak_x + np.random.uniform(-0.15, 0.15, 1)[0]
                     peak_y_t = peak_y + np.random.uniform(-0.15, 0.15, 1)[0]
-                    index_ = PFS_FoV(peak_x_t, peak_y_t, 0, sample_s)
+                    index_ = PFS_FoV(peak_x_t, peak_y_t, 0, _tb_tgt_t_)
 
-                peak.append(
-                    [len(peak), peak_x_t, peak_y_t, 0]
+                ppc_lst.append(
+                    [len(ppc_lst), peak_x_t, peak_y_t, 0]
                 )  # ppc_id,ppc_ra,ppc_dec,ppc_PA=0
 
-            # -------------------------------
-            if len(index_) > Nfiber:
-                index_ = random.sample(list(index_), Nfiber)
-
-            sample_s["exptime_PPP"][
-                list(index_)
-            ] -= 900  # targets in the PPC observed with 900 sec
-
-            # add a small random so that PPCs determined would not have the totally same weights
-            peak_totPri.append(
-                sum(sample_s["weight"][list(index_)])
-                + np.random.uniform(-0.05, 0.05, 1)[0]
+            # run netflow to assign fibers for targets falling in the PPC-------------------------------
+            lst_tgtID_assign = netflowRun4PPC(
+                _tb_tgt_t_[list(index_)], ppc_lst[-1][1], ppc_lst[-1][2]
             )
 
-            sample_s = sample_s[sample_s["exptime_PPP"] > 0]  # targets not finished
-            sample_s = count_N(sample_s)
-            sample_s = weight(sample_s, conta, contb, contc)
+            index_assign = np.in1d(_tb_tgt_t_["identify_code"], lst_tgtID_assign)
+            _tb_tgt_t_["exptime_PPP"][
+                index_assign
+            ] -= 900  # targets in the PPC observed with 900 sec
 
-            # print("Point_{:3d}: {:5d}/{:10d} = {:.2f}% targets are finished.".\
-            #        format(len(peak),(len(sample)-len(sample_s)),len(sample),\
-            #                 100*(len(sample)-len(sample_s))/len(sample)))
+            # add a small random so that PPCs determined would not have totally same weights
+            weight_random = np.random.uniform(-0.05, 0.05, 1)[0]
+            ppc_totPri.append(sum(_tb_tgt_t_["weight"][index_assign]) + weight_random)
+            ppc_totPri_sub.append(
+                sum(_tb_tgt_t_["weight"][index_assign]) + weight_random
+            )
 
-    """if len(peak)>nPPC:
-        peak_totPri_limit=sorted(peak_totPri,reverse=True)[nPPC-1]
-        peak_fin=[peak[iii] for iii in range(len(peak)) if peak_totPri[iii]>=peak_totPri_limit]
+            if len(lst_tgtID_assign) == 0:
+                # quit if no targets assigned
+                break
+
+            if ppc_totPri_sub[-1] < ppc_totPri_sub[0] * 0.05:
+                # quit if ppc contains too limited targets
+                break
+
+            # -------------------------------
+            _tb_tgt_t_ = _tb_tgt_t_[
+                _tb_tgt_t_["exptime_PPP"] > 0
+            ]  # targets not finished
+            _tb_tgt_t_ = count_N(_tb_tgt_t_)
+            _tb_tgt_t_ = weight(_tb_tgt_t_, para_sci, para_exp, para_n)
+
+            print(
+                f"PPC_{len(ppc_lst):3d}: {len(_tb_tgt_t)-len(_tb_tgt_t_):5d}/{len(_tb_tgt_t):10d} targets are finished (w={ppc_totPri[-1]:.2f})."
+            )
+
+    if len(ppc_lst) > nPPC:
+        ppc_totPri_limit = sorted(ppc_totPri, reverse=True)[nPPC - 1]
+        ppc_lst_fin = [
+            ppc_lst[iii]
+            for iii in range(len(ppc_lst))
+            if ppc_totPri[iii] >= ppc_totPri_limit
+        ]
 
     else:
-        peak_fin=peak[:]#"""
-    peak_fin = peak[:]  # only for quick testing!!!
+        ppc_lst_fin = ppc_lst[:]
 
-    sample_f.meta["PPC"] = np.array(peak_fin)
+    logger.info(
+        f"[S2] Determine pointing centers done ( nppc = {len(ppc_lst_fin):.0f}; takes {round(time.time()-time_start,3)} sec)"
+    )
 
-    if Print:
-        print(f"#There are {len(peak_fin):5d} pointings determined.")
-        print(
-            f"######### Determine pointing centers DONE! (takes {round(time.time()-time_start,3)} sec)"
-        )
-
-    if Plot == True:
-        plt.plot(sample_f["ra"], sample_f["dec"], "ko", ms=2, zorder=10)
-
-        for ii in peak:
-            PFS_FoV_plot(ii[1], ii[2], 0, "c", 0.5, "-")
-        for ii in peak_fin:
-            PFS_FoV_plot(ii[1], ii[2], 0, "tomato", 0.5, "-")
-
-        plt.xlim(min(sample_f["ra"]) - 1, max(sample_f["ra"]) + 1)
-        plt.ylim(min(sample_f["dec"]) - 1, max(sample_f["dec"]) + 1)
-        plt.xlabel("RA", fontsize=10)
-        plt.ylabel("DEC", fontsize=10)
-        plt.show()
-
-    return sample_f
+    return np.array(ppc_lst_fin)
 
 
-def point_DBSCAN(sample, Plot, Print):
-    """separate pointings into different group
-
-    Parameters
-    ==========
-    sample:table
-    Plot, Print:boolean
-
-    Returns
-    =======
-    list of pointing centers in different group
+def ppc_DBSCAN(_tb_tgt):
+    # separate pointings into different group (skip due to FH upper limit -24-02-07; NEED TO FIX)
+    ppc_xy = _tb_tgt.meta["PPC"]
+    ppc_group = []
     """
-    ppc_xy = sample.meta["PPC"]
-
     # haversine uses (dec,ra) in radian;
-    db = DBSCAN(eps=np.radians(1.38), min_samples=1, metric="haversine").fit(
+    ppc_cluster = DBSCAN(eps=np.radians(1.38), min_samples=1, metric="haversine").fit(
         np.fliplr(np.radians(ppc_xy[:, [1, 2]]))
     )
 
-    labels = db.labels_
+    labels = ppc_cluster.labels_
     unique_labels = set(labels)
     n_clusters = len(unique_labels)
 
-    if Print:
-        print(
-            "#There are {:5d} pointings, they are grouped into {:5d} clusters.".format(
-                len(ppc_xy), n_clusters
-            )
-        )
-
-    if Plot:
-        colors = sns.color_palette(cc.glasbey_warm, n_clusters)
-
-    ppc_group = []
+    logger.info(f"[S3] There are {len(ppc_xy):5d} pointings, they are grouped into {n_clusters:5d} clusters.")
 
     for ii in range(n_clusters):
         ppc_t = ppc_xy[labels == ii]
         ppc_group.append(ppc_t)
 
-        if Plot:
-            xy = ppc_t[:, [1, 2]]
+    ppc_group.sort(key=lambda x: len(x), reverse=True)
+    #"""
 
-            for uu in xy:
-                PFS_FoV_plot(uu[0], uu[1], 0, colors[ii], 0.2, "-")
-                plt.plot(uu[0], uu[1], "o", mfc=colors[ii], mew=0, ms=5)
-
-            plt.show()
+    ppc_group.append(ppc_xy)
 
     return ppc_group
 
 
-def sam2netflow(sample):
-    """put targets to the format which can be read by netflow
-
-    Parameters
-    ==========
-    sample : table
-
-    Returns
-    =======
-    list of targets readable by netflow
-    """
-    targetL = []
+def sam2netflow(_tb_tgt, for_ppc=False):
+    # put targets to the format which can be read by netflow
+    tgt_lst_netflow = []
+    _tgt_lst_psl_id = []
 
     int_ = 0
-    for tt in sample:
-        id_, ra, dec, tm = (tt["identify_code"], tt["ra"], tt["dec"], tt["exptime_PPP"])
-        targetL.append(nf.ScienceTarget(id_, ra, dec, tm, int_, "sci"))
+    for tt in _tb_tgt:
+        if for_ppc:
+            # set exptime = 900s if running netflow to determine PPC
+            tgt_id_, tgt_ra_, tgt_dec_, tgt_exptime_, tgt_proposal_id_ = (
+                tt["identify_code"],
+                tt["ra"],
+                tt["dec"],
+                900,
+                tt["proposal_id"],
+            )
+        else:
+            tgt_id_, tgt_ra_, tgt_dec_, tgt_exptime_, tgt_proposal_id_ = (
+                tt["identify_code"],
+                tt["ra"],
+                tt["dec"],
+                tt["exptime_PPP"],
+                tt["proposal_id"],
+            )
+        tgt_lst_netflow.append(
+            nf.ScienceTarget(
+                tgt_id_,
+                tgt_ra_,
+                tgt_dec_,
+                tgt_exptime_,
+                int_,
+                "sci_" + tgt_proposal_id_,
+            )
+        )
+        _tgt_lst_psl_id.append("sci_" + tgt_proposal_id_ + "_P" + str(int(int_)))
         int_ += 1
 
-    # for ii in range(50): #mock Fstars
-    #    targetL.append(nf.CalibTarget('Fs_'+str(ii),0,0, "cal"))
+    # set FH limit bundle
+    tgt_psl_FH_tac_ = {}
 
-    # for jj in range(150):#mock skys
-    #    targetL.append(nf.CalibTarget('Sky_'+str(jj),0,0,"sky"))
+    if for_ppc == False:
+        psl_id = sorted(set(_tb_tgt["proposal_id"]))
 
-    return targetL
+        for psl_id_ in psl_id:
+            tt_ = tuple([tt for tt in _tgt_lst_psl_id if psl_id_ in tt])
+            tgt_psl_FH_tac_[tt_] = _tb_tgt[_tb_tgt["proposal_id"] == psl_id_][
+                "allocated_time"
+            ][0]
+
+    return tgt_lst_netflow, tgt_psl_FH_tac_
 
 
-def NetflowPreparation(sample):
-    """assign cost to each target
-
-    Parameters
-    ==========
-    sample : sample
-
-    Returns
-    =======
-    class of targets with costs
-    """
-
+def NetflowPreparation(_tb_tgt):
+    # assign cost to each target
     classdict = {}
 
     int_ = 0
-    for ii in sample:
-        classdict["sci_P" + str(int_)] = {
-            "nonObservationCost": ii["weight"],
-            "partialObservationCost": ii["weight"] * 1.5,
+    for tt in _tb_tgt:
+        classdict["sci_" + tt["proposal_id"] + "_P" + str(int_)] = {
+            "nonObservationCost": tt["weight"],
+            "partialObservationCost": tt["weight"] * 1.5,
             "calib": False,
         }
         int_ += 1
-
-    # classdict["sky"] = {"numRequired": 150,
-    #                    "nonObservationCost": max(sample['weight'])*1., "calib": True}
-
-    # classdict["cal"] = {"numRequired": 50,
-    #                    "nonObservationCost": max(sample['weight'])*1., "calib": True}
 
     return classdict
 
 
 def cobraMoveCost(dist):
-    """optional: penalize assignments where the cobra has to move far out"""
+    # optional: penalize assignments where the cobra has to move far out
     return 0.1 * dist
 
 
-def netflowRun_single(Tel, sample, TraCollision=False):
-    """run netflow (without iteration)
+def netflowRun_single(
+    ppc_lst,
+    _tb_tgt,
+    TraCollision=False,
+    numReservedFibers=0,
+    fiberNonAllocationCost=0.0,
+    otime="2024-05-20T08:00:00Z",
+    for_ppc=False,
+):
+    # run netflow (without iteration)
+    Telra = ppc_lst[:, 1]
+    Teldec = ppc_lst[:, 2]
+    Telpa = ppc_lst[:, 3]
 
-    Parameters
-    ==========
-    sample : sample
-    Tel: PPC info (id,ra,dec,PA)
-    TraCollision:
-        whether or not to check the collision of trajectory
-
-    Returns
-    =======
-    solution of Gurobi, PPC list
-    """
-    Telra = Tel[:, 1]
-    Teldec = Tel[:, 2]
-    Telpa = Tel[:, 3]
-
-    bench = Bench(layout="full")
-    tgt = sam2netflow(sample)
-    classdict = NetflowPreparation(sample)
-    otime = "2024-05-20T08:00:00Z"
+    tgt_lst_netflow, tgt_psl_FH_tac = sam2netflow(_tb_tgt, for_ppc)
+    classdict = NetflowPreparation(_tb_tgt)
 
     telescopes = []
 
     nvisit = len(Telra)
     for ii in range(nvisit):
         telescopes.append(nf.Telescope(Telra[ii], Teldec[ii], Telpa[ii], otime))
-    tpos = [tele.get_fp_positions(tgt) for tele in telescopes]
+    tpos = [tele.get_fp_positions(tgt_lst_netflow) for tele in telescopes]
 
     # optional: slightly increase the cost for later observations,
     # to observe as early as possible
@@ -845,14 +711,12 @@ def netflowRun_single(Tel, sample, TraCollision=False):
         degenmoves=0,
         heuristics=0.8,
         mipfocus=0,
-        mipgap=1.0e-2,
+        mipgap=5.0e-2,
         LogToConsole=0,
     )
 
-    # partially observed? no
-    alreadyObserved = {}
-
     forbiddenPairs = [[] for i in range(nvisit)]
+    alreadyObserved = {}
 
     if TraCollision:
         done = False
@@ -860,7 +724,7 @@ def netflowRun_single(Tel, sample, TraCollision=False):
             # compute observation strategy
             prob = nf.buildProblem(
                 bench,
-                tgt,
+                tgt_lst_netflow,
                 tpos,
                 classdict,
                 900,
@@ -872,6 +736,16 @@ def netflowRun_single(Tel, sample, TraCollision=False):
                 gurobiOptions=gurobiOptions,
                 alreadyObserved=alreadyObserved,
                 forbiddenPairs=forbiddenPairs,
+                cobraLocationGroup=cobra_location_group,
+                minSkyTargetsPerLocation=min_sky_targets_per_location,
+                locationGroupPenalty=location_group_penalty,
+                cobraInstrumentRegion=cobra_instrument_region,
+                minSkyTargetsPerInstrumentRegion=min_sky_targets_per_instrument_region,
+                instrumentRegionPenalty=instrument_region_penalty,
+                blackDotPenalty=black_dot_penalty_cost,
+                numReservedFibers=numReservedFibers,
+                fiberNonAllocationCost=fiberNonAllocationCost,
+                obsprog_time_budget=tgt_psl_FH_tac,
             )
 
             prob.solve()
@@ -900,7 +774,7 @@ def netflowRun_single(Tel, sample, TraCollision=False):
                 simulator = CollisionSimulator(bench, TargetGroup(selectedTargets, ids))
                 simulator.run()
                 if np.any(simulator.endPointCollisions):
-                    print(
+                    logger.error(
                         "ERROR: detected end point collision, which should be impossible"
                     )
                 coll_tidx = []
@@ -919,7 +793,7 @@ def netflowRun_single(Tel, sample, TraCollision=False):
         # compute observation strategy
         prob = nf.buildProblem(
             bench,
-            tgt,
+            tgt_lst_netflow,
             tpos,
             classdict,
             900,
@@ -931,6 +805,16 @@ def netflowRun_single(Tel, sample, TraCollision=False):
             gurobiOptions=gurobiOptions,
             alreadyObserved=alreadyObserved,
             forbiddenPairs=forbiddenPairs,
+            cobraLocationGroup=cobra_location_group,
+            minSkyTargetsPerLocation=min_sky_targets_per_location,
+            locationGroupPenalty=location_group_penalty,
+            cobraInstrumentRegion=cobra_instrument_region,
+            minSkyTargetsPerInstrumentRegion=min_sky_targets_per_instrument_region,
+            instrumentRegionPenalty=instrument_region_penalty,
+            blackDotPenalty=black_dot_penalty_cost,
+            numReservedFibers=numReservedFibers,
+            fiberNonAllocationCost=fiberNonAllocationCost,
+            obsprog_time_budget=tgt_psl_FH_tac,
         )
 
         prob.solve()
@@ -943,89 +827,108 @@ def netflowRun_single(Tel, sample, TraCollision=False):
                     _, _, tidx, cidx, ivis = k1.split("_")
                     res[int(ivis)][int(tidx)] = int(cidx)
 
-    return res, telescopes, tgt
+    return res, telescopes, tgt_lst_netflow
 
 
-def netflowRun_nofibAssign(Tel, sample, randomseed, Print=True, TraCollision=False):
-    """run netflow (with iteration)
-        if no fiber assignment in some PPCs, shift these PPCs with 0.15 deg
+def netflowRun_nofibAssign(
+    ppc_lst,
+    _tb_tgt,
+    for_ppc=False,
+    randomseed=0,
+    TraCollision=False,
+    numReservedFibers=0,
+    fiberNonAllocationCost=0.0,
+):
+    # run netflow (with iteration)
+    #    if no fiber assignment in some PPCs, shift these PPCs with 0.15 deg
+    # (skip due to FH upper limit -24-02-07; NEED TO FIX)
 
-    Parameters
-    ==========
-    sample : sample
-    Tel: PPC info (id,ra,dec,PA)
-    randomseed
-    TraCollision:
-        whether or not to check the collision of trajectory
+    otime_ = "2024-05-20T08:00:00Z"
 
-    Returns
-    =======
-    solution of Gurobi, PPC list
+    res, telescope, tgt_lst_netflow = netflowRun_single(
+        ppc_lst,
+        _tb_tgt,
+        TraCollision,
+        numReservedFibers,
+        fiberNonAllocationCost,
+        otime_,
+        for_ppc,
+    )
+    return res, telescope, tgt_lst_netflow
+
     """
-
-    np.random.seed(randomseed)
-
-    res, telescope, tgt = netflowRun_single(Tel, sample, TraCollision)
-
     if sum(np.array([len(tt) for tt in res]) == 0) == 0:
         # All PPCs have fiber assignment
-        return res, telescope, tgt
+        return res, telescope, tgt_lst_netflow
 
     else:
         # if there are PPCs with no fiber assignment
         index = np.where(np.array([len(tt) for tt in res]) == 0)[0]
 
-        Tel_t = np.array([tt for tt in Tel])
-
+        ppc_lst = np.array(ppc_lst)
+        ppc_lst_t = np.copy(ppc_lst)
+        
         iter_1 = 0
 
-        shift = [-0.15, 0.15]
-
-        while len(index) > 0 and iter_1 < 5:
-            # shift PPCs with 0.2 deg, but only run three iterations to save computational time
+        while len(index) > 0 and iter_1 < 8:
+            # shift PPCs with 0.2 deg, but only run 8 iterations to save computational time
             # typically one iteration is enough
 
-            if Print:
-                print(
-                    f"#Now re-assigning fibers to PPCs with no fiber assigned, iter {iter_1+1:3d}"
-                )
+            logger.info(f"[S3] Re-assign fibers to PPCs without fiber assignment (iter {iter_1+1:.0f}/8)")
 
-            for ind in index:
-                Tel_t[ind, 1] = Tel[ind, 1] + np.random.choice(shift, 1)[0]
-                Tel_t[ind, 2] = Tel[ind, 2] + np.random.choice(shift, 1)[0]
+            shift_ra = np.random.choice([-0.3, -0.2, -0.1, 0.1, 0.2, 0.3], 1)[0]
+            shift_dec = np.random.choice([-0.3, -0.2, -0.1, 0.1, 0.2, 0.3], 1)[0]
 
-            res, telescope, tgt = netflowRun_single(Tel_t, sample, TraCollision)
+            ppc_lst_t[index,1] = ppc_lst[index,1] + shift_ra
+            ppc_lst_t[index,2] = ppc_lst[index,2] + shift_dec
+
+            res, telescope, tgt_lst_netflow = netflowRun_single(
+                ppc_lst_t, 
+                _tb_tgt, 
+                TraCollision, 
+                numReservedFibers, 
+                fiberNonAllocationCost, 
+                otime_,
+                for_ppc
+            )
 
             index = np.where(np.array([len(tt) for tt in res]) == 0)[0]
 
             iter_1 += 1
 
-        return res, telescope, tgt
+            if iter_1 >= 4:
+                otime_ = "2024-04-20T08:00:00Z"#"""
 
 
-def netflowRun(sample, randomseed, Print=True, TraCollision=False):
-    """run netflow (with iteration and DBSCAN)
+def netflowRun(
+    _tb_tgt,
+    randomseed=0,
+    TraCollision=False,
+    numReservedFibers=0,
+    fiberNonAllocationCost=0.0,
+):
+    # run netflow (with iteration and DBSCAN)
 
-    Parameters
-    ==========
-    sample : sample
-
-    Returns
-    =======
-    Fiber assignment in each PPC
-    """
     time_start = time.time()
+    logger.info("[S3] Run netflow started")
 
-    if Print:
-        print("######### Start running netflow to assign fibers")
+    if ("PPC" not in _tb_tgt.meta.keys()) or (len(_tb_tgt.meta["PPC"]) == 0):
+        logger.warning("[S3] No PPC has been determined")
+        ppc_lst = []
+        return ppc_lst
 
-    ppc_g = point_DBSCAN(sample, False, Print)  # separate ppc into different groups
+    if len(_tb_tgt) == 0:
+        logger.warning("[S3] No targets")
+        ppc_lst = []
+        return ppc_lst
 
-    point_list = []
+    ppc_g = ppc_DBSCAN(_tb_tgt)  # separate ppc into different groups
+
+    ppc_lst = []
 
     for uu in range(len(ppc_g)):  # run netflow for each ppc group
         # only consider sample in the group
-        sample_index = list(
+        _index = list(
             chain.from_iterable(
                 [
                     list(
@@ -1033,78 +936,82 @@ def netflowRun(sample, randomseed, Print=True, TraCollision=False):
                             ppc_g[uu][iii, 1],
                             ppc_g[uu][iii, 2],
                             ppc_g[uu][iii, 3],
-                            sample,
+                            _tb_tgt,
                         )
                     )
                     for iii in range(len(ppc_g[uu]))
                 ]
             )
         )
-        if len(sample_index) == 0:
+
+        if len(_index) == 0:
             continue
-        sample_inuse = sample[list(set(sample_index))]
+        _tb_tgt_inuse = _tb_tgt[list(set(_index))]
 
-        if Print:
-            print(
-                "#Now is Group {:3d}, it contains {:5d} pointings, and {:6d} targets.".format(
-                    uu + 1, len(ppc_g[uu]), len(sample_inuse)
-                )
-            )
+        logger.info(
+            f"[S3] Group {uu + 1:3d}: nppc = {len(ppc_g[uu]):5d}, n_tgt = {len(_tb_tgt_inuse):6d}"
+        )
 
-        res, telescope, tgt = netflowRun_nofibAssign(
-            ppc_g[uu], sample_inuse, randomseed, Print, TraCollision
+        res, telescope, tgt_lst_netflow = netflowRun_nofibAssign(
+            ppc_g[uu],
+            _tb_tgt_inuse,
+            False,
+            randomseed,
+            TraCollision,
+            numReservedFibers,
+            fiberNonAllocationCost,
         )
 
         for i, (vis, tel) in enumerate(zip(res, telescope)):
-            fib_eff_t = len(vis) / 2394.0 * 100
+            ppc_fib_eff = len(vis) / 2394.0 * 100
 
-            if Print:
-                print("exposure {}:".format(i))
-                print("  assigned Cobras(%): {:.2f}%".format(fib_eff_t))
+            logger.info(f"PPC {i:4d}: {ppc_fib_eff:.2f}% assigned Cobras")
 
             # assigned targets in each ppc
-            obj_allo_id = []
+            tgt_assign_id_lst = []
             for tidx, cidx in vis.items():
-                obj_allo_id.append(tgt[tidx].ID)
+                tgt_assign_id_lst.append(tgt_lst_netflow[tidx].ID)
 
             # calculate the total weights in each ppc (smaller value means more important)
             if len(vis) == 0:
-                tot_weight = np.nan
+                ppc_tot_weight = np.nan
 
             else:
-                tot_weight = 1 / sum(
-                    sample[np.in1d(sample["identify_code"], obj_allo_id)]["weight"]
+                ppc_tot_weight = 1 / sum(
+                    _tb_tgt[np.in1d(_tb_tgt["identify_code"], tgt_assign_id_lst)][
+                        "weight"
+                    ]
                 )
 
-            point_list.append(
+            ppc_lst.append(
                 [
-                    "Point_"
-                    + sample["resolution"][0]
+                    "PPC_"
+                    + _tb_tgt["resolution"][0]
                     + "_"
                     + str(int(time.time() * 1e7))[-8:],
                     "Group_" + str(uu + 1),
                     tel._ra,
                     tel._dec,
                     tel._posang,
-                    tot_weight,
-                    fib_eff_t,
-                    obj_allo_id,
-                    sample["resolution"][0],
+                    ppc_tot_weight,
+                    ppc_fib_eff,
+                    tgt_assign_id_lst,
+                    _tb_tgt["resolution"][0],
                 ]
             )
 
-    point_t = Table(
-        np.array(point_list, dtype=object),
+    tb_ppc_netflow = Table(
+        np.array(ppc_lst, dtype=object),
         names=[
-            "point_id",
+            "ppc_code",
             "group_id",
-            "tel_ra",
-            "tel_dec",
-            "tel_pa",
-            "tel_priority",
-            "tel_fiber_usage_frac",
-            "allocated_targets",
-            "resolution",
+            "ppc_ra",
+            "ppc_dec",
+            "ppc_pa",
+            "ppc_priority",
+            "ppc_fiber_usage_frac",
+            "ppc_allocated_targets",
+            "ppc_resolution",
         ],
         dtype=[
             np.str_,
@@ -1119,149 +1026,146 @@ def netflowRun(sample, randomseed, Print=True, TraCollision=False):
         ],
     )
 
-    if Print:
-        print(
-            "######### Run netflow DONE! (takes",
-            round(time.time() - time_start, 3),
-            "sec)",
-        )
+    tb_ppc_netflow["ppc_priority"] = (
+        tb_ppc_netflow["ppc_priority"] / max(tb_ppc_netflow["ppc_priority"]) * 1e3
+    )
 
-    return point_t
+    logger.info(
+        f"[S3] Run netflow done (takes {round(time.time() - time_start, 3)} sec)"
+    )
+
+    return tb_ppc_netflow
 
 
-def netflowAssign(sample, point_l):
-    """check fiber assignment of targets
+def netflowRun4PPC(
+    _tb_tgt_inuse,
+    ppc_x,
+    ppc_y,
+):
+    # run netflow (for PPP_centers)
+    ppc_lst = np.array([[0, ppc_x, ppc_y, 0]])
 
-    Parameters
-    ==========
-    sample : sample
-    point_l : ppc list
+    res, telescope, tgt_lst_netflow = netflowRun_nofibAssign(
+        ppc_lst, _tb_tgt_inuse, True
+    )
 
-    Returns
-    =======
-    sample with allocated time by netflow added
-    """
-    if "Netflow_time" in sample.colnames:
-        sample.remove_column("Netflow_time")
-    sample.add_column(0, name="Netflow_time")
-    sample["ppc_code"] = ""
-    sample["obj_id"] = np.arange(len(sample))
+    for i, (vis, tel) in enumerate(zip(res, telescope)):
+        # assigned targets in each ppc
+        tgt_assign_id_lst = []
+        for tidx, cidx in vis.items():
+            tgt_assign_id_lst.append(tgt_lst_netflow[tidx].ID)
+
+    return tgt_assign_id_lst
+
+
+def netflowAssign(_tb_tgt, _tb_ppc):
+    # check fiber assignment of targets
+    if len(_tb_ppc) == 0:
+        # no ppc
+        return _tb_tgt
+
+    _tb_tgt["exptime_assign"] = 0
 
     # sort ppc by its total priority == sum(weights of the assigned targets in ppc)
-    point_l_pri = point_l[point_l.argsort(keys="tel_priority")]
+    _tb_ppc_pri = _tb_ppc[_tb_ppc.argsort(keys="ppc_priority")]
 
     # targets with allocated fiber
-    for ppc in point_l_pri:
+    for ppc_t in _tb_ppc_pri:
         lst = np.where(
-            np.in1d(sample["identify_code"], ppc["allocated_targets"]) == True
+            np.in1d(_tb_tgt["identify_code"], ppc_t["ppc_allocated_targets"]) == True
         )[0]
-        sample["Netflow_time"].data[lst] += 900
-        sample["ppc_code"].data[lst] = [ppc["point_id"] for _ in lst]
+        _tb_tgt["exptime_assign"].data[lst] += 900
 
-    return sample
+    return _tb_tgt
 
 
 def netflow_iter(
-    uS,
-    obj_allo,
-    conta,
-    contb,
-    contc,
-    nppc,
-    randomseed,
-    PrintTF=True,
-    PlotTF=True,
+    _tb_tgt,
+    _tb_ppc_netflow,
+    weight_para,
+    nPPC,
+    randomseed=0,
     TraCollision=False,
+    numReservedFibers=0,
+    fiberNonAllocationCost=0.0,
 ):
-    """iterate the total procedure to re-assign fibers to targets which have not been assigned
-        in the previous/first iteration
-
-    Parameters
-    ==========
-    uS: table
-        sample with exptime>allocate_time
-
-    obj_allo: table
-        ppc information
-
-    conta,contb,contc: float
-        weight parameters
-
-    nppc: int
-        number of PPC given
-
-    PrintTF,PlotTF: boolean , default==True
-
-    TraCollision: boolean, default==False
-
-    Returns
-    =======
-    table of ppc information after all targets are assigned
+    # iterate the total procedure to re-assign fibers to targets which have not been assigned in the previous/first iteration
     # note that some targets in the dense region may need very long time to be assigned with fibers
-        # if targets can not be successfully assigned with fibers in >10 iterations, then directly stop
-        # if total number of ppc > nppc, then directly stop
-    """
-    obj_allo.remove_rows(np.where(obj_allo["tel_fiber_usage_frac"] == 0)[0])
+    # if targets can not be successfully assigned with fibers in >10 iterations, then directly stop
+    # if total number of ppc > nPPC, then directly stop
 
-    if sum(uS["Netflow_time"] == uS["exptime_PPP"]) == len(uS) or len(obj_allo) >= nppc:
-        # remove ppc with no fiber assignment
-        return obj_allo
+    if len(_tb_tgt) == 0 or len(_tb_ppc_netflow) == 0:
+        return _tb_ppc_netflow
+
+    if (
+        sum(_tb_tgt["exptime_assign"] == _tb_tgt["exptime_PPP"]) == len(_tb_tgt)
+        or len(_tb_ppc_netflow) >= nPPC
+    ):
+        # remove ppc with fiber assignment < 0.1%
+        _tb_ppc_netflow.remove_rows(
+            np.where(_tb_ppc_netflow["ppc_fiber_usage_frac"] < 0.1)[0]
+        )
+        return _tb_ppc_netflow
 
     else:
+        _tb_ppc_netflow.remove_rows(
+            np.where(_tb_ppc_netflow["ppc_fiber_usage_frac"] == 0)[0]
+        )
+        return _tb_ppc_netflow
+        """ skip due to FH upper limit -24-02-07 NEED TO FIX
         #  select non-assigned targets --> PPC determination --> netflow --> if no fibre assigned: shift PPC
         iter_m2 = 0
 
-        while any(uS["Netflow_time"] < uS["exptime_PPP"]) and iter_m2 < 10:
-            uS_t1 = uS[uS["Netflow_time"] < uS["exptime_PPP"]]
-            uS_t1["exptime_PPP"] = (
-                uS_t1["exptime_PPP"] - uS_t1["Netflow_time"]
+        while any(_tb_tgt["exptime_assign"] < _tb_tgt["exptime_PPP"]):
+            _tb_tgt_t1 = _tb_tgt[_tb_tgt["exptime_assign"] < _tb_tgt["exptime_PPP"]]
+            _tb_tgt_t1["exptime_PPP"] = (
+                _tb_tgt_t1["exptime_PPP"] - _tb_tgt_t1["exptime_assign"]
             )  # remained exposure time
 
-            uS_t2 = PPP_centers(
-                uS_t1,
-                nppc - len(obj_allo),
-                conta,
-                contb,
-                contc,
+            _tb_ppc_netflow.remove_rows(np.where(_tb_ppc_netflow["ppc_fiber_usage_frac"] == 0)[0])
+            _tb_tgt_t2 = PPP_centers(
+                _tb_tgt_t1,
+                nPPC - len(_tb_ppc_netflow),
+                weight_para,
                 randomseed,
-                True,
-                PrintTF,
-                PlotTF,
             )
 
-            obj_allo_t = netflowRun(uS_t2, randomseed, PrintTF, TraCollision)
+            _tb_ppc_netflow_t = netflowRun(
+                _tb_tgt_t2, 
+                randomseed, 
+                TraCollision, 
+                numReservedFibers, 
+                fiberNonAllocationCost, 
+            )
 
-            if len(obj_allo) >= nppc or iter_m2 >= 10:
-                # stop if n_ppc>200
-                return obj_allo
+            if len(_tb_ppc_netflow) >= nPPC or iter_m2 >= 10:
+                # stop if n_ppc exceeds the requirment
+                return _tb_ppc_netflow
 
             else:
-                obj_allo = vstack([obj_allo, obj_allo_t])
-                obj_allo.remove_rows(np.where(obj_allo["tel_fiber_usage_frac"] == 0)[0])
-
-                uS = netflowAssign(uS_t2, obj_allo)
-
+                _tb_ppc_netflow = vstack([_tb_ppc_netflow, _tb_ppc_netflow_t])
+                _tb_ppc_netflow.remove_rows(np.where(_tb_ppc_netflow["ppc_fiber_usage_frac"] == 0)[0])
+                _tb_tgt = netflowAssign(_tb_tgt, _tb_ppc_netflow)
+            
                 iter_m2 += 1
+                
+        return _tb_ppc_netflow 
+        #"""
 
-        return obj_allo
 
-
-def complete_ppc(sample, mode):
+def complete_ppc(_tb_tgt, mode):
     """check completion rate
 
     Parameters
     ==========
-    sample : sample
+    _tb_tgt : sample
 
     mode :
         "compOFtgt_weighted" -- completion = (weight(finished) + 0.5 * weight(partial)) / weight(tgt_all)
 
-        "compOFtgt"          -- completion = (N(finished) + 0.5 * N(partial)) / N(tgt_all)
+        "compOFtgt_n"          -- completion = (N(finished) + 0.5 * N(partial)) / N(tgt_all)
 
-        "compOFpsl_m1"       -- completion = mean(completion_psl)
-                                #completion_psl_i= N(finished) / N(tgt) in psl i
-
-        "compOFpsl_ra"       -- completion in count, completion in ratio, list of (psl_id, rank) ordered by rank
+        "compOFpsl_n"       -- completion in count, completion in ratio, list of (psl_id, rank) ordered by rank
 
     Returns
     =======
@@ -1270,50 +1174,50 @@ def complete_ppc(sample, mode):
 
     if mode == "compOFtgt_weighted":
         # finished
-        index_allo = np.where(sample["exptime_PPP"] == sample["Netflow_time"])[0]
+        index_allo = np.where(_tb_tgt["exptime_PPP"] == _tb_tgt["exptime_assign"])[0]
 
         if len(index_allo) == 0:
             weight_allo = 0
 
         else:
-            weight_allo = sum(sample[index_allo]["weight"])
+            weight_allo = sum(_tb_tgt[index_allo]["weight"])
 
         # patrly observed
         index_part = np.where(
-            (sample["exptime_PPP"] > sample["Netflow_time"])
-            & (sample["Netflow_time"] > 0)
+            (_tb_tgt["exptime_PPP"] > _tb_tgt["exptime_assign"])
+            & (_tb_tgt["exptime_assign"] > 0)
         )[0]
 
         if len(index_part) > 0:
-            weight_allo += 0.5 * sum(sample[index_part]["weight"])
+            weight_allo += 0.5 * sum(_tb_tgt[index_part]["weight"])
 
-        weight_tot = sum(sample["weight"])
+        weight_tot = sum(_tb_tgt["weight"])
 
         comp = weight_allo / weight_tot
 
         return comp
 
-    elif mode == "compOFtgt":
+    elif mode == "compOFtgt_n":
         # finished
-        index_allo = np.where(sample["exptime_PPP"] == sample["Netflow_time"])[0]
+        index_allo = np.where(_tb_tgt["exptime_PPP"] == _tb_tgt["exptime_assign"])[0]
         weight_allo = len(index_allo)
 
         # patrly observed
         index_part = np.where(
-            (sample["exptime_PPP"] > sample["Netflow_time"])
-            & (sample["Netflow_time"] > 0)
+            (_tb_tgt["exptime_PPP"] > _tb_tgt["exptime_assign"])
+            & (_tb_tgt["exptime_assign"] > 0)
         )[0]
         weight_allo += 0.5 * len(index_part)
 
-        comp = weight_allo / len(sample)
+        comp = weight_allo / len(_tb_tgt)
 
         return comp
 
-    elif mode[:-3] == "compOFpsl":
+    elif mode == "compOFpsl_n":
         # proposal list
-        listPsl_ = list(set(sample["proposal_id"]))
+        listPsl_ = list(set(_tb_tgt["proposal_id"]))
 
-        PslRank_ = [sample[sample["proposal_id"] == kk]["rank"][0] for kk in listPsl_]
+        PslRank_ = [_tb_tgt[_tb_tgt["proposal_id"] == kk]["rank"][0] for kk in listPsl_]
         rank_index = reversed(np.argsort(PslRank_))
 
         listPsl = [
@@ -1331,18 +1235,20 @@ def complete_ppc(sample, mode):
 
         comp_tot = 0
         for jj in range(n_psl):
-            sample_t = sample[sample["proposal_id"] == listPsl[jj][0]]
+            _tb_tgt_t = _tb_tgt[_tb_tgt["proposal_id"] == listPsl[jj][0]]
 
             count_sub = (
-                [sum(sample_t["priority"] == ll) for ll in sub_l]
-                + [len(sample_t)]
-                + [len(sample)]
+                [sum(_tb_tgt_t["priority"] == ll) for ll in sub_l]
+                + [len(_tb_tgt_t)]
+                + [len(_tb_tgt)]
             )
 
-            comp_psl = np.where(sample_t["exptime_PPP"] == sample_t["Netflow_time"])[0]
+            comp_psl = np.where(
+                _tb_tgt_t["exptime_PPP"] == _tb_tgt_t["exptime_assign"]
+            )[0]
             comp_tot += len(comp_psl)
             comT_t = (
-                [sum(sample_t["priority"][comp_psl] == ll) for ll in sub_l]
+                [sum(_tb_tgt_t["priority"][comp_psl] == ll) for ll in sub_l]
                 + [len(comp_psl)]
                 + [comp_tot]
             )
@@ -1352,27 +1258,13 @@ def complete_ppc(sample, mode):
                 [comT_t[oo] / count_sub[oo] for oo in range(len(count_sub))]
             )
 
-        if mode[-3:] == "_m1":
-            return np.mean(np.array(comRatio_sub_psl)[:, -2])
-
-        elif mode[-3:] == "_ra":
-            return np.array(comN_sub_psl), np.array(comRatio_sub_psl), np.array(listPsl)
+        return np.array(comN_sub_psl), np.array(comRatio_sub_psl), np.array(listPsl)
 
 
-def PPC_efficiency(point_l):
-    """calculate fiber allocation efficiency
+def PPC_efficiency(tab_ppc_netflow):
+    # calculate fiber allocation efficiency
 
-    Parameters
-    ==========
-    point_l: table of ppc information
-
-    Returns
-    =======
-    fiber allocation efficiency in each PPC,
-    average of fiber allocation efficiency / max,
-    average fiber allocation efficiency
-    """
-    fib_eff = point_l["tel_fiber_usage_frac"].data  # unit --> %
+    fib_eff = tab_ppc_netflow["ppc_fiber_usage_frac"].data  # unit --> %
 
     if max(fib_eff) == 0:
         return fib_eff, 0, 0
@@ -1399,88 +1291,79 @@ def fun2opt(para, info):
 
         randomSeed -- random seed for np.random
 
-        comMode -- the same with complete_ppc
+        crMode -- the same with complete_ppc
 
         checkTraCollision -- boolean; whether or not to allow netflow to check collision of trajectory
-
-        print -- boolean; print results or not
-        iter1_n
 
     Returns
     =======
     (2 - average_fibEfficiency_L - average_completion_L) + (2 - average_fibEfficiency_M - average_completion_M)
     """
-    conta, contb, contc = para
+    para_sci, para_exp, para_n = para
 
-    uS, uS_L, uS_M = info["samp"]
+    _tb_tgt, _tb_tgt_l, _tb_tgt_m = info["tb_tgt"]
 
-    nppc_l = info["nPPC_L"]
-    nppc_m = info["nPPC_M"]
+    nppc_l = info["nPPC_l"]
+    nppc_m = info["nPPC_m"]
 
-    index_op1 = info["iter1_n"]
+    index_op1 = info["iter"]
     randomseed = info["randomSeed"]
 
-    printTF = info["print"]
     TraCollision = info["checkTraCollision"]
 
-    completeMode = info["comMode"]
+    completeMode = info["crMode"]
 
     # --------------------
     tem1 = 0
     tem2 = 0
+
     mfibEff1 = 0
-    compl1 = 0
+    CR_fin1 = 0
     mfibEff2 = 0
-    compl2 = 0
+    CR_fin2 = 0
 
-    if len(uS_L) > 0:
-        uS_L1 = PPP_centers(
-            uS_L, nppc_l, conta, contb, contc, randomseed, True, False, False
-        )
+    if len(_tb_tgt_l) > 0:
+        _tb_tgt_l1 = PPP_centers(_tb_tgt_l, nppc_l, para, randomseed, True)
 
-        obj_allo_L = netflowRun(uS_L1, randomseed, False, TraCollision)
+        _tb_ppc_netflow_l = netflowRun(_tb_tgt_l1, randomseed)
 
-        uS_L1 = netflowAssign(uS_L1, obj_allo_L)
+        _tb_tgt_l1 = netflowAssign(_tb_tgt_l1, _tb_ppc_netflow_l)
 
-        compl1 = complete_ppc(uS_L1, completeMode)
+        CR_l = complete_ppc(_tb_tgt_l1, completeMode)
 
-        mfibEff1 = PPC_efficiency(obj_allo_L)[1]  # mean of fib/max(fib)
+        CR_fin1 = sum(CR_l[-2][:, -2]) / len(CR_l[-1])
 
-        tem1 = 2 - (mfibEff1 + compl1)
+        mfibEff1 = PPC_efficiency(_tb_ppc_netflow_l)[2]  # mean of fib --/max(fib)--
 
-    if len(uS_M) > 0:
-        uS_M1 = PPP_centers(
-            uS_M, nppc_m, conta, contb, contc, randomseed, True, False, False
-        )
-        obj_allo_M = netflowRun(uS_M1, randomseed, False, TraCollision)
+        tem1 = 200 - (mfibEff1 + CR_fin1) * 100
 
-        uS_M1 = netflowAssign(uS_M1, obj_allo_M)
+    if len(_tb_tgt_m) > 0:
+        _tb_tgt_m1 = PPP_centers(_tb_tgt_m, nppc_m, para, randomseed, True)
 
-        compl2 = complete_ppc(uS_M1, completeMode)
+        _tb_ppc_netflow_m = netflowRun(_tb_tgt_m1, randomseed)
 
-        mfibEff2 = PPC_efficiency(obj_allo_M)[1]
+        _tb_tgt_m1 = netflowAssign(_tb_tgt_m1, _tb_ppc_netflow_m)
 
-        tem2 = 2 - (mfibEff2 + compl2)
+        CR_m = complete_ppc(_tb_tgt_m1, completeMode)
 
-    if printTF:
-        print(
-            f"#Iter {info['iter1_n']+1:3d}, now para is [{conta:.3f}, {contb:.3f}, {contc:.3f}]; objV is {mfibEff1:.3f} {compl1:.3f} (low-mode) {mfibEff2:.3f} {compl2:.3f} (medium-mode) {tem1+tem2:.3f} (total)."
-        )
+        CR_fin2 = sum(CR_m[-2][:, -2]) / len(CR_m[-1])
 
-    info["iter1_n"] += 1
+        mfibEff2 = PPC_efficiency(_tb_ppc_netflow_m)[2]  # mean of fib --/max(fib)--
+
+        tem2 = 200 - (mfibEff2 + CR_fin2) * 100
+
+    logger.info(
+        f"[S4] Iter {info['iter']+1:.0f}, w_para is [{para_sci:.3f}, {para_exp:.3f}, {para_n:.3f}]; \
+                objV is {mfibEff1:.2f} {CR_fin1:.2f} (low-mode) {mfibEff2:.2f} {CR_fin2:.2f} (medium-mode) {tem1+tem2:.2f} (total)."
+    )
+
+    info["iter"] += 1
 
     return tem1 + tem2
 
 
-def iter1(
-    samp,
-    weight_initialGuess,
-    nppc_l,
-    nppc_m,
-    commode,
-    randomSeed,
-    TraCollision,
-    printTF,
+def iter_weight(
+    _tb_tgt, weight_initialGuess, nppc_l, nppc_m, crMode, randomSeed, TraCollision
 ):
     """optimize the weighting scheme
 
@@ -1495,7 +1378,7 @@ def iter1(
 
     randomSeed -- random seed for np.random
 
-    commode -- the same with complete_ppc
+    crmode -- the same with complete_ppc
 
     TraCollision -- boolean; whether or not to allow netflow to check collision of trajectory
 
@@ -1505,23 +1388,21 @@ def iter1(
     =======
     the optimal weighting scheme [conta, b, c]
     """
-    if printTF:
-        time_s = time.time()
-        print("####### Optimization 1 (weighting scheme) starts.")
+    time_s = time.time()
+    logger.info("[S4] Optimization started")
 
     best_weight = opt.fmin(
         fun2opt,
         weight_initialGuess,
-        xtol=0.01,
-        ftol=0.01,
+        xtol=0.1,
+        ftol=0.1,
         args=(
             {
-                "samp": samp,
-                "nPPC_L": nppc_l,
-                "nPPC_M": nppc_m,
-                "print": printTF,
-                "comMode": commode,
-                "iter1_n": 0,
+                "tb_tgt": _tb_tgt,
+                "nPPC_l": nppc_l,
+                "nPPC_m": nppc_m,
+                "crMode": crMode,
+                "iter": 0,
                 "randomSeed": randomSeed,
                 "checkTraCollision": TraCollision,
             },
@@ -1532,37 +1413,36 @@ def iter1(
         maxiter=200,
         maxfun=200,
     )
-    if printTF:
-        print(
-            f"####### Optimization 1 (weighting scheme) DONE! (takes {time.time()-time_s:.3f} sec)"
-        )
+
+    logger.info(f"[S4] Optimization done (takes {time.time()-time_s:.3f} sec)")
 
     return best_weight
 
 
-def output(obj_allo_tot, uS_tot, dirName="."):
+def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
     """write outputs into ecsv files
 
     Parameters
     ==========
-    obj_allo_tot: table of ppc information
-    uS_tot: table of targets
+    _tb_ppc_tot: table of ppc information
+    _tb_tgt_tot: table of targets
 
     Returns
     =======
     ppcList & obList in output/ folder
     """
-    ppc_code = obj_allo_tot["point_id"].data
-    ppc_ra = obj_allo_tot["tel_ra"].data
-    ppc_dec = obj_allo_tot["tel_dec"].data
-    ppc_pa = obj_allo_tot["tel_pa"].data
-    ppc_equinox = ["J2000"] * len(obj_allo_tot)
-    ppc_priority = obj_allo_tot["tel_priority"].data
-    ppc_exptime = [900] * len(obj_allo_tot)
-    ppc_totaltime = [900 + 240] * len(obj_allo_tot)
-    ppc_resolution = obj_allo_tot["resolution"].data
-    ppc_fibAlloFrac = obj_allo_tot["tel_fiber_usage_frac"].data
-    ppc_comment = [" "] * len(obj_allo_tot)
+    ppc_code = _tb_ppc_tot["ppc_code"].data
+    ppc_ra = _tb_ppc_tot["ppc_ra"].data
+    ppc_dec = _tb_ppc_tot["ppc_dec"].data
+    ppc_pa = _tb_ppc_tot["ppc_pa"].data
+    ppc_equinox = ["J2000"] * len(_tb_ppc_tot)
+    ppc_priority = _tb_ppc_tot["ppc_priority"].data
+    ppc_exptime = [900] * len(_tb_ppc_tot)
+    ppc_totaltime = [900 + 240] * len(_tb_ppc_tot)
+    ppc_resolution = _tb_ppc_tot["ppc_resolution"].data
+    ppc_fibAlloFrac = _tb_ppc_tot["ppc_fiber_usage_frac"].data
+    ppc_tgtAllo = _tb_ppc_tot["ppc_allocated_targets"].data
+    ppc_comment = [" "] * len(_tb_ppc_tot)
 
     ppcList = Table(
         [
@@ -1576,6 +1456,7 @@ def output(obj_allo_tot, uS_tot, dirName="."):
             ppc_totaltime,
             ppc_resolution,
             ppc_fibAlloFrac,
+            ppc_tgtAllo,
             ppc_comment,
         ],
         names=[
@@ -1588,7 +1469,8 @@ def output(obj_allo_tot, uS_tot, dirName="."):
             "ppc_exptime",
             "ppc_totaltime",
             "ppc_resolution",
-            "ppc_fibAlloFrac",
+            "ppc_fiber_usage_frac",
+            "ppc_allocated_targets",
             "ppc_comment",
         ],
     )
@@ -1597,22 +1479,21 @@ def output(obj_allo_tot, uS_tot, dirName="."):
         os.path.join(dirName, "ppcList.ecsv"), format="ascii.ecsv", overwrite=True
     )
 
-    ob_code = uS_tot["ob_code"].data
-    ob_obj_id = uS_tot["obj_id"].data
-    ob_ra = uS_tot["ra"].data
-    ob_dec = uS_tot["dec"].data
-    ob_pmra = uS_tot["pmra"].data
-    ob_pmdec = uS_tot["pmdec"].data
-    ob_parallax = uS_tot["parallax"].data
-    ob_equinox = uS_tot["equinox"].data
-    ob_priority = uS_tot["priority"].data
-    ob_exptime = uS_tot["exptime"].data
-    ob_resolution = uS_tot["resolution"].data
-    proposal_id = uS_tot["proposal_id"].data
-    proposal_rank = uS_tot["rank"].data
-    ob_weight_best = uS_tot["weight"].data
-    ob_allocate_time_netflow = uS_tot["Netflow_time"].data
-    ob_ppc_code = uS_tot["ppc_code"].data
+    ob_code = _tb_tgt_tot["ob_code"].data
+    ob_obj_id = _tb_tgt_tot["obj_id"].data
+    ob_ra = _tb_tgt_tot["ra"].data
+    ob_dec = _tb_tgt_tot["dec"].data
+    ob_equinox = ["J2000"] * len(_tb_tgt_tot)
+    ob_pmras = _tb_tgt_tot["pmra"].data
+    ob_pmdecs = _tb_tgt_tot["pmdec"].data
+    ob_parallaxs = _tb_tgt_tot["parallax"].data
+    ob_priority = _tb_tgt_tot["priority"].data
+    ob_exptime = _tb_tgt_tot["exptime"].data
+    ob_resolution = _tb_tgt_tot["resolution"].data
+    proposal_id = _tb_tgt_tot["proposal_id"].data
+    proposal_rank = _tb_tgt_tot["rank"].data
+    ob_weight_best = _tb_tgt_tot["weight"].data
+    ob_allocate_time_netflow = _tb_tgt_tot["exptime_assign"].data
 
     obList = Table(
         [
@@ -1620,10 +1501,10 @@ def output(obj_allo_tot, uS_tot, dirName="."):
             ob_obj_id,
             ob_ra,
             ob_dec,
-            ob_pmra,
-            ob_pmdec,
-            ob_parallax,
             ob_equinox,
+            ob_pmras,
+            ob_pmdecs,
+            ob_parallaxs,
             ob_priority,
             ob_exptime,
             ob_resolution,
@@ -1631,25 +1512,23 @@ def output(obj_allo_tot, uS_tot, dirName="."):
             proposal_rank,
             ob_weight_best,
             ob_allocate_time_netflow,
-            ob_ppc_code,
         ],
         names=[
             "ob_code",
             "ob_obj_id",
             "ob_ra",
             "ob_dec",
+            "ob_equinox",
             "ob_pmra",
             "ob_pmdec",
             "ob_parallax",
-            "ob_equinox",
             "ob_priority",
             "ob_exptime",
             "ob_resolution",
             "proposal_id",
             "proposal_rank",
             "ob_weight_best",
-            "ob_allocate_time_netflow",
-            "ob_ppc_code",
+            "ob_exptime_assign",
         ],
     )
 
@@ -1657,29 +1536,19 @@ def output(obj_allo_tot, uS_tot, dirName="."):
         os.path.join(dirName, "obList.ecsv"), format="ascii.ecsv", overwrite=True
     )
 
-    np.save(os.path.join(dirName, "obj_allo_tot.npy"), obj_allo_tot)
+    np.save(os.path.join(dirName, "obj_allo_tot.npy"), _tb_ppc_tot)
 
 
-def plotCR(cR, sub, obj_allo, dirName=".", show_plots=False):
-    """plot completion rate and fiber allocation efficiency
+def plotCR(CR, sub_lst, _tb_ppc_tot, dirName="output/", show_plots=False):
+    # plot completion rate and fiber allocation efficiency
 
-    Parameters
-    ==========
-    cR: completion rate of each proposal
-    sub: list of (proposal_id, rank)
-    obj_allo: table of ppc information
-
-    Returns
-    =======
-    fig in output/ folder
-    """
     plt.figure(figsize=(13, 5))
 
     plt.subplot(121)
 
     plt.bar(
-        np.arange(1, len(cR) + 1, 1),
-        100 * cR[:, -2],
+        np.arange(1, len(CR) + 1, 1),
+        100 * CR[:, -2],
         width=0.8,
         fc="tomato",
         ec="none",
@@ -1687,29 +1556,29 @@ def plotCR(cR, sub, obj_allo, dirName=".", show_plots=False):
         zorder=10,
     )
 
-    plt.plot([0, len(cR) + 1], [80, 80], "k--", lw=2, zorder=11)
+    plt.plot([0, len(CR) + 1], [80, 80], "k--", lw=2, zorder=11)
     plt.plot(
-        [0, len(cR) + 1],
-        [100 * np.mean(cR[:, -2]), 100 * np.mean(cR[:, -2])],
+        [0, len(CR) + 1],
+        [100 * np.mean(CR[:, -2]), 100 * np.mean(CR[:, -2])],
         "--",
         color="tomato",
         lw=2,
         zorder=11,
     )
     plt.text(
-        (len(cR) + 1) * 0.85,
-        100 * np.mean(cR[:, -2]),
-        "{:2.2f}%".format(100 * np.mean(cR[:, -2])),
+        (len(CR) + 1) * 0.85,
+        100 * np.mean(CR[:, -2]),
+        "{:2.2f}%".format(100 * np.mean(CR[:, -2])),
         color="r",
         fontsize=12,
     )
 
-    plt.xlim(0, len(cR) + 1)
-    plt.ylim(0, 100 * cR[:, -2].max() + 5)
+    plt.xlim(0, len(CR) + 1)
+    plt.ylim(0, 100 * CR[:, -2].max() + 5)
     plt.ylabel("completeness (%)", fontsize=18)
     plt.xticks(
-        np.arange(1, len(sub) + 1, 1),
-        [str(kk[0])[5:] + "_" + str(kk[1]) for kk in sub],
+        np.arange(1, len(sub_lst) + 1, 1),
+        [str(kk[0])[5:] + "_" + str(kk[1]) for kk in sub_lst],
         fontsize=12,
         rotation=90,
     )
@@ -1718,8 +1587,8 @@ def plotCR(cR, sub, obj_allo, dirName=".", show_plots=False):
 
     plt.subplot(122)
 
-    obj_allo = obj_allo[obj_allo.argsort(keys="tel_priority")]
-    fib_eff = obj_allo["tel_fiber_usage_frac"].data
+    _tb_ppc_tot = _tb_ppc_tot[_tb_ppc_tot.argsort(keys="ppc_priority")]
+    fib_eff = _tb_ppc_tot["ppc_fiber_usage_frac"].data
 
     plt.bar(
         np.arange(0, len(fib_eff), 1),
@@ -1755,21 +1624,26 @@ def plotCR(cR, sub, obj_allo, dirName=".", show_plots=False):
     plt.yticks(fontsize=16)
     plt.grid()
     plt.savefig(os.path.join(dirName, "ppp_result.jpg"), dpi=300, bbox_inches="tight")
-    if show_plots == True:
+    if show_plots:
         plt.show()
 
 
 def run(
-    readsamp_con,
+    bench_info,
+    readtgt_con,
     TimeOnSource_l,
     TimeOnSource_m,
-    iter1_on=False,
-    iter2_on=False,
-    iter3_on=False,
-    dirName=".",
+    dirName="output/",
+    numReservedFibers=0,
+    fiberNonAllocationCost=0.0,
     show_plots=False,
 ):
-    sample = readUserSample(readsamp_con, True)
+    global bench
+    bench = bench_info
+
+    tb_tgt, tb_sel_l, tb_sel_m, tb_tgt_l, tb_tgt_m = readTarget(
+        readtgt_con["mode_readtgt"], readtgt_con["para_readtgt"]
+    )
 
     nppc_l = int(np.ceil(TimeOnSource_l / 900.0))
     nppc_m = int(np.ceil(TimeOnSource_m / 900.0))
@@ -1777,196 +1651,114 @@ def run(
     randomseed = 2
 
     TraCollision = False
-    printTF = True
     multiProcess = True
-    if show_plots == True:
-        plotTF = True
-    else:
-        plotTF = False
 
-    commode = "compOFpsl_m1"
+    crMode = "compOFpsl_n"
 
-    if iter1_on:
-        weight_guess = [3, 0, 0]
-        conta, contb, contc = iter1(
-            sample,
-            weight_guess,
-            nppc_l,
-            nppc_m,
-            commode,
-            randomseed,
-            TraCollision,
-            printTF,
-        )
+    """
+    weight_guess = [2, -0.1, 0.05]
+    para_sci,para_exp,para_n = iter_weight(
+        [tb_tgt,tb_tgt_l,tb_tgt_m],
+        weight_guess,
+        nppc_l,
+        nppc_m,
+        crMode,
+        randomseed,
+        TraCollision,
+        numReservedFibers,
+        fiberNonAllocationCost,
+    )
+    #"""
+    para_sci, para_exp, para_n = [1.4, 0.1, 0.1]
 
-    else:
-        conta, contb, contc = [4.2, -0.1, 0.1]
+    # LR--------------------------------------------
+    ppc_lst_l = PPP_centers(
+        tb_sel_l, nppc_l, [para_sci, para_exp, para_n], randomseed, multiProcess
+    )
 
-    if len(sample[1]) > 0 and len(sample[2]) == 0:
-        if nppc_l > 0:
-            uS_L1 = PPP_centers(
-                sample[1],
-                nppc_l,
-                conta,
-                contb,
-                contc,
-                randomseed,
-                multiProcess,
-                printTF,
-                plotTF,
-            )
-            obj_allo_L = netflowRun(uS_L1, randomseed, printTF, TraCollision)
+    tb_tgt_l1 = Table.copy(tb_tgt_l)
+    tb_tgt_l1.meta["PPC"] = ppc_lst_l
 
-            uS_L1 = netflowAssign(uS_L1, obj_allo_L)
+    tb_tgt_l1 = sciRank_pri(tb_tgt_l1)
+    tb_tgt_l1 = count_N(tb_tgt_l1)
+    tb_tgt_l1 = weight(tb_tgt_l1, para_sci, para_exp, para_n)
 
-            obj_allo_L_fin = netflow_iter(
-                uS_L1,
-                obj_allo_L,
-                conta,
-                contb,
-                contc,
-                nppc_l,
-                randomseed,
-                printTF,
-                plotTF,
-                TraCollision,
-            )
-            uS_L_fin = netflowAssign(uS_L1, obj_allo_L_fin)
+    tb_ppc_l = netflowRun(
+        tb_tgt_l1,
+        randomseed,
+        TraCollision,
+        numReservedFibers,
+        fiberNonAllocationCost,
+    )
 
-            output(obj_allo_L_fin, uS_L_fin, dirName=dirName)
+    tb_tgt_l1 = netflowAssign(tb_tgt_l1, tb_ppc_l)
 
-            cR_L, cR_L_, sub_l = complete_ppc(uS_L_fin, "compOFpsl_ra")
+    tb_ppc_l_fin = netflow_iter(
+        tb_tgt_l1,
+        tb_ppc_l,
+        [para_sci, para_exp, para_n],
+        nppc_l,
+        randomseed,
+        TraCollision,
+        numReservedFibers,
+        fiberNonAllocationCost,
+    )
+    tb_tgt_l_fin = netflowAssign(tb_tgt_l1, tb_ppc_l_fin)
 
-            # clear_output(wait=True)
-            plotCR(cR_L_, sub_l, obj_allo_L, dirName=dirName, show_plots=show_plots)
-        else:
-            print("no allocated time for LR!")
+    # MR--------------------------------------------
+    ppc_lst_m = PPP_centers(
+        tb_sel_m, nppc_m, [para_sci, para_exp, para_n], randomseed, multiProcess
+    )
 
-    elif len(sample[2]) > 0 and len(sample[1]) == 0:
+    tb_tgt_m1 = Table.copy(tb_tgt_m)
+    tb_tgt_m1.meta["PPC"] = ppc_lst_m
+
+    tb_tgt_m1 = sciRank_pri(tb_tgt_m1)
+    tb_tgt_m1 = count_N(tb_tgt_m1)
+    tb_tgt_m1 = weight(tb_tgt_m1, para_sci, para_exp, para_n)
+
+    tb_ppc_m = netflowRun(
+        tb_tgt_m1,
+        randomseed,
+        TraCollision,
+        numReservedFibers,
+        fiberNonAllocationCost,
+    )
+
+    tb_tgt_m1 = netflowAssign(tb_tgt_m1, tb_ppc_m)
+
+    tb_ppc_m_fin = netflow_iter(
+        tb_tgt_m1,
+        tb_ppc_m,
+        [para_sci, para_exp, para_n],
+        nppc_m,
+        randomseed,
+        TraCollision,
+        numReservedFibers,
+        fiberNonAllocationCost,
+    )
+    tb_tgt_m_fin = netflowAssign(tb_tgt_m1, tb_ppc_m_fin)
+
+    if nppc_l > 0:
         if nppc_m > 0:
-            uS_M1 = PPP_centers(
-                sample[2],
-                nppc_m,
-                conta,
-                contb,
-                contc,
-                randomseed,
-                multiProcess,
-                printTF,
-                plotTF,
-            )
-            obj_allo_M = netflowRun(uS_M1, randomseed, printTF, TraCollision)
-
-            uS_M1 = netflowAssign(uS_M1, obj_allo_M)
-
-            obj_allo_M_fin = netflow_iter(
-                uS_M1,
-                obj_allo_M,
-                conta,
-                contb,
-                contc,
-                nppc_m,
-                randomseed,
-                printTF,
-                plotTF,
-                TraCollision,
-            )
-            uS_M_fin = netflowAssign(uS_M1, obj_allo_M_fin)
-
-            output(obj_allo_M_fin, uS_M_fin, dirName=dirName)
-
-            cR_M, cR_M_, sub_m = complete_ppc(uS_M_fin, "compOFpsl_ra")
-
-            # clear_output(wait=True)
-            plotCR(cR_M_, sub_m, obj_allo_M, dirName=dirName, show_plots=show_plots)
+            tb_ppc_tot = vstack([tb_ppc_l_fin, tb_ppc_m_fin])
+            tb_tgt_tot = vstack([tb_tgt_l_fin, tb_tgt_m_fin])
         else:
-            print("no allocated time for MR!")
-
-    elif len(sample[1]) > 0 and len(sample[2]) > 0:
-        if nppc_l > 0:
-            uS_L1 = PPP_centers(
-                sample[1],
-                nppc_l,
-                conta,
-                contb,
-                contc,
-                randomseed,
-                multiProcess,
-                printTF,
-                plotTF,
-            )
-            obj_allo_L = netflowRun(uS_L1, randomseed, printTF, TraCollision)
-
-            uS_L1 = netflowAssign(uS_L1, obj_allo_L)
-
-            obj_allo_L_fin = netflow_iter(
-                uS_L1,
-                obj_allo_L,
-                conta,
-                contb,
-                contc,
-                nppc_l,
-                randomseed,
-                printTF,
-                plotTF,
-                TraCollision,
-            )
-            uS_L_fin = netflowAssign(uS_L1, obj_allo_L_fin)
-        else:
-            print("no allocated time for LR!")
-
-        # ------------------------------------
+            tb_ppc_tot = tb_ppc_l_fin.copy()
+            tb_tgt_tot = tb_tgt_l_fin.copy()
+            if len(tb_tgt_m) > 0:
+                logger.warning("no allocated time for MR")
+    else:
         if nppc_m > 0:
-            uS_M1 = PPP_centers(
-                sample[2],
-                nppc_m,
-                conta,
-                contb,
-                contc,
-                randomseed,
-                multiProcess,
-                printTF,
-                plotTF,
-            )
-            obj_allo_M = netflowRun(uS_M1, randomseed, printTF, TraCollision)
-
-            uS_M1 = netflowAssign(uS_M1, obj_allo_M)
-
-            obj_allo_M_fin = netflow_iter(
-                uS_M1,
-                obj_allo_M,
-                conta,
-                contb,
-                contc,
-                nppc_m,
-                randomseed,
-                printTF,
-                plotTF,
-                TraCollision,
-            )
-            uS_M_fin = netflowAssign(uS_M1, obj_allo_M_fin)
+            tb_ppc_tot = tb_ppc_m_fin.copy()
+            tb_tgt_tot = tb_tgt_m_fin.copy()
+            if len(tb_tgt_l) > 0:
+                logger.warning("no allocated time for LR")
         else:
-            print("no allocated time for MR!")
+            logger.error("Please specify n_pcc_l or n_pcc_m")
 
-        # ------------------------------------
+    output(tb_ppc_tot, tb_tgt_tot, dirName=dirName)
 
-        if nppc_l > 0:
-            if nppc_m > 0:
-                obj_allo_tot = vstack([obj_allo_L_fin, obj_allo_M_fin])
-                uS_tot = vstack([uS_L_fin, uS_M_fin])
-            else:
-                obj_allo_tot = obj_allo_L_fin.copy()
-                uS_tot = uS_L_fin.copy()
-        else:
-            if nppc_m > 0:
-                obj_allo_tot = obj_allo_M_fin.copy()
-                uS_tot = uS_M_fin.copy()
-            else:
-                raise ("Please specify n_pccs_l or n_pccs_m")
+    CR_tot, CR_tot_, sub_tot = complete_ppc(tb_tgt_tot, "compOFpsl_n")
 
-        output(obj_allo_tot, uS_tot, dirName=dirName)
-
-        cR_t, cR_t_, sub_t = complete_ppc(uS_tot, "compOFpsl_ra")
-
-        # clear_output(wait=True)
-        plotCR(cR_t_, sub_t, obj_allo_tot, dirName=dirName, show_plots=show_plots)
+    plotCR(CR_tot_, sub_tot, tb_ppc_tot, dirName=dirName, show_plots=show_plots)

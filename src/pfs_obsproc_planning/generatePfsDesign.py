@@ -16,6 +16,7 @@ from logzero import logger
 warnings.filterwarnings("ignore")
 
 from .opefile import OpeFile
+from pfs_design_tool.pointing_utils import nfutils
 
 
 def read_conf(conf):
@@ -102,22 +103,26 @@ class GeneratePfsDesign(object):
 
         ## read sample from local path ##
         if self.conf["ppp"]["mode"] == "local":
-            readsamp_con = {
-                "mode": "local",
-                "localPath": os.path.join(
+            readtgt_con = {
+                "mode_readtgt": "local",
+                "para_readtgt": os.path.join(
                     self.workDir, f"{self.inputDirPPP}/mock_sim.csv"
                 ),
             }
         else:
-            readsamp_con = {
-                "mode": self.conf["ppp"]["mode"],
-                "dialect": self.conf["targetdb"]["db"]["dialect"],
-                "user": self.conf["targetdb"]["db"]["user"],
-                "pwd": self.conf["targetdb"]["db"]["password"],
-                "host": self.conf["targetdb"]["db"]["host"],
-                "port": self.conf["targetdb"]["db"]["port"],
-                "dbname": self.conf["targetdb"]["db"]["dbname"],
-                "sql_query": self.conf["ppp"]["sql_query"],
+            readtgt_con = {
+                "mode_readtgt": "DB",
+                "para_readtgt": {
+                    "DBPath_tgt": [
+                        self.conf["targetdb"]["db"]["dialect"],
+                        self.conf["targetdb"]["db"]["user"],
+                        self.conf["targetdb"]["db"]["password"],
+                        self.conf["targetdb"]["db"]["host"],
+                        self.conf["targetdb"]["db"]["port"],
+                        self.conf["targetdb"]["db"]["dbname"],
+                    ],
+                    "sql_query": self.conf["ppp"]["sql_query"],
+                },
             }
 
         ## define exposure time ##
@@ -128,11 +133,30 @@ class GeneratePfsDesign(object):
             self.conf["ppp"]["TEXP_NOMINAL"] * n_pccs_m
         )  # in sec (assuming 0 PPCs given)  --  MR
 
+        cobra_coach, bench_info = nfutils.getBench(
+            self.conf["sfa"]["pfs_instdata_dir"],
+            self.conf["sfa"]["cobra_coach_dir"],
+            None,
+            self.conf["sfa"]["sm"],
+            self.conf["sfa"]["dot_margin"],
+        )
+
+        # reserve fibers for calibration targets?
+        if self.conf["ppp"]["reserveFibers"] == True:
+            num_reserved_fibers = int(
+                self.conf["sfa"]["n_sky"] + self.conf["sfa"]["n_fluxstd"]
+            )
+            fiber_non_allocation_cost = self.conf["ppp"]["fiberNonAllocationCost"]
+        else:
+            num_reserved_fibers = 0
+            fiber_non_allocation_cost = 0.0
+        logger.info(f"{num_reserved_fibers} fibers reserved for calibration targets")
+
         PPP.run(
-            readsamp_con,
+            bench_info,
+            readtgt_con,
             onsourceT_L,
             onsourceT_M,
-            iter1_on=False,
             dirName=self.outputDirPPP,
             show_plots=show_plots,
         )
@@ -194,7 +218,7 @@ class GeneratePfsDesign(object):
         ob_equinoxs = t["ob_equinox"]
         ob_priorities = t["ob_priority"]
         obList = {
-            f"{proposal_id}{ob_code}": [
+            f"{proposal_id}_{ob_code}": [
                 proposal_id,
                 ob_code,
                 ob_obj_id,
@@ -222,25 +246,25 @@ class GeneratePfsDesign(object):
         logger.info(len(obList))
 
         ## get a list of assigned OBs ## FIXME (maybe we don't need to use this)
-        data_ppp = np.load(
-            os.path.join(self.outputDirPPP, "obj_allo_tot.npy"), allow_pickle=True
+        data_ppp = Table.read(
+            os.path.join(self.outputDirPPP, "ppcList.ecsv")
         )
         # print(len(data_ppp))
         # print(t[:4])
 
         ## check the number of assigned fibers ##
         for i in range(len(data_ppp)):
-            print(data_ppp[i][0], len(data_ppp[i][7]))
+            print(data_ppp[i]["ppc_code"], len(data_ppp[i]["ppc_allocated_targets"]))
             # print(data_ppp[0])
 
         ## get a list of assigned targets combined with qPlan info ##
         data = []
         for i in range(len(data_ppp)):
-            ppc_code = data_ppp[i][0]
-            ppc_ra = data_ppp[i][2]
-            ppc_dec = data_ppp[i][3]
-            ppc_pa = data_ppp[i][4]
-            ob_unique_id = data_ppp[i][7]
+            ppc_code = data_ppp[i]["ppc_code"]
+            ppc_ra = data_ppp[i]["ppc_ra"]
+            ppc_dec = data_ppp[i]["ppc_dec"]
+            ppc_pa = data_ppp[i]["ppc_pa"]
+            ob_unique_id = data_ppp[i]["ppc_allocated_targets"]
             if ppc_code in self.resQPlan.keys():
                 res = self.resQPlan[ppc_code]
                 obstime = res[0].tz_convert("UTC")
