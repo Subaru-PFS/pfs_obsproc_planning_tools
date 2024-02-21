@@ -315,6 +315,7 @@ class GeneratePfsDesign(object):
         ## ope file generation ##
         ope = OpeFile(conf=self.conf, workDir=self.workDir)
         for obsdate in self.obs_dates:
+            logger.info(f"generating ope file for {obsdate}...")
             ope.loadTemplate()  # initialize
             ope.update_obsdate(obsdate)  # update observation date
             info = []
@@ -323,7 +324,7 @@ class GeneratePfsDesign(object):
             ):
                 if observation_date_in_hst == obsdate:
                     res = self.resQPlan[pointing]
-                    info.append([pointing, obsdate, k, v, res[1], res[2]])
+                    info.append([pointing, obsdate, k, v, res[1].replace(":", ""), res[2].replace(":","")])
             ope.update_design(info)
             ope.write()  # save file
         # for pointing, (k,v) in zip(listPointings, pfsDesignIds.items()):
