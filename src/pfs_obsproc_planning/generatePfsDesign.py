@@ -92,6 +92,9 @@ class GeneratePfsDesign(object):
 
         return None
 
+    def update_config(self):
+        self.conf = read_conf(os.path.join(self.workDir, self.config))
+
     def update_obs_dates(self, obs_dates):
         if type(obs_dates) == list:
             self.obs_dates = obs_dates
@@ -279,7 +282,7 @@ class GeneratePfsDesign(object):
                     )
 
         ## write to csv ##
-        filename = "ppp+qplan_outout.csv"
+        filename = "ppp+qplan_output.csv"
         header = "pointing,ra_center,dec_center,pa_center,ob_unique_code,proposal_id,ob_code,obj_id,ra_target,dec_target,pmra_target,pmdec_target,parallax_target,equinox_target,target_class,obstime,obsdate_in_hst"
         np.savetxt(
             os.path.join(self.outputDirPPP, filename),
@@ -291,7 +294,7 @@ class GeneratePfsDesign(object):
         )
 
         ## run SFA ##
-        filename = "ppp+qplan_outout.csv"
+        filename = "ppp+qplan_output.csv"
         df = pd.read_csv(os.path.join(self.outputDirPPP, filename))
 
         listPointings, dictPointings, pfsDesignIds, observation_dates_in_hst = SFA.run(
