@@ -104,6 +104,9 @@ class GeneratePfsDesign(object):
     def runPPP(self, n_pccs_l, n_pccs_m, show_plots=False):
         from . import PPP
 
+        ## update config before run PPP ##
+        self.update_config()
+
         ## read sample from local path ##
         if self.conf["ppp"]["mode"] == "local":
             readtgt_con = {
@@ -172,8 +175,12 @@ class GeneratePfsDesign(object):
         return None
 
     def runQPlan(self, obs_dates=["2023-05-20"], plotVisibility=False):
+
         if obs_dates is not ["2023-05-20"]:
             self.update_obs_dates(obs_dates)
+
+        ## update config before run qPlan ##
+        self.update_config()
 
         ## import qPlanner module ##
         from . import qPlan
@@ -207,7 +214,8 @@ class GeneratePfsDesign(object):
     def runSFA(self, clearOutput=False):
         from . import SFA
 
-        ## define directory of outputs from each component ##
+        ## update config before run SFA ##
+        self.update_config()
 
         ## get a list of OBs ##
         t = Table.read(os.path.join(self.outputDirPPP, "obList.ecsv"))
