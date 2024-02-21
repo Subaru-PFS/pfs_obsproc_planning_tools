@@ -65,6 +65,12 @@ def count_N_overlap(_tb_tgt_psl, _tb_tgt):
 
     return _tb_tgt_psl
 
+def removeObjIdDuplication(df):
+    num1 = len(df)
+    df = df.drop_duplicates(subset=['proposal_id', 'obj_id', 'input_catalog_id', 'resolution'], inplace=False, ignore_index=True)
+    num2 = len(df)
+    logger.info(f'Duplication removed: {num1} --> {num2}')
+    return df    
 
 def readTarget(mode, para):
     """Read target list including:
@@ -112,6 +118,7 @@ def readTarget(mode, para):
             columns=[
                 "ob_code",
                 "obj_id",
+                "input_catalog_id",
                 "ra",
                 "dec",
                 "epoch",
@@ -143,6 +150,8 @@ def readTarget(mode, para):
             for ii in range(len(df_tgt))
         ]
         df_tgt = df_tgt.drop(columns=["allocated_time_lr", "allocated_time_mr"])
+
+        df_tgt = removeObjIdDuplication(df_tgt)
 
         tb_tgt = Table.from_pandas(df_tgt)
 
@@ -1573,7 +1582,7 @@ def plotCR(CR, sub_lst, _tb_ppc_tot, dirName="output/", show_plots=False):
         fontsize=12,
     )
 
-    plt.xlim(0, len(CR) + 1)
+    plt.xlim(-0.5, len(CR) + 1)
     plt.ylim(0, 100 * CR[:, -2].max() + 5)
     plt.ylabel("completeness (%)", fontsize=18)
     plt.xticks(

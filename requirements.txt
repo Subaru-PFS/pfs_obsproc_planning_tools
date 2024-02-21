@@ -19,7 +19,7 @@ numpy<1.24.0
 opdb @ git+https://github.com/Subaru-PFS/spt_operational_database.git
 pandas>=2.1.0
 pfs-datamodel @ git+https://github.com/Subaru-PFS/datamodel.git
-pfs-design-tool @ git+https://github.com/Subaru-PFS/ets_pointing.git
+pfs-design-tool @ git+https://github.com/Subaru-PFS/ets_pointing.git@u/kiyoyabe/e2e_test_2023oct
 -e git+https://github.com/Subaru-PFS/pfs_utils.git#egg=pfs-utils
 psycopg2>=2.9.8
 pybind11>=2.11.1

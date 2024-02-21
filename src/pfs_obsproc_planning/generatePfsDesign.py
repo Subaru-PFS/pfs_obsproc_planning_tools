@@ -164,6 +164,8 @@ class GeneratePfsDesign(object):
             onsourceT_L,
             onsourceT_M,
             dirName=self.outputDirPPP,
+            numReservedFibers=num_reserved_fibers,
+            fiberNonAllocationCost=fiber_non_allocation_cost,
             show_plots=show_plots,
         )
 
