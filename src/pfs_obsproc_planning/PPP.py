@@ -1582,7 +1582,7 @@ def plotCR(CR, sub_lst, _tb_ppc_tot, dirName="output/", show_plots=False):
         fontsize=12,
     )
 
-    plt.xlim(-0.5, len(CR) + 1)
+    plt.xlim(0, len(CR) + 1)
     plt.ylim(0, 100 * CR[:, -2].max() + 5)
     plt.ylabel("completeness (%)", fontsize=18)
     plt.xticks(
