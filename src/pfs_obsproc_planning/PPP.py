@@ -563,7 +563,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para, randomseed=0, mutiPro=True):
             _tb_tgt_t_ = weight(_tb_tgt_t_, para_sci, para_exp, para_n)
 
             print(
-                f"PPC_{len(ppc_lst):3d}: {len(_tb_tgt_t)-len(_tb_tgt_t_):5d}/{len(_tb_tgt_t):10d} targets are finished (w={ppc_totPri[-1]:.2f})."
+                f"PPC_{len(ppc_lst):03d}: {len(_tb_tgt_t)-len(_tb_tgt_t_):5d}/{len(_tb_tgt_t):10d} targets are finished (w={ppc_totPri[-1]:.2f})."
             )
 
     if len(ppc_lst) > nPPC:
