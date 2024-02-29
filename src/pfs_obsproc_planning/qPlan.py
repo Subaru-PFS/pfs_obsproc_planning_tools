@@ -43,8 +43,7 @@ from qplan.plots import airmass
 from qplan.Scheduler import Scheduler
 from qplan.util.site import site_subaru as observer
 
-
-def run(ppcList, obs_dates, inputDirName=".", outputDirName=".", plotVisibility=False):
+def run(conf, ppcList, obs_dates, inputDirName=".", outputDirName=".", plotVisibility=False):
     # log file will let us debug scheduling, check it for error and debug messages
     # NOTE: any python (stdlib) logging compatible logger will work
     logger = get_logger(
@@ -83,7 +82,7 @@ def run(ppcList, obs_dates, inputDirName=".", outputDirName=".", plotVisibility=
     # rank: 0 rank not important, >0 preference for higher ranked programs
     # priority: (*only considered when looking at two OBs from the same program*)
     #           0 priority disregarded, >0 user's priority considered
-    weights = dict(slew=0.2, delay=3.0, filter=0.0, rank=0.85, priority=0.1)
+    weights = conf['qplan']['weight']
 
     # create and initialize qplan scheduler
     sdlr = Scheduler(logger, observer)
@@ -151,7 +150,7 @@ def run(ppcList, obs_dates, inputDirName=".", outputDirName=".", plotVisibility=
             comment,
         ) = line.split("\t")
         exp_time = float(exp_time) * 60.0  # assume table is in MINUTES
-        print(dec)
+
         tgt = StaticTarget(
             name=ob_code, ra=ra, dec=dec, equinox=float(eq), comment=comment
         )

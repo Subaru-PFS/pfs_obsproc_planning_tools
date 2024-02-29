@@ -65,6 +65,12 @@ def count_N_overlap(_tb_tgt_psl, _tb_tgt):
 
     return _tb_tgt_psl
 
+def removeObjIdDuplication(df):
+    num1 = len(df)
+    df = df.drop_duplicates(subset=['proposal_id', 'obj_id', 'input_catalog_id', 'resolution'], inplace=False, ignore_index=True)
+    num2 = len(df)
+    logger.info(f'Duplication removed: {num1} --> {num2}')
+    return df    
 
 def readTarget(mode, para):
     """Read target list including:
@@ -112,6 +118,7 @@ def readTarget(mode, para):
             columns=[
                 "ob_code",
                 "obj_id",
+                "input_catalog_id",
                 "ra",
                 "dec",
                 "epoch",
@@ -143,6 +150,8 @@ def readTarget(mode, para):
             for ii in range(len(df_tgt))
         ]
         df_tgt = df_tgt.drop(columns=["allocated_time_lr", "allocated_time_mr"])
+
+        df_tgt = removeObjIdDuplication(df_tgt)
 
         tb_tgt = Table.from_pandas(df_tgt)
 
@@ -554,7 +563,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para, randomseed=0, mutiPro=True):
             _tb_tgt_t_ = weight(_tb_tgt_t_, para_sci, para_exp, para_n)
 
             print(
-                f"PPC_{len(ppc_lst):3d}: {len(_tb_tgt_t)-len(_tb_tgt_t_):5d}/{len(_tb_tgt_t):10d} targets are finished (w={ppc_totPri[-1]:.2f})."
+                f"PPC_{len(ppc_lst):03d}: {len(_tb_tgt_t)-len(_tb_tgt_t_):5d}/{len(_tb_tgt_t):10d} targets are finished (w={ppc_totPri[-1]:.2f})."
             )
 
     if len(ppc_lst) > nPPC:

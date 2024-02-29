@@ -92,6 +92,9 @@ class GeneratePfsDesign(object):
 
         return None
 
+    def update_config(self):
+        self.conf = read_conf(os.path.join(self.workDir, self.config))
+
     def update_obs_dates(self, obs_dates):
         if type(obs_dates) == list:
             self.obs_dates = obs_dates
@@ -100,6 +103,9 @@ class GeneratePfsDesign(object):
 
     def runPPP(self, n_pccs_l, n_pccs_m, show_plots=False):
         from . import PPP
+
+        ## update config before run PPP ##
+        self.update_config()
 
         ## read sample from local path ##
         if self.conf["ppp"]["mode"] == "local":
@@ -158,6 +164,8 @@ class GeneratePfsDesign(object):
             onsourceT_L,
             onsourceT_M,
             dirName=self.outputDirPPP,
+            numReservedFibers=num_reserved_fibers,
+            fiberNonAllocationCost=fiber_non_allocation_cost,
             show_plots=show_plots,
         )
 
@@ -169,14 +177,19 @@ class GeneratePfsDesign(object):
         return None
 
     def runQPlan(self, obs_dates=["2023-05-20"], plotVisibility=False):
+
         if obs_dates is not ["2023-05-20"]:
             self.update_obs_dates(obs_dates)
+
+        ## update config before run qPlan ##
+        self.update_config()
 
         ## import qPlanner module ##
         from . import qPlan
 
         ## read output from PPP ##
         self.df_qplan, self.sdlr, self.figs_qplan = qPlan.run(
+            self.conf,
             "ppcList.ecsv",
             obs_dates,
             inputDirName=self.outputDirPPP,
@@ -203,7 +216,8 @@ class GeneratePfsDesign(object):
     def runSFA(self, clearOutput=False):
         from . import SFA
 
-        ## define directory of outputs from each component ##
+        ## update config before run SFA ##
+        self.update_config()
 
         ## get a list of OBs ##
         t = Table.read(os.path.join(self.outputDirPPP, "obList.ecsv"))
@@ -278,7 +292,7 @@ class GeneratePfsDesign(object):
                     )
 
         ## write to csv ##
-        filename = "ppp+qplan_outout.csv"
+        filename = "ppp+qplan_output.csv"
         header = "pointing,ra_center,dec_center,pa_center,ob_unique_code,proposal_id,ob_code,obj_id,ra_target,dec_target,pmra_target,pmdec_target,parallax_target,equinox_target,target_class,obstime,obsdate_in_hst"
         np.savetxt(
             os.path.join(self.outputDirPPP, filename),
@@ -290,7 +304,7 @@ class GeneratePfsDesign(object):
         )
 
         ## run SFA ##
-        filename = "ppp+qplan_outout.csv"
+        filename = "ppp+qplan_output.csv"
         df = pd.read_csv(os.path.join(self.outputDirPPP, filename))
 
         listPointings, dictPointings, pfsDesignIds, observation_dates_in_hst = SFA.run(
@@ -303,6 +317,7 @@ class GeneratePfsDesign(object):
         ## ope file generation ##
         ope = OpeFile(conf=self.conf, workDir=self.workDir)
         for obsdate in self.obs_dates:
+            logger.info(f"generating ope file for {obsdate}...")
             ope.loadTemplate()  # initialize
             ope.update_obsdate(obsdate)  # update observation date
             info = []
@@ -311,7 +326,7 @@ class GeneratePfsDesign(object):
             ):
                 if observation_date_in_hst == obsdate:
                     res = self.resQPlan[pointing]
-                    info.append([pointing, obsdate, k, v, res[1], res[2]])
+                    info.append([pointing, obsdate, k, v, res[1].replace(":", ""), res[2].replace(":","")])
             ope.update_design(info)
             ope.write()  # save file
         # for pointing, (k,v) in zip(listPointings, pfsDesignIds.items()):

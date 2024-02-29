@@ -36,7 +36,7 @@ dependencies = [
     "qplan @ git+https://github.com/naojsoft/qplan.git",
     "pfs-datamodel @ git+https://github.com/Subaru-PFS/datamodel.git",
     "ets-fiber-assigner @ git+https://github.com/Subaru-PFS/ets_fiberalloc.git",
-    "pfs-design-tool @ git+https://github.com/Subaru-PFS/ets_pointing.git",
+    "pfs-design-tool @ git+https://github.com/Subaru-PFS/ets_pointing.git@u/kiyoyabe/e2e_test_2023oct",
     "ics-cobraOps @ git+https://github.com/Subaru-PFS/ics_cobraOps.git",
     "opdb @ git+https://github.com/Subaru-PFS/spt_operational_database.git",
     "targetdb @ git+https://github.com/Subaru-PFS/ets_target_database.git",
