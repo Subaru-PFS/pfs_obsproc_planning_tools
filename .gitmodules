@@ -3,3 +3,11 @@
 	url = https://github.com/Subaru-PFS/ets_shuffle.git
 	branch = master
     ignore = dirty
+[submodule "src/pfs_instdata"]
+	path = src/pfs_instdata
+	url = https://github.com/Subaru-PFS/pfs_instdata.git
+	branch = master
+[submodule "src/ets_pointing"]
+	path = src/ets_pointing
+	url = https://github.com/Subaru-PFS/ets_pointing.git
+	branch = main
