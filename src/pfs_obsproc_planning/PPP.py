@@ -134,6 +134,21 @@ def readTarget(mode, para):
                 "allocated_time",
                 "allocated_time_lr",
                 "allocated_time_mr",
+                "filter_g",
+                "filter_r",
+                "filter_i",
+                "filter_z",
+                "filter_y",
+                "psf_flux_g",
+                "psf_flux_r",
+                "psf_flux_i",
+                "psf_flux_z",
+                "psf_flux_y",
+                "psf_flux_error_g",
+                "psf_flux_error_r",
+                "psf_flux_error_i",
+                "psf_flux_error_z",
+                "psf_flux_error_y",
             ],
         )
         # convert column names
@@ -1490,6 +1505,7 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
 
     ob_code = _tb_tgt_tot["ob_code"].data
     ob_obj_id = _tb_tgt_tot["obj_id"].data
+    ob_cat_id = _tb_tgt_tot["input_catalog_id"].data
     ob_ra = _tb_tgt_tot["ra"].data
     ob_dec = _tb_tgt_tot["dec"].data
     ob_equinox = ["J2000"] * len(_tb_tgt_tot)
@@ -1503,11 +1519,27 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
     proposal_rank = _tb_tgt_tot["rank"].data
     ob_weight_best = _tb_tgt_tot["weight"].data
     ob_allocate_time_netflow = _tb_tgt_tot["exptime_assign"].data
+    ob_filter_g = _tb_tgt_tot["filter_g"].data
+    ob_filter_r = _tb_tgt_tot["filter_r"].data
+    ob_filter_i = _tb_tgt_tot["filter_i"].data
+    ob_filter_z = _tb_tgt_tot["filter_z"].data
+    ob_filter_y = _tb_tgt_tot["filter_y"].data
+    ob_psf_flux_g = _tb_tgt_tot["psf_flux_g"].data
+    ob_psf_flux_r = _tb_tgt_tot["psf_flux_r"].data
+    ob_psf_flux_i = _tb_tgt_tot["psf_flux_i"].data
+    ob_psf_flux_z = _tb_tgt_tot["psf_flux_z"].data
+    ob_psf_flux_y = _tb_tgt_tot["psf_flux_y"].data
+    ob_psf_flux_error_g = _tb_tgt_tot["psf_flux_error_g"].data
+    ob_psf_flux_error_r = _tb_tgt_tot["psf_flux_error_r"].data
+    ob_psf_flux_error_i = _tb_tgt_tot["psf_flux_error_i"].data
+    ob_psf_flux_error_z = _tb_tgt_tot["psf_flux_error_z"].data
+    ob_psf_flux_error_y = _tb_tgt_tot["psf_flux_error_y"].data
 
     obList = Table(
         [
             ob_code,
             ob_obj_id,
+            ob_cat_id,
             ob_ra,
             ob_dec,
             ob_equinox,
@@ -1521,10 +1553,26 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
             proposal_rank,
             ob_weight_best,
             ob_allocate_time_netflow,
+            ob_filter_g,
+            ob_filter_r,
+            ob_filter_i,
+            ob_filter_z,
+            ob_filter_y,
+            ob_psf_flux_g,
+            ob_psf_flux_r,
+            ob_psf_flux_i,
+            ob_psf_flux_z,
+            ob_psf_flux_y,
+            ob_psf_flux_error_g,
+            ob_psf_flux_error_r,
+            ob_psf_flux_error_i,
+            ob_psf_flux_error_z,
+            ob_psf_flux_error_y,
         ],
         names=[
             "ob_code",
             "ob_obj_id",
+            "ob_cat_id",
             "ob_ra",
             "ob_dec",
             "ob_equinox",
@@ -1538,6 +1586,21 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
             "proposal_rank",
             "ob_weight_best",
             "ob_exptime_assign",
+            "ob_filter_g",
+            "ob_filter_r",
+            "ob_filter_i",
+            "ob_filter_z",
+            "ob_filter_y",
+            "ob_psf_flux_g",
+            "ob_psf_flux_r",
+            "ob_psf_flux_i",
+            "ob_psf_flux_z",
+            "ob_psf_flux_y",
+            "ob_psf_flux_error_g",
+            "ob_psf_flux_error_r",
+            "ob_psf_flux_error_i",
+            "ob_psf_flux_error_z",
+            "ob_psf_flux_error_y",
         ],
     )
 
