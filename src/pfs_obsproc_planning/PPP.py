@@ -1534,6 +1534,7 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
     ob_psf_flux_error_i = _tb_tgt_tot["psf_flux_error_i"].data
     ob_psf_flux_error_z = _tb_tgt_tot["psf_flux_error_z"].data
     ob_psf_flux_error_y = _tb_tgt_tot["psf_flux_error_y"].data
+    ob_identify_code = _tb_tgt_tot["identify_code"].data
 
     obList = Table(
         [
@@ -1568,6 +1569,7 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
             ob_psf_flux_error_i,
             ob_psf_flux_error_z,
             ob_psf_flux_error_y,
+            ob_identify_code,
         ],
         names=[
             "ob_code",
@@ -1601,6 +1603,7 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
             "ob_psf_flux_error_i",
             "ob_psf_flux_error_z",
             "ob_psf_flux_error_y",
+            "ob_identify_code",
         ],
     )
 
