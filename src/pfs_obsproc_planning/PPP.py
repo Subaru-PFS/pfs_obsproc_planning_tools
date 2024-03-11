@@ -95,7 +95,7 @@ def readTarget(mode, para):
     target sample (all), target sample (low-resolution mode), target sample (medium-resolution mode)
     """
     time_start = time.time()
-    logger.info(f"[S1] Read targets started")
+    logger.info(f"[S1] Read targets started (PPP)")
 
     if mode == "local":
         tb_tgt = Table.read(para["localPath_tgt"])
@@ -168,6 +168,18 @@ def readTarget(mode, para):
 
         df_tgt = removeObjIdDuplication(df_tgt)
 
+        df_tgt["psf_flux_g"][np.isnan(df_tgt["psf_flux_g"])]=9e-5
+        df_tgt["psf_flux_r"][np.isnan(df_tgt["psf_flux_r"])]=9e-5
+        df_tgt["psf_flux_i"][np.isnan(df_tgt["psf_flux_i"])]=9e-5
+        df_tgt["psf_flux_z"][np.isnan(df_tgt["psf_flux_z"])]=9e-5
+        df_tgt["psf_flux_y"][np.isnan(df_tgt["psf_flux_y"])]=9e-5
+
+        df_tgt["psf_flux_error_g"][np.isnan(df_tgt["psf_flux_error_g"])]=9e-5
+        df_tgt["psf_flux_error_r"][np.isnan(df_tgt["psf_flux_error_r"])]=9e-5
+        df_tgt["psf_flux_error_i"][np.isnan(df_tgt["psf_flux_error_i"])]=9e-5
+        df_tgt["psf_flux_error_z"][np.isnan(df_tgt["psf_flux_error_z"])]=9e-5
+        df_tgt["psf_flux_error_y"][np.isnan(df_tgt["psf_flux_error_y"])]=9e-5
+
         tb_tgt = Table.from_pandas(df_tgt)
 
         conn.close()
@@ -208,10 +220,10 @@ def readTarget(mode, para):
             while FH_select < FH_tac:
                 tb_tgt_tem_l = count_N_overlap(tb_tgt_tem_l, tb_tgt_l)
                 pri_ = (
-                    (10 - tb_tgt_tem_l["priority"])
-                    + 10
+                    (10 - tb_tgt_tem_l["priority"]) 
+                    + 2
                     * (tb_tgt_tem_l["local_count"] / max(tb_tgt_tem_l["local_count"]))
-                    + 10 * (1 - tb_tgt_tem_l["exptime"] / max(tb_tgt_tem_l["exptime"]))
+                    + 2 * (1 - tb_tgt_tem_l["exptime"] / max(tb_tgt_tem_l["exptime"]))
                 )
                 psl_pri_l = pri_ / sum(pri_)
                 if len(tb_tgt_tem_l) < size_step:
@@ -239,9 +251,9 @@ def readTarget(mode, para):
                 tb_tgt_tem_m = count_N_overlap(tb_tgt_tem_m, tb_tgt_m)
                 pri_ = (
                     (10 - tb_tgt_tem_m["priority"])
-                    + 10
+                    + 2
                     * (tb_tgt_tem_m["local_count"] / max(tb_tgt_tem_m["local_count"]))
-                    + 10 * (1 - tb_tgt_tem_m["exptime"] / max(tb_tgt_tem_m["exptime"]))
+                    + 2 * (1 - tb_tgt_tem_m["exptime"] / max(tb_tgt_tem_m["exptime"]))
                 )
                 psl_pri_m = pri_ / sum(pri_)
                 if len(tb_tgt_tem_m) < size_step:
@@ -277,7 +289,7 @@ def readTarget(mode, para):
     )
     logger.info(f"[S1] There are {len(set(tb_tgt['proposal_id'])):.0f} proposals.")
     logger.info(
-        f"n_tgt_low = {len(tb_tgt_l):.0f} ({len(tgt_select_l):.0f}), n_tgt_medium = {len(tb_tgt_m):.0f} ({len(tgt_select_m):.0f})"
+        f"[S1] n_tgt_low = {len(tb_tgt_l):.0f} ({len(tgt_select_l):.0f}), n_tgt_medium = {len(tb_tgt_m):.0f} ({len(tgt_select_m):.0f})"
     )
 
     return tb_tgt, tgt_select_l, tgt_select_m, tb_tgt_l, tb_tgt_m
@@ -520,6 +532,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para, randomseed=0, mutiPro=True):
         _tb_tgt_t_ = _tb_tgt_t[_tb_tgt_t["exptime_PPP"] > 0]  # targets not finished
 
         ppc_totPri_sub = []
+        iter_n = 0
         while any(_tb_tgt_t_["exptime_PPP"] > 0):
             # peak_xy from KDE peak with weights -------------------------------
             X_, Y_, obj_dis_sig_, peak_x, peak_y = KDE(_tb_tgt_t_, mutiPro)
@@ -566,7 +579,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para, randomseed=0, mutiPro=True):
                 # quit if no targets assigned
                 break
 
-            if ppc_totPri_sub[-1] < ppc_totPri_sub[0] * 0.05:
+            if iter_n>25 and ppc_totPri_sub[-1] < ppc_totPri_sub[0] * 0.15:
                 # quit if ppc contains too limited targets
                 break
 
@@ -576,6 +589,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para, randomseed=0, mutiPro=True):
             ]  # targets not finished
             _tb_tgt_t_ = count_N(_tb_tgt_t_)
             _tb_tgt_t_ = weight(_tb_tgt_t_, para_sci, para_exp, para_n)
+            iter_n += 1
 
             print(
                 f"PPC_{len(ppc_lst):03d}: {len(_tb_tgt_t)-len(_tb_tgt_t_):5d}/{len(_tb_tgt_t):10d} targets are finished (w={ppc_totPri[-1]:.2f})."
