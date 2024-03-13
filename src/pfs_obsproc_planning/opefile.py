@@ -126,7 +126,7 @@ class OpeFile(object):
 
             # add PPC code
             repl1 = "### SCIENCE:START ###"
-            repl2 = f"### {val[0]} ###"
+            repl2 = f"### {val[0]} ###\n### OBSTIME: {val[6]} ###"
             tmpl = tmpl.replace(repl1, repl2)
 
             # add pfsDesignId

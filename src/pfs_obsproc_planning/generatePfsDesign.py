@@ -378,8 +378,10 @@ class GeneratePfsDesign(object):
             ):
                 if observation_date_in_hst == obsdate:
                     res = self.resQPlan[pointing]
-                    info.append([pointing, obsdate, k, v, res[1].replace(":", ""), res[2].replace(":","")])
-            info = pd.DataFrame(info, columns=['ppc_code', 'obsdate_in_hst', 'obstime_in_utc', 'pfs_design_id', 'ppc_ra', 'ppc_dec'])
+                    info.append([pointing, obsdate, k, v, res[1].replace(":", ""), res[2].replace(":",""), k])
+            info = pd.DataFrame(info, columns=['ppc_code', 'obsdate_in_hst', 'obstime_in_utc', 'pfs_design_id', 'ppc_ra', 'ppc_dec', 'obstime_in_hst'])
+            info["obstime_in_hst"] = pd.to_datetime(info["obstime_in_hst"], utc=True) 
+            info["obstime_in_hst"] = info["obstime_in_hst"].dt.tz_convert('Pacific/Honolulu').dt.strftime("%Y/%m/%d %H:%M:%S")
             info = info.sort_values(by='obstime_in_utc', ascending=True).values.tolist()
             ope.update_design(info)
             ope.write()  # save file
