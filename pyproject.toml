@@ -21,7 +21,7 @@ dependencies = [
     "matplotlib>=3.8.0",
     "numpy<1.24.0",
     "pandas>=2.1.0",
-    "psycopg2>=2.9.8",
+    "psycopg2-binary>=2.9.8",
     "pybind11>=2.11.1",
     "pyyaml==5.3.1",
     "scikit-learn>=1.3.1",
@@ -36,7 +36,7 @@ dependencies = [
     "qplan @ git+https://github.com/naojsoft/qplan.git",
     "pfs-datamodel @ git+https://github.com/Subaru-PFS/datamodel.git",
     "ets-fiber-assigner @ git+https://github.com/Subaru-PFS/ets_fiberalloc.git",
-    "pfs-design-tool @ git+https://github.com/Subaru-PFS/ets_pointing.git@u/kiyoyabe/e2e_test_2023oct",
+    #"pfs-design-tool @ git+https://github.com/Subaru-PFS/ets_pointing.git@u/kiyoyabe/run15_2024mar",
     "ics-cobraOps @ git+https://github.com/Subaru-PFS/ics_cobraOps.git",
     "opdb @ git+https://github.com/Subaru-PFS/spt_operational_database.git",
     "targetdb @ git+https://github.com/Subaru-PFS/ets_target_database.git",
@@ -52,14 +52,14 @@ build-backend = "setuptools.build_meta"
 
 
 [tool.setuptools]
-packages = ["pfs_obsproc_planning", "ets_shuffle"]
+packages = ["pfs_obsproc_planning", "ets_shuffle", "pfs_design_tool"]
 include-package-data = true
 
 
 [tool.setuptools.package-dir]
 pfs_obsproc_planning = "src/pfs_obsproc_planning"
 ets_shuffle = "src/ets_shuffle/ets_shuffle"
-
+pfs_design_tool = "src/ets_pointing/src/pfs_design_tool"
 
 [tool.pdm.dev-dependencies]
 dev = [

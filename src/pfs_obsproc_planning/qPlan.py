@@ -121,7 +121,7 @@ def run(conf, ppcList, obs_dates, inputDirName=".", outputDirName=".", plotVisib
         line = "  "
         line += f"{t['ppc_code']}\t"
         line += "0\t"
-        line += "15\t"
+        line += conf['qplan']['ob_tottime']['tottime']+"\t"
         line += "L\t"
         line += f"{int(ra.h)}:{int(abs(ra.m))}:{abs(ra.s)}\t"
         line += f"{int(dec.d)}:{int(abs(dec.m))}:{abs(dec.s)}\t"
@@ -180,8 +180,8 @@ def run(conf, ppcList, obs_dates, inputDirName=".", outputDirName=".", plotVisib
         rec.append(
             Bunch(
                 date=date,  # date HST
-                starttime="18:30:00",  # time HST
-                stoptime="05:30:00",  # time HST
+                starttime=conf['qplan']['tw_time']['starttime'],  # time HST
+                stoptime=conf['qplan']['tw_time']['stoptime'],  # time HST
                 categories=["open"],
                 skip=False,
                 note="",

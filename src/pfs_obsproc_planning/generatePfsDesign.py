@@ -224,6 +224,7 @@ class GeneratePfsDesign(object):
         proposal_ids = t["proposal_id"]
         ob_codes = t["ob_code"]
         ob_obj_ids = t["ob_obj_id"]
+        ob_cat_ids = t["ob_cat_id"]
         ob_ras = t["ob_ra"]
         ob_decs = t["ob_dec"]
         ob_pmras = t["ob_pmra"]
@@ -231,11 +232,27 @@ class GeneratePfsDesign(object):
         ob_parallaxs = t["ob_parallax"]
         ob_equinoxs = t["ob_equinox"]
         ob_priorities = t["ob_priority"]
+        ob_filter_gs = t["ob_filter_g"]
+        ob_filter_rs = t["ob_filter_r"]
+        ob_filter_is = t["ob_filter_i"]
+        ob_filter_zs = t["ob_filter_z"]
+        ob_filter_ys = t["ob_filter_y"]
+        ob_psf_flux_gs = t["ob_psf_flux_g"]
+        ob_psf_flux_rs = t["ob_psf_flux_r"]
+        ob_psf_flux_is = t["ob_psf_flux_i"]
+        ob_psf_flux_zs = t["ob_psf_flux_z"]
+        ob_psf_flux_ys = t["ob_psf_flux_y"]
+        ob_psf_flux_error_gs = t["ob_psf_flux_error_g"]
+        ob_psf_flux_error_rs = t["ob_psf_flux_error_r"]
+        ob_psf_flux_error_is = t["ob_psf_flux_error_i"]
+        ob_psf_flux_error_zs = t["ob_psf_flux_error_z"]
+        ob_psf_flux_error_ys = t["ob_psf_flux_error_y"]
         obList = {
             f"{proposal_id}_{ob_code}": [
                 proposal_id,
                 ob_code,
                 ob_obj_id,
+                ob_cat_id,
                 ob_ra,
                 ob_dec,
                 ob_pmra,
@@ -243,11 +260,27 @@ class GeneratePfsDesign(object):
                 ob_parallax,
                 ob_equinox,
                 "sci_P%d" % (int(ob_priority)),
+                ob_filter_g,
+                ob_filter_r,
+                ob_filter_i,
+                ob_filter_z,
+                ob_filter_y,
+                ob_psf_flux_g,
+                ob_psf_flux_r,
+                ob_psf_flux_i,
+                ob_psf_flux_z,
+                ob_psf_flux_y,
+                ob_psf_flux_error_g,
+                ob_psf_flux_error_r,
+                ob_psf_flux_error_i,
+                ob_psf_flux_error_z,
+                ob_psf_flux_error_y,
             ]
-            for proposal_id, ob_code, ob_obj_id, ob_ra, ob_dec, ob_pmra, ob_pmdec, ob_parallax, ob_equinox, ob_priority in zip(
+            for proposal_id, ob_code, ob_obj_id, ob_cat_id, ob_ra, ob_dec, ob_pmra, ob_pmdec, ob_parallax, ob_equinox, ob_priority, ob_filter_g, ob_filter_r, ob_filter_i, ob_filter_z, ob_filter_y, ob_psf_flux_g, ob_psf_flux_r, ob_psf_flux_i, ob_psf_flux_z, ob_psf_flux_y, ob_psf_flux_error_g, ob_psf_flux_error_r, ob_psf_flux_error_i, ob_psf_flux_error_z, ob_psf_flux_error_y in zip(
                 proposal_ids,
                 ob_codes,
                 ob_obj_ids,
+                ob_cat_ids,
                 ob_ras,
                 ob_decs,
                 ob_pmras,
@@ -255,6 +288,21 @@ class GeneratePfsDesign(object):
                 ob_parallaxs,
                 ob_equinoxs,
                 ob_priorities,
+                ob_filter_gs,
+                ob_filter_rs,
+                ob_filter_is,
+                ob_filter_zs,
+                ob_filter_ys,
+                ob_psf_flux_gs,
+                ob_psf_flux_rs,
+                ob_psf_flux_is,
+                ob_psf_flux_zs,
+                ob_psf_flux_ys,
+                ob_psf_flux_error_gs,
+                ob_psf_flux_error_rs,
+                ob_psf_flux_error_is,
+                ob_psf_flux_error_zs,
+                ob_psf_flux_error_ys,
             )
         }
         logger.info(len(obList))
@@ -293,7 +341,7 @@ class GeneratePfsDesign(object):
 
         ## write to csv ##
         filename = "ppp+qplan_output.csv"
-        header = "pointing,ra_center,dec_center,pa_center,ob_unique_code,proposal_id,ob_code,obj_id,ra_target,dec_target,pmra_target,pmdec_target,parallax_target,equinox_target,target_class,obstime,obsdate_in_hst"
+        header = "pointing,ra_center,dec_center,pa_center,ob_unique_code,proposal_id,ob_code,obj_id,cat_id,ra_target,dec_target,pmra_target,pmdec_target,parallax_target,equinox_target,target_class,filter_g,filter_r,filter_i,filter_z,filter_y,psf_flux_g,psf_flux_r,psf_flux_i,psf_flux_z,psf_flux_y,psf_flux_error_g,psf_flux_error_r,psf_flux_error_i,psf_flux_error_z,psf_flux_error_y,obstime,obsdate_in_hst"
         np.savetxt(
             os.path.join(self.outputDirPPP, filename),
             data,
@@ -302,6 +350,10 @@ class GeneratePfsDesign(object):
             comments="",
             header=header,
         )
+        ## curate csv (FIXME) ##
+        df = pd.read_csv(os.path.join(self.outputDirPPP, filename))
+        df = df.replace("[]","")
+        df.to_csv(os.path.join(self.outputDirPPP, filename), index=False)
 
         ## run SFA ##
         filename = "ppp+qplan_output.csv"
@@ -326,7 +378,11 @@ class GeneratePfsDesign(object):
             ):
                 if observation_date_in_hst == obsdate:
                     res = self.resQPlan[pointing]
-                    info.append([pointing, obsdate, k, v, res[1].replace(":", ""), res[2].replace(":","")])
+                    info.append([pointing, obsdate, k, v, res[1].replace(":", ""), res[2].replace(":",""), k])
+            info = pd.DataFrame(info, columns=['ppc_code', 'obsdate_in_hst', 'obstime_in_utc', 'pfs_design_id', 'ppc_ra', 'ppc_dec', 'obstime_in_hst'])
+            info["obstime_in_hst"] = pd.to_datetime(info["obstime_in_hst"], utc=True) 
+            info["obstime_in_hst"] = info["obstime_in_hst"].dt.tz_convert('Pacific/Honolulu').dt.strftime("%Y/%m/%d %H:%M:%S")
+            info = info.sort_values(by='obstime_in_utc', ascending=True).values.tolist()
             ope.update_design(info)
             ope.write()  # save file
         # for pointing, (k,v) in zip(listPointings, pfsDesignIds.items()):
