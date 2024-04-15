@@ -42,8 +42,12 @@ from qplan.entity import (
 from qplan.plots import airmass
 from qplan.Scheduler import Scheduler
 from qplan.util.site import site_subaru as observer
+from dateutil import parser
 
-def run(conf, ppcList, obs_dates, inputDirName=".", outputDirName=".", plotVisibility=False):
+
+def run(
+    conf, ppcList, obs_dates, inputDirName=".", outputDirName=".", plotVisibility=False
+):
     # log file will let us debug scheduling, check it for error and debug messages
     # NOTE: any python (stdlib) logging compatible logger will work
     logger = get_logger(
@@ -82,7 +86,7 @@ def run(conf, ppcList, obs_dates, inputDirName=".", outputDirName=".", plotVisib
     # rank: 0 rank not important, >0 preference for higher ranked programs
     # priority: (*only considered when looking at two OBs from the same program*)
     #           0 priority disregarded, >0 user's priority considered
-    weights = conf['qplan']['weight']
+    weights = conf["qplan"]["weight"]
 
     # create and initialize qplan scheduler
     sdlr = Scheduler(logger, observer)
@@ -121,7 +125,7 @@ def run(conf, ppcList, obs_dates, inputDirName=".", outputDirName=".", plotVisib
         line = "  "
         line += f"{t['ppc_code']}\t"
         line += "0\t"
-        line += conf['qplan']['ob_tottime']['tottime']+"\t"
+        line += conf["qplan"]["ob_tottime"]["tottime"] + "\t"
         line += "L\t"
         line += f"{int(ra.h)}:{int(abs(ra.m))}:{abs(ra.s)}\t"
         line += f"{int(dec.d)}:{int(abs(dec.m))}:{abs(dec.s)}\t"
@@ -177,11 +181,17 @@ def run(conf, ppcList, obs_dates, inputDirName=".", outputDirName=".", plotVisib
     #       if scheduling a second half just set the start time to 00:30:00 etc
     rec = []
     for date in obs_dates:
+        date_t = parser.parse(f"{date} 12:00 HST")
+        observer.set_date(date_t)
+        start_time_ = observer.evening_twilight_18()
+        stop_time_ = observer.morning_twilight_18()
+        print(f"{date}: start obs. at {start_time_}, stop obs. at {stop_time_}")
+
         rec.append(
             Bunch(
                 date=date,  # date HST
-                starttime=conf['qplan']['tw_time']['starttime'],  # time HST
-                stoptime=conf['qplan']['tw_time']['stoptime'],  # time HST
+                starttime=start_time_,  # time HST
+                stoptime=stop_time_,  # time HST
                 categories=["open"],
                 skip=False,
                 note="",
