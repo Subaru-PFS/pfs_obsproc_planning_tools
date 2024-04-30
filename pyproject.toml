@@ -39,7 +39,7 @@ dependencies = [
     #"pfs-design-tool @ git+https://github.com/Subaru-PFS/ets_pointing.git@u/kiyoyabe/run15_2024mar",
     "ics-cobraOps @ git+https://github.com/Subaru-PFS/ics_cobraOps.git",
     "opdb @ git+https://github.com/Subaru-PFS/spt_operational_database.git",
-    "targetdb @ git+https://github.com/Subaru-PFS/ets_target_database.git",
+    "ets_target_database @ git+https://github.com/Subaru-PFS/ets_target_database.git",
 ]
 requires-python = ">=3.9,<3.12"
 readme = "README.md"

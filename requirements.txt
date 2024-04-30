@@ -6,6 +6,7 @@ astropy>=5.3
 bokeh>=3.3.0
 colorcet>=3.0.1
 ets-fiber-assigner @ git+https://github.com/Subaru-PFS/ets_fiberalloc.git
+ets-target-database @ git+https://github.com/Subaru-PFS/ets_target_database.git
 gitpython>=3.1.38
 gurobipy<11,>=10.0.3
 -e git+https://github.com/Subaru-PFS/ics_cobraCharmer.git@1af21d85a0af309cc57c939b78d625e884ece404#egg=ics-cobraCharmer
@@ -19,7 +20,6 @@ numpy<1.24.0
 opdb @ git+https://github.com/Subaru-PFS/spt_operational_database.git
 pandas>=2.1.0
 pfs-datamodel @ git+https://github.com/Subaru-PFS/datamodel.git
-# pfs-design-tool @ git+https://github.com/Subaru-PFS/ets_pointing.git@u/kiyoyabe/run15_2024mar
 -e git+https://github.com/Subaru-PFS/pfs_utils.git#egg=pfs-utils
 psycopg2-binary>=2.9.8
 pybind11>=2.11.1
@@ -32,6 +32,5 @@ sep>=1.2.1
 setuptools>=68.2.2
 shapely>=2.0.1
 sqlalchemy>=2.0.21
-targetdb @ git+https://github.com/Subaru-PFS/ets_target_database.git
 toml>=0.10.2
 wheel>=0.41.2
