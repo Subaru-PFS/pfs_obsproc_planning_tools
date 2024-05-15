@@ -108,17 +108,23 @@ class OpeFile(object):
 
         # update FIELD NAME (contents part)
         repl1 = (
-            'FIELD_NAME=OBJECT=\"FIELD_NAME\" RA=FIELD_RA DEC=FIELD_DEC EQUINOX=2000.0'
+            'FIELD_NAME=OBJECT="FIELD_NAME" RA=FIELD_RA DEC=FIELD_DEC EQUINOX=2000.0'
         )
         repl2 = ""
         for i, val in enumerate(info):
-            repl2 += f'FIELD_NAME=OBJECT=\"{val[0]}\" RA={val[4]} DEC={val[5]} EQUINOX=2000.0\n'
+            repl2 += (
+                f'{val[0]}=OBJECT="{val[0]}" RA={val[4]} DEC={val[5]} EQUINOX=2000.0\n'
+            )
         self.contents1_updated = self.contents1_updated.replace(repl1, repl2)
 
         # remove unnecessary words
-        self.contents1_updated = self.contents1_updated.replace('#!!! MODIFICATION NEEDED !!!#', '')
-        self.contents1_updated = self.contents1_updated.replace('#!!! WHOLE LIST NEED TO BE MODIFIED !!!#', '')
-    
+        self.contents1_updated = self.contents1_updated.replace(
+            "#!!! MODIFICATION NEEDED !!!#", ""
+        )
+        self.contents1_updated = self.contents1_updated.replace(
+            "#!!! WHOLE LIST NEED TO BE MODIFIED !!!#", ""
+        )
+
         # update "Science Exposure" part
         self.contents2_updated = ""
         for i, val in enumerate(info):
@@ -130,27 +136,27 @@ class OpeFile(object):
             tmpl = tmpl.replace(repl1, repl2)
 
             # add pfsDesignId
-            repl1 = 'DESIGN_ID=\"designId\"'
-            repl2 = f"DESIGN_ID=\"{val[3]:#013x}\""
+            repl1 = 'DESIGN_ID="designId"'
+            repl2 = f'DESIGN_ID="{val[3]:#013x}"'
             tmpl = tmpl.replace(repl1, repl2)
 
             # add objectname
-            repl1 = '\"objectname\"'
-            repl2 = f"\"{val[0]}\""
+            repl1 = '"objectname"'
+            repl2 = f'"{val[0]}"'
             tmpl = tmpl.replace(repl1, repl2)
 
             # remove unnecessary words
-            repl1 = '# SETUPFIELD WITH cobra convergence                     #!!! MODIFICATION NEEDED: designId, objectname !!!#'
-            repl2 = '# SETUPFIELD WITH cobra convergence'
+            repl1 = "# SETUPFIELD WITH cobra convergence                     #!!! MODIFICATION NEEDED: designId, objectname !!!#"
+            repl2 = "# SETUPFIELD WITH cobra convergence"
             tmpl = tmpl.replace(repl1, repl2)
 
-            repl1 = '## Get spectrum                                         #!!! MODIFICATION NEEDED: objectname !!!#'
-            repl2 = '## Get spectrum'
+            repl1 = "## Get spectrum                                         #!!! MODIFICATION NEEDED: objectname !!!#"
+            repl2 = "## Get spectrum"
             tmpl = tmpl.replace(repl1, repl2)
 
             self.contents2_updated += tmpl
-            
-            self.contents3 = self.contents3.replace('### SCIENCE:END  ###', '')
+
+            self.contents3 = self.contents3.replace("### SCIENCE:END  ###", "")
 
     def write(self):
         with open(self.outfile, "w") as file:
