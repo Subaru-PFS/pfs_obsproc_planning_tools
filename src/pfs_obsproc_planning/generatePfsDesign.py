@@ -128,6 +128,7 @@ class GeneratePfsDesign(object):
                         self.conf["targetdb"]["db"]["dbname"],
                     ],
                     "sql_query": self.conf["ppp"]["sql_query"],
+                    "DBPath_qDB": self.conf["queuedb"]["filepath"],
                 },
             }
 
@@ -177,7 +178,6 @@ class GeneratePfsDesign(object):
         return None
 
     def runQPlan(self, obs_dates=["2023-05-20"], plotVisibility=False):
-
         if obs_dates is not ["2023-05-20"]:
             self.update_obs_dates(obs_dates)
 
@@ -308,9 +308,7 @@ class GeneratePfsDesign(object):
         logger.info(len(obList))
 
         ## get a list of assigned OBs ## FIXME (maybe we don't need to use this)
-        data_ppp = Table.read(
-            os.path.join(self.outputDirPPP, "ppcList.ecsv")
-        )
+        data_ppp = Table.read(os.path.join(self.outputDirPPP, "ppcList.ecsv"))
         # print(len(data_ppp))
         # print(t[:4])
 
@@ -352,7 +350,7 @@ class GeneratePfsDesign(object):
         )
         ## curate csv (FIXME) ##
         df = pd.read_csv(os.path.join(self.outputDirPPP, filename))
-        df = df.replace("[]","")
+        df = df.replace("[]", "")
         df.to_csv(os.path.join(self.outputDirPPP, filename), index=False)
 
         ## run SFA ##
@@ -378,11 +376,36 @@ class GeneratePfsDesign(object):
             ):
                 if observation_date_in_hst == obsdate:
                     res = self.resQPlan[pointing]
-                    info.append([pointing, obsdate, k, v, res[1].replace(":", ""), res[2].replace(":",""), k])
-            info = pd.DataFrame(info, columns=['ppc_code', 'obsdate_in_hst', 'obstime_in_utc', 'pfs_design_id', 'ppc_ra', 'ppc_dec', 'obstime_in_hst'])
-            info["obstime_in_hst"] = pd.to_datetime(info["obstime_in_hst"], utc=True) 
-            info["obstime_in_hst"] = info["obstime_in_hst"].dt.tz_convert('Pacific/Honolulu').dt.strftime("%Y/%m/%d %H:%M:%S")
-            info = info.sort_values(by='obstime_in_utc', ascending=True).values.tolist()
+                    info.append(
+                        [
+                            pointing,
+                            obsdate,
+                            k,
+                            v,
+                            res[1].replace(":", ""),
+                            res[2].replace(":", ""),
+                            k,
+                        ]
+                    )
+            info = pd.DataFrame(
+                info,
+                columns=[
+                    "ppc_code",
+                    "obsdate_in_hst",
+                    "obstime_in_utc",
+                    "pfs_design_id",
+                    "ppc_ra",
+                    "ppc_dec",
+                    "obstime_in_hst",
+                ],
+            )
+            info["obstime_in_hst"] = pd.to_datetime(info["obstime_in_hst"], utc=True)
+            info["obstime_in_hst"] = (
+                info["obstime_in_hst"]
+                .dt.tz_convert("Pacific/Honolulu")
+                .dt.strftime("%Y/%m/%d %H:%M:%S")
+            )
+            info = info.sort_values(by="obstime_in_utc", ascending=True).values.tolist()
             ope.update_design(info)
             ope.write()  # save file
         # for pointing, (k,v) in zip(listPointings, pfsDesignIds.items()):
