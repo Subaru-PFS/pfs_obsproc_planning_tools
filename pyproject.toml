@@ -35,7 +35,7 @@ dependencies = [
     "wheel>=0.41.2",
     "qplan @ git+https://github.com/naojsoft/qplan.git",
     "pfs-datamodel @ git+https://github.com/Subaru-PFS/datamodel.git",
-    "ets-fiber-assigner @ git+https://github.com/Subaru-PFS/ets_fiberalloc.git",
+    "ets-fiber-assigner @ git+https://github.com/Subaru-PFS/ets_fiberalloc.git@tickets/FIBERALLOC-49", # two-step assignment
     #"pfs-design-tool @ git+https://github.com/Subaru-PFS/ets_pointing.git@u/kiyoyabe/run15_2024mar",
     "ics-cobraOps @ git+https://github.com/Subaru-PFS/ics_cobraOps.git",
     "opdb @ git+https://github.com/Subaru-PFS/spt_operational_database.git",
