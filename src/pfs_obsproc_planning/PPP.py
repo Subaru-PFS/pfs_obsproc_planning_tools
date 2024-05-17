@@ -20,6 +20,10 @@ from loguru import logger
 from matplotlib.path import Path
 from sklearn.cluster import DBSCAN, AgglomerativeClustering
 from sklearn.neighbors import KernelDensity
+from qplan import q_db, q_query, entity
+from ginga.misc.log import get_logger
+
+logger_qplan = get_logger("qplan_test", null=True)
 
 warnings.filterwarnings("ignore")
 
@@ -65,12 +69,18 @@ def count_N_overlap(_tb_tgt_psl, _tb_tgt):
 
     return _tb_tgt_psl
 
+
 def removeObjIdDuplication(df):
     num1 = len(df)
-    df = df.drop_duplicates(subset=['proposal_id', 'obj_id', 'input_catalog_id', 'resolution'], inplace=False, ignore_index=True)
+    df = df.drop_duplicates(
+        subset=["proposal_id", "obj_id", "input_catalog_id", "resolution"],
+        inplace=False,
+        ignore_index=True,
+    )
     num2 = len(df)
-    logger.info(f'Duplication removed: {num1} --> {num2}')
-    return df    
+    logger.info(f"Duplication removed: {num1} --> {num2}")
+    return df
+
 
 def readTarget(mode, para):
     """Read target list including:
@@ -131,7 +141,7 @@ def readTarget(mode, para):
                 "proposal_id",
                 "rank",
                 "grade",
-                "allocated_time",
+                "allocated_time_tac",
                 "allocated_time_lr",
                 "allocated_time_mr",
                 "filter_g",
@@ -153,12 +163,12 @@ def readTarget(mode, para):
         )
         # convert column names
         df_tgt = df_tgt.rename(columns={"epoch": "equinox"})
-        df_tgt = df_tgt.rename(columns={"effective_exptime": "exptime"})
+        df_tgt = df_tgt.rename(columns={"effective_exptime": "exptime_usr"})
         df_tgt = df_tgt.rename(columns={"is_medium_resolution": "resolution"})
 
         # convert Boolean to String
         df_tgt["resolution"] = ["M" if v == True else "L" for v in df_tgt["resolution"]]
-        df_tgt["allocated_time"] = [
+        df_tgt["allocated_time_tac"] = [
             df_tgt["allocated_time_lr"][ii]
             if df_tgt["resolution"][ii] == "L"
             else df_tgt["allocated_time_mr"][ii]
@@ -168,17 +178,17 @@ def readTarget(mode, para):
 
         df_tgt = removeObjIdDuplication(df_tgt)
 
-        df_tgt["psf_flux_g"][np.isnan(df_tgt["psf_flux_g"])]=9e-5
-        df_tgt["psf_flux_r"][np.isnan(df_tgt["psf_flux_r"])]=9e-5
-        df_tgt["psf_flux_i"][np.isnan(df_tgt["psf_flux_i"])]=9e-5
-        df_tgt["psf_flux_z"][np.isnan(df_tgt["psf_flux_z"])]=9e-5
-        df_tgt["psf_flux_y"][np.isnan(df_tgt["psf_flux_y"])]=9e-5
+        df_tgt["psf_flux_g"][df_tgt["psf_flux_g"].isnull()] = 9e-5
+        df_tgt["psf_flux_r"][df_tgt["psf_flux_r"].isnull()] = 9e-5
+        df_tgt["psf_flux_i"][df_tgt["psf_flux_i"].isnull()] = 9e-5
+        df_tgt["psf_flux_z"][df_tgt["psf_flux_z"].isnull()] = 9e-5
+        df_tgt["psf_flux_y"][df_tgt["psf_flux_y"].isnull()] = 9e-5
 
-        df_tgt["psf_flux_error_g"][np.isnan(df_tgt["psf_flux_error_g"])]=9e-5
-        df_tgt["psf_flux_error_r"][np.isnan(df_tgt["psf_flux_error_r"])]=9e-5
-        df_tgt["psf_flux_error_i"][np.isnan(df_tgt["psf_flux_error_i"])]=9e-5
-        df_tgt["psf_flux_error_z"][np.isnan(df_tgt["psf_flux_error_z"])]=9e-5
-        df_tgt["psf_flux_error_y"][np.isnan(df_tgt["psf_flux_error_y"])]=9e-5
+        df_tgt["psf_flux_error_g"][df_tgt["psf_flux_error_g"].isnull()] = 9e-5
+        df_tgt["psf_flux_error_r"][df_tgt["psf_flux_error_r"].isnull()] = 9e-5
+        df_tgt["psf_flux_error_i"][df_tgt["psf_flux_error_i"].isnull()] = 9e-5
+        df_tgt["psf_flux_error_z"][df_tgt["psf_flux_error_z"].isnull()] = 9e-5
+        df_tgt["psf_flux_error_y"][df_tgt["psf_flux_error_y"].isnull()] = 9e-5
 
         tb_tgt = Table.from_pandas(df_tgt)
 
@@ -189,16 +199,89 @@ def readTarget(mode, para):
     tb_tgt["ob_code"] = tb_tgt["ob_code"].astype(str)
     tb_tgt["identify_code"] = [tt["proposal_id"] + "_" + tt["ob_code"] for tt in tb_tgt]
     tb_tgt["exptime_assign"] = 0
+    tb_tgt["allocated_time_done"] = 0
+    tb_tgt["allocated_time"] = 0
+    tb_tgt["exptime_done"] = 0  # observed exptime
 
-    # exptime needs to be multiples of 900s so netflow can be successfully executed
-    tb_tgt["exptime_PPP"] = np.ceil(tb_tgt["exptime"] / 900) * 900
+    # list of all psl_id
+    psl_id = sorted(set(tb_tgt["proposal_id"]))
+
+    # connect with queueDB
+    qdb = q_db.QueueDatabase(logger_qplan)
+    qdb.read_config(para["DBPath_qDB"])
+    qdb.connect()
+    qa = q_db.QueueAdapter(qdb)
+    qq = q_query.QueueQuery(qa, use_cache=False)
+
+    # determine observed exptime
+    for psl_id_ in psl_id:
+        ex_obs = qq.get_executed_obs_by_proposal(psl_id_)
+        for ex_ob in ex_obs:
+            exps = qq.get_exposures(ex_ob)
+            exptime_exe = sum([exp.effective_exptime for exp in exps])
+            exptime_usr = tb_tgt[
+                (tb_tgt["proposal_id"] == ex_ob.ob_key[0])
+                * (tb_tgt["ob_code"] == ex_ob.ob_key[1])
+            ]["exptime_usr"].data[0]
+            exptime_exe_fin = min(exptime_usr, exptime_exe)  # ignore over-observation
+            tb_tgt["exptime_done"][
+                (tb_tgt["proposal_id"] == ex_ob.ob_key[0])
+                * (tb_tgt["ob_code"] == ex_ob.ob_key[1])
+            ] = exptime_exe_fin
+
+    tb_tgt["exptime"] = tb_tgt["exptime_usr"] - tb_tgt["exptime_done"]
+
+    # update allocated time
+    for psl_id_ in psl_id:
+        tb_tgt_tem_l = tb_tgt[
+            (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "L")
+        ]
+        tb_tgt_tem_m = tb_tgt[
+            (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "M")
+        ]
+
+        if len(tb_tgt_tem_l) > 0:
+            # total observed FH for the proposal (LR)
+            FH_psl_done = sum(tb_tgt_tem_l["exptime_done"]) / 3600.0
+            tb_tgt["allocated_time_done"][
+                (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "L")
+            ] = FH_psl_done
+            FH_psl = tb_tgt["allocated_time_tac"][
+                (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "L")
+            ].data[0]
+            FH_comp = tb_tgt["allocated_time_done"][
+                (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "L")
+            ].data[0]
+            logger.info(
+                f"{psl_id_} (LR): allocated FH = {FH_psl:.2f}, achieved FH = {FH_comp:.2f}, CR = {FH_comp/FH_psl*100.0:.2f}%"
+            )
+
+        if len(tb_tgt_tem_m) > 0:
+            # total observed FH for the proposal (MR)
+            FH_psl_done = sum(tb_tgt_tem_m["exptime_done"]) / 3600.0
+            tb_tgt["allocated_time_done"][
+                (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "M")
+            ] = FH_psl_done
+            FH_psl = tb_tgt["allocated_time_tac"][
+                (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "M")
+            ].data[0]
+            FH_comp = tb_tgt["allocated_time_done"][
+                (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "M")
+            ].data[0]
+            logger.info(
+                f"{psl_id_} (MR): allocated FH = {FH_psl:.2f}, achieved FH = {FH_comp:.2f}, CR = {FH_comp/FH_psl*100.0:.2f}%"
+            )
+
+    tb_tgt["allocated_time"] = (
+        tb_tgt["allocated_time_tac"] - tb_tgt["allocated_time_done"]
+    )
+    tb_tgt["allocated_time"][tb_tgt["allocated_time"] < 0] = 0
 
     # separete the sample by 'resolution' (L/M)
     tb_tgt_l = tb_tgt[tb_tgt["resolution"] == "L"]
     tb_tgt_m = tb_tgt[tb_tgt["resolution"] == "M"]
 
     # select targets based on the allocated FH (for determining PPC)
-    psl_id = sorted(set(tb_tgt["proposal_id"]))
     _tgt_select_l = []
     _tgt_select_m = []
 
@@ -210,17 +293,23 @@ def readTarget(mode, para):
             (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "M")
         ]
 
-        size_step = 50
-        size_ = 50
-
         if len(tb_tgt_tem_l) > 0:
-            FH_select = 0
-            FH_tac = tb_tgt_tem_l["allocated_time"][0] * 3600.0
+            _tgt_select_l.append(tb_tgt_tem_l[tb_tgt_tem_l["exptime_done"] > 0])
+            FH_select = sum(
+                tb_tgt_tem_l["exptime_usr"][tb_tgt_tem_l["exptime_done"] > 0]
+            )
+            FH_tac = tb_tgt_tem_l["allocated_time_tac"][0] * 3600.0
+            # print("1L", psl_id_, FH_select/3600.0, FH_tac/3600.0, len(_tgt_select_l[-1]))
+
+            tb_tgt_tem_l = tb_tgt_tem_l[tb_tgt_tem_l["exptime_done"] == 0]
+
+            size_step = max(int(0.02 * len(tb_tgt_tem_l)), 100)
+            size_ = max(int(0.02 * len(tb_tgt_tem_l)), 100)
 
             while FH_select < FH_tac:
                 tb_tgt_tem_l = count_N_overlap(tb_tgt_tem_l, tb_tgt_l)
                 pri_ = (
-                    (10 - tb_tgt_tem_l["priority"]) 
+                    (10 - tb_tgt_tem_l["priority"])
                     + 2
                     * (tb_tgt_tem_l["local_count"] / max(tb_tgt_tem_l["local_count"]))
                     + 2 * (1 - tb_tgt_tem_l["exptime"] / max(tb_tgt_tem_l["exptime"]))
@@ -236,16 +325,28 @@ def readTarget(mode, para):
                 )
 
                 _tb_tem = Table.copy(tb_tgt_tem_l)
-                [_tgt_select_l.append(_tb_tem_) for _tb_tem_ in _tb_tem[index_t]]
-                FH_select += sum(tb_tgt_tem_l[index_t]["exptime"])
+                _tgt_select_l.append(_tb_tem[index_t])
+                FH_select += sum(tb_tgt_tem_l["exptime_usr"][index_t])
                 tb_tgt_tem_l.remove_rows(index_t)
 
                 if len(tb_tgt_tem_l) == 0:
                     break
 
+                # print("L", psl_id_, FH_select/3600.0, FH_tac/3600.0, len(_tgt_select_l[-1]))
+                #'''
+
         if len(tb_tgt_tem_m) > 0:
-            FH_select = 0
-            FH_tac = tb_tgt_tem_m["allocated_time"][0] * 3600.0
+            _tgt_select_m.append(tb_tgt_tem_m[tb_tgt_tem_m["exptime_done"] > 0])
+            FH_select = sum(
+                tb_tgt_tem_m["exptime_usr"][tb_tgt_tem_m["exptime_done"] > 0]
+            )
+            FH_tac = tb_tgt_tem_m["allocated_time_tac"][0] * 3600.0
+            # print("1M", psl_id_, FH_select/3600.0, FH_tac/3600.0, len(_tgt_select_m[-1]))
+
+            tb_tgt_tem_m = tb_tgt_tem_m[tb_tgt_tem_m["exptime_done"] == 0]
+
+            size_step = max(int(0.02 * len(tb_tgt_tem_m)), 100)
+            size_ = max(int(0.02 * len(tb_tgt_tem_m)), 100)
 
             while FH_select < FH_tac:
                 tb_tgt_tem_m = count_N_overlap(tb_tgt_tem_m, tb_tgt_m)
@@ -266,12 +367,15 @@ def readTarget(mode, para):
                 )
 
                 _tb_tem = Table.copy(tb_tgt_tem_m)
-                [_tgt_select_m.append(_tb_tem_) for _tb_tem_ in _tb_tem[index_t]]
-                FH_select += sum(tb_tgt_tem_m[index_t]["exptime"])
+                _tgt_select_m.append(_tb_tem[index_t])
+                FH_select += sum(tb_tgt_tem_m["exptime_usr"][index_t])
                 tb_tgt_tem_m.remove_rows(index_t)
 
                 if len(tb_tgt_tem_m) == 0:
                     break
+
+                # print("M", psl_id_, FH_select/3600.0, FH_tac/3600.0, len(_tgt_select_m[-1]))
+                #'''
 
     if len(_tgt_select_l) > 0:
         tgt_select_l = vstack(_tgt_select_l)
@@ -282,7 +386,27 @@ def readTarget(mode, para):
         tgt_select_m = vstack(_tgt_select_m)
     else:
         tgt_select_m = Table()
-    # """
+
+    # remove complete targets
+    n_tgt1 = len(tb_tgt)
+    tb_tgt = tb_tgt[tb_tgt["exptime"] > 0]
+    tb_tgt["exptime_PPP"] = (
+        np.ceil(tb_tgt["exptime"] / 900) * 900
+    )  # exptime needs to be multiples of 900s so netflow can be successfully executed
+    n_tgt2 = len(tb_tgt)
+    logger.info(f"There are {n_tgt2:.0f} / {n_tgt1:.0f} targets not completed")
+
+    if len(_tgt_select_l) > 0:
+        tgt_select_l = tgt_select_l[tgt_select_l["exptime"] > 0]
+        tb_tgt_l = tb_tgt_l[tb_tgt_l["exptime"] > 0]
+        tgt_select_l["exptime_PPP"] = np.ceil(tgt_select_l["exptime"] / 900) * 900
+        tb_tgt_l["exptime_PPP"] = np.ceil(tb_tgt_l["exptime"] / 900) * 900
+
+    if len(_tgt_select_m) > 0:
+        tgt_select_m = tgt_select_m[tgt_select_m["exptime"] > 0]
+        tb_tgt_m = tb_tgt_m[tb_tgt_m["exptime"] > 0]
+        tgt_select_m["exptime_PPP"] = np.ceil(tgt_select_m["exptime"] / 900) * 900
+        tb_tgt_m["exptime_PPP"] = np.ceil(tb_tgt_m["exptime"] / 900) * 900
 
     logger.info(
         f"[S1] Read targets done (takes {round(time.time()-time_start,3):.2f} sec)."
@@ -579,7 +703,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para, randomseed=0, mutiPro=True):
                 # quit if no targets assigned
                 break
 
-            if iter_n>25 and ppc_totPri_sub[-1] < ppc_totPri_sub[0] * 0.15:
+            if iter_n > 25 and ppc_totPri_sub[-1] < ppc_totPri_sub[0] * 0.15:
                 # quit if ppc contains too limited targets
                 break
 
@@ -1848,6 +1972,6 @@ def run(
 
     output(tb_ppc_tot, tb_tgt_tot, dirName=dirName)
 
-    CR_tot, CR_tot_, sub_tot = complete_ppc(tb_tgt_tot, "compOFpsl_n")
+    # CR_tot, CR_tot_, sub_tot = complete_ppc(tb_tgt_tot, "compOFpsl_n")
 
-    plotCR(CR_tot_, sub_tot, tb_ppc_tot, dirName=dirName, show_plots=show_plots)
+    # plotCR(CR_tot_, sub_tot, tb_ppc_tot, dirName=dirName, show_plots=show_plots)

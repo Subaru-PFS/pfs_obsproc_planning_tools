@@ -112,7 +112,7 @@ class OpeFile(object):
         )
         repl2 = ""
         for i, val in enumerate(info):
-            repl2 += f'FIELD_NAME=OBJECT=\"{val[0]}\" RA={val[4]} DEC={val[5]} EQUINOX=2000.0\n'
+            repl2 += f'{val[0]}=OBJECT=\"{val[0]}\" RA={val[4]} DEC={val[5]} EQUINOX=2000.0\n'
         self.contents1_updated = self.contents1_updated.replace(repl1, repl2)
 
         # remove unnecessary words

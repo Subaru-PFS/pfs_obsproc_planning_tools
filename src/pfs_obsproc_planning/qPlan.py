@@ -72,7 +72,7 @@ def run(
     # PPCConfiguration -- PFS Pointing Center
     # if you have different times for your pointing centers, create a different one
     # for each exp_time, PA or resolution
-    inscfg = PPCConfiguration(exp_time=15 * 60.0, pa=0.0, resolution="low")
+    #inscfg = PPCConfiguration(exp_time=15 * 60.0, pa=0.0, resolution="low")
     # can be used later to constrain, if desired, for now set to allow anything
     envcfg = EnvironmentConfiguration(seeing=99.0, transparency=0.0)
 
@@ -163,7 +163,7 @@ def run(
             program=pgm,
             target=tgt,
             telcfg=telcfg,
-            inscfg=inscfg,
+            inscfg=PPCConfiguration(exp_time=15 * 60.0, pa=0.0, resolution="low"),
             envcfg=envcfg,
             # total_time should really include instrument overheads
             # acct_time is time we charge to the PI
@@ -256,7 +256,7 @@ def run(
 
     def make_schedule_table(schedule):
         data = [
-            (slot.start_time, slot.ob.name, slot.ob.target.ra, slot.ob.target.dec)
+            (slot.start_time, slot.ob.name, slot.ob.target.ra, slot.ob.target.dec, slot.ob.inscfg.pa)
             for slot in schedule
             if slot.ob is not None and not slot.ob.derived
         ]
@@ -265,7 +265,7 @@ def run(
             for slot in schedule
             if slot.ob is not None and not slot.ob.derived
         ]
-        df = pd.DataFrame(data, columns=["obstime", "ppc_code", "ppc_ra", "ppc_dec"])
+        df = pd.DataFrame(data, columns=["obstime", "ppc_code", "ppc_ra", "ppc_dec", "ppc_pa"])
         return df, targets
 
     df, targets = make_schedule_table(slots)
