@@ -3,7 +3,7 @@
 
 import os
 import warnings
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
@@ -72,9 +72,9 @@ def run(
     # PPCConfiguration -- PFS Pointing Center
     # if you have different times for your pointing centers, create a different one
     # for each exp_time, PA or resolution
-    #inscfg = PPCConfiguration(exp_time=15 * 60.0, pa=0.0, resolution="low")
+    # inscfg = PPCConfiguration(exp_time=15 * 60.0, pa=0.0, resolution="low")
     # can be used later to constrain, if desired, for now set to allow anything
-    envcfg = EnvironmentConfiguration(seeing=99.0, transparency=0.0)
+    # envcfg = EnvironmentConfiguration(seeing=99.0, transparency=0.0)
 
     # these are typical weights for HSC, but PFS has no filters
     # most weights are normalized to 0-1, but we use a higher value for delay
@@ -124,9 +124,9 @@ def run(
         dec = c.dec.dms
         line = "  "
         line += f"{t['ppc_code']}\t"
-        line += "0\t"
-        line += conf["qplan"]["ob_tottime"]["tottime"] + "\t"
-        line += "L\t"
+        line += f"{t['ppc_priority']}\t"
+        line += f"{t['ppc_exptime'] + float(conf['qplan']['overhead'])*60.0}\t"
+        line += f"{t['ppc_resolution']}\t"
         line += f"{int(ra.h)}:{int(abs(ra.m))}:{abs(ra.s)}\t"
         line += f"{int(dec.d)}:{int(abs(dec.m))}:{abs(dec.s)}\t"
         line += "2000\t"
@@ -153,18 +153,43 @@ def run(
             cat_id,
             comment,
         ) = line.split("\t")
-        exp_time = float(exp_time) * 60.0  # assume table is in MINUTES
+        # exp_time = float(exp_time) * 60.0  # assume table is in MINUTES
+        exp_time = float(exp_time)  # exptime is in seconds
+
+        if resolution == "L":
+            resolution = "low"
+        elif resolution == "M":
+            resolution = "medium"
 
         tgt = StaticTarget(
             name=ob_code, ra=ra, dec=dec, equinox=float(eq), comment=comment
         )
+
+        if len(conf["qplan"]["start_time"]) > 0:
+            start_time_too = datetime.strptime(
+                conf["qplan"]["start_time"], "%Y-%m-%d %H:%M:%S"
+            ).replace(tzinfo=timezone.utc)
+        else:
+            start_time_too = None
+
+        if len(conf["qplan"]["stop_time"]) > 0:
+            stop_time_too = datetime.strptime(
+                conf["qplan"]["stop_time"], "%Y-%m-%d %H:%M:%S"
+            ).replace(tzinfo=timezone.utc)
+        else:
+            stop_time_too = None
         ob = PPC_OB(
             id=ob_code,
             program=pgm,
             target=tgt,
             telcfg=telcfg,
-            inscfg=PPCConfiguration(exp_time=15 * 60.0, pa=0.0, resolution="low"),
-            envcfg=envcfg,
+            inscfg=PPCConfiguration(exp_time=exp_time, pa=0.0, resolution=resolution),
+            envcfg=EnvironmentConfiguration(
+                seeing=99.0,
+                transparency=0.0,
+                lower_time_limit=start_time_too,
+                upper_time_limit=stop_time_too,
+            ),
             # total_time should really include instrument overheads
             # acct_time is time we charge to the PI
             acct_time=exp_time,
@@ -256,7 +281,13 @@ def run(
 
     def make_schedule_table(schedule):
         data = [
-            (slot.start_time, slot.ob.name, slot.ob.target.ra, slot.ob.target.dec, slot.ob.inscfg.pa)
+            (
+                slot.start_time,
+                slot.ob.name,
+                slot.ob.target.ra,
+                slot.ob.target.dec,
+                slot.ob.inscfg.pa,
+            )
             for slot in schedule
             if slot.ob is not None and not slot.ob.derived
         ]
@@ -265,7 +296,9 @@ def run(
             for slot in schedule
             if slot.ob is not None and not slot.ob.derived
         ]
-        df = pd.DataFrame(data, columns=["obstime", "ppc_code", "ppc_ra", "ppc_dec", "ppc_pa"])
+        df = pd.DataFrame(
+            data, columns=["obstime", "ppc_code", "ppc_ra", "ppc_dec", "ppc_pa"]
+        )
         return df, targets
 
     df, targets = make_schedule_table(slots)

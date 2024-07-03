@@ -90,8 +90,7 @@ def readTarget(mode, para):
     ==========
     para : dict
         mode:
-            'local' -- read target list from local machine
-            'DB' -- read target list from Database
+            'classic' , 'queue'
 
         localPath:
             (if mode == local) the path of the target list
@@ -107,10 +106,15 @@ def readTarget(mode, para):
     time_start = time.time()
     logger.info(f"[S1] Read targets started (PPP)")
 
-    if mode == "local":
+    if len(para["localPath_tgt"]) > 0:
         tb_tgt = Table.read(para["localPath_tgt"])
+        logger.info(f"[S1] Target list is read from {para['localPath_tgt']}.")
 
-    elif mode == "DB":
+    elif None in para["DBPath_tgt"]:
+        logger.error("[S1] Incorrect connection info to database is provided.")
+        return Table(), Table(), Table(), Table(), Table()
+
+    else:
         import pandas as pd
         import psycopg2
         import sqlalchemy as sa
@@ -137,6 +141,7 @@ def readTarget(mode, para):
                 "pmdec",
                 "parallax",
                 "effective_exptime",
+                "single_exptime",
                 "is_medium_resolution",
                 "proposal_id",
                 "rank",
@@ -165,6 +170,8 @@ def readTarget(mode, para):
         df_tgt = df_tgt.rename(columns={"epoch": "equinox"})
         df_tgt = df_tgt.rename(columns={"effective_exptime": "exptime_usr"})
         df_tgt = df_tgt.rename(columns={"is_medium_resolution": "resolution"})
+
+        df_tgt.to_csv("/home/wanqqq/examples/test/input/test_input.csv")
 
         # convert Boolean to String
         df_tgt["resolution"] = ["M" if v == True else "L" for v in df_tgt["resolution"]]
@@ -197,226 +204,385 @@ def readTarget(mode, para):
     tb_tgt["ra"] = tb_tgt["ra"].astype(float)
     tb_tgt["dec"] = tb_tgt["dec"].astype(float)
     tb_tgt["ob_code"] = tb_tgt["ob_code"].astype(str)
-    tb_tgt["identify_code"] = [tt["proposal_id"] + "_" + tt["ob_code"] for tt in tb_tgt]
+    tb_tgt["identify_code"] = [
+        tt["proposal_id"] + "_" + tt["ob_code"]
+        if "proposal_id" in tb_tgt.columns
+        else tt["ob_code"]
+        for tt in tb_tgt
+    ]
     tb_tgt["exptime_assign"] = 0
-    tb_tgt["allocated_time_done"] = 0
-    tb_tgt["allocated_time"] = 0
     tb_tgt["exptime_done"] = 0  # observed exptime
 
-    # list of all psl_id
-    psl_id = sorted(set(tb_tgt["proposal_id"]))
+    if len(set(tb_tgt["single_exptime"])) > 1:
+        logger.error(
+            "[S1] Multiple single-exptime are given. Not accepted now (240709)."
+        )
+        return Table(), Table(), Table(), Table(), Table()
 
-    # connect with queueDB
-    qdb = q_db.QueueDatabase(logger_qplan)
-    qdb.read_config(para["DBPath_qDB"])
-    qdb.connect()
-    qa = q_db.QueueAdapter(qdb)
-    qq = q_query.QueueQuery(qa, use_cache=False)
-
-    # determine observed exptime
-    for psl_id_ in psl_id:
-        ex_obs = qq.get_executed_obs_by_proposal(psl_id_)
-        for ex_ob in ex_obs:
-            exps = qq.get_exposures(ex_ob)
-            exptime_exe = sum([exp.effective_exptime for exp in exps])
-            exptime_usr = tb_tgt[
-                (tb_tgt["proposal_id"] == ex_ob.ob_key[0])
-                * (tb_tgt["ob_code"] == ex_ob.ob_key[1])
-            ]["exptime_usr"].data[0]
-            exptime_exe_fin = min(exptime_usr, exptime_exe)  # ignore over-observation
-            tb_tgt["exptime_done"][
-                (tb_tgt["proposal_id"] == ex_ob.ob_key[0])
-                * (tb_tgt["ob_code"] == ex_ob.ob_key[1])
-            ] = exptime_exe_fin
-
-    tb_tgt["exptime"] = tb_tgt["exptime_usr"] - tb_tgt["exptime_done"]
-
-    # update allocated time
-    for psl_id_ in psl_id:
-        tb_tgt_tem_l = tb_tgt[
-            (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "L")
-        ]
-        tb_tgt_tem_m = tb_tgt[
-            (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "M")
-        ]
-
-        if len(tb_tgt_tem_l) > 0:
-            # total observed FH for the proposal (LR)
-            FH_psl_done = sum(tb_tgt_tem_l["exptime_done"]) / 3600.0
-            tb_tgt["allocated_time_done"][
-                (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "L")
-            ] = FH_psl_done
-            FH_psl = tb_tgt["allocated_time_tac"][
-                (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "L")
-            ].data[0]
-            FH_comp = tb_tgt["allocated_time_done"][
-                (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "L")
-            ].data[0]
-            logger.info(
-                f"{psl_id_} (LR): allocated FH = {FH_psl:.2f}, achieved FH = {FH_comp:.2f}, CR = {FH_comp/FH_psl*100.0:.2f}%"
-            )
-
-        if len(tb_tgt_tem_m) > 0:
-            # total observed FH for the proposal (MR)
-            FH_psl_done = sum(tb_tgt_tem_m["exptime_done"]) / 3600.0
-            tb_tgt["allocated_time_done"][
-                (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "M")
-            ] = FH_psl_done
-            FH_psl = tb_tgt["allocated_time_tac"][
-                (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "M")
-            ].data[0]
-            FH_comp = tb_tgt["allocated_time_done"][
-                (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "M")
-            ].data[0]
-            logger.info(
-                f"{psl_id_} (MR): allocated FH = {FH_psl:.2f}, achieved FH = {FH_comp:.2f}, CR = {FH_comp/FH_psl*100.0:.2f}%"
-            )
-
-    tb_tgt["allocated_time"] = (
-        tb_tgt["allocated_time_tac"] - tb_tgt["allocated_time_done"]
-    )
-    tb_tgt["allocated_time"][tb_tgt["allocated_time"] < 0] = 0
-
-    # separete the sample by 'resolution' (L/M)
-    tb_tgt_l = tb_tgt[tb_tgt["resolution"] == "L"]
-    tb_tgt_m = tb_tgt[tb_tgt["resolution"] == "M"]
-
-    # select targets based on the allocated FH (for determining PPC)
-    _tgt_select_l = []
-    _tgt_select_m = []
-
-    for psl_id_ in psl_id:
-        tb_tgt_tem_l = tb_tgt[
-            (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "L")
-        ]
-        tb_tgt_tem_m = tb_tgt[
-            (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "M")
-        ]
-
-        if len(tb_tgt_tem_l) > 0:
-            _tgt_select_l.append(tb_tgt_tem_l[tb_tgt_tem_l["exptime_done"] > 0])
-            FH_select = sum(
-                tb_tgt_tem_l["exptime_usr"][tb_tgt_tem_l["exptime_done"] > 0]
-            )
-            FH_tac = tb_tgt_tem_l["allocated_time_tac"][0] * 3600.0
-            # print("1L", psl_id_, FH_select/3600.0, FH_tac/3600.0, len(_tgt_select_l[-1]))
-
-            tb_tgt_tem_l = tb_tgt_tem_l[tb_tgt_tem_l["exptime_done"] == 0]
-
-            size_step = max(int(0.02 * len(tb_tgt_tem_l)), 100)
-            size_ = max(int(0.02 * len(tb_tgt_tem_l)), 100)
-
-            while FH_select < FH_tac:
-                tb_tgt_tem_l = count_N_overlap(tb_tgt_tem_l, tb_tgt_l)
-                pri_ = (
-                    (10 - tb_tgt_tem_l["priority"])
-                    + 2
-                    * (tb_tgt_tem_l["local_count"] / max(tb_tgt_tem_l["local_count"]))
-                    + 2 * (1 - tb_tgt_tem_l["exptime"] / max(tb_tgt_tem_l["exptime"]))
-                )
-                psl_pri_l = pri_ / sum(pri_)
-                if len(tb_tgt_tem_l) < size_step:
-                    size_ = len(tb_tgt_tem_l)
-                index_t = np.random.choice(
-                    np.arange(0, len(tb_tgt_tem_l), 1),
-                    size=size_,
-                    replace=False,
-                    p=psl_pri_l,
-                )
-
-                _tb_tem = Table.copy(tb_tgt_tem_l)
-                _tgt_select_l.append(_tb_tem[index_t])
-                FH_select += sum(tb_tgt_tem_l["exptime_usr"][index_t])
-                tb_tgt_tem_l.remove_rows(index_t)
-
-                if len(tb_tgt_tem_l) == 0:
-                    break
-
-                # print("L", psl_id_, FH_select/3600.0, FH_tac/3600.0, len(_tgt_select_l[-1]))
-                #'''
-
-        if len(tb_tgt_tem_m) > 0:
-            _tgt_select_m.append(tb_tgt_tem_m[tb_tgt_tem_m["exptime_done"] > 0])
-            FH_select = sum(
-                tb_tgt_tem_m["exptime_usr"][tb_tgt_tem_m["exptime_done"] > 0]
-            )
-            FH_tac = tb_tgt_tem_m["allocated_time_tac"][0] * 3600.0
-            # print("1M", psl_id_, FH_select/3600.0, FH_tac/3600.0, len(_tgt_select_m[-1]))
-
-            tb_tgt_tem_m = tb_tgt_tem_m[tb_tgt_tem_m["exptime_done"] == 0]
-
-            size_step = max(int(0.02 * len(tb_tgt_tem_m)), 100)
-            size_ = max(int(0.02 * len(tb_tgt_tem_m)), 100)
-
-            while FH_select < FH_tac:
-                tb_tgt_tem_m = count_N_overlap(tb_tgt_tem_m, tb_tgt_m)
-                pri_ = (
-                    (10 - tb_tgt_tem_m["priority"])
-                    + 2
-                    * (tb_tgt_tem_m["local_count"] / max(tb_tgt_tem_m["local_count"]))
-                    + 2 * (1 - tb_tgt_tem_m["exptime"] / max(tb_tgt_tem_m["exptime"]))
-                )
-                psl_pri_m = pri_ / sum(pri_)
-                if len(tb_tgt_tem_m) < size_step:
-                    size_ = len(tb_tgt_tem_m)
-                index_t = np.random.choice(
-                    np.arange(0, len(tb_tgt_tem_m), 1),
-                    size=size_,
-                    replace=False,
-                    p=psl_pri_m,
-                )
-
-                _tb_tem = Table.copy(tb_tgt_tem_m)
-                _tgt_select_m.append(_tb_tem[index_t])
-                FH_select += sum(tb_tgt_tem_m["exptime_usr"][index_t])
-                tb_tgt_tem_m.remove_rows(index_t)
-
-                if len(tb_tgt_tem_m) == 0:
-                    break
-
-                # print("M", psl_id_, FH_select/3600.0, FH_tac/3600.0, len(_tgt_select_m[-1]))
-                #'''
-
-    if len(_tgt_select_l) > 0:
-        tgt_select_l = vstack(_tgt_select_l)
-    else:
-        tgt_select_l = Table()
-
-    if len(_tgt_select_m) > 0:
-        tgt_select_m = vstack(_tgt_select_m)
-    else:
-        tgt_select_m = Table()
-
-    # remove complete targets
-    n_tgt1 = len(tb_tgt)
-    tb_tgt = tb_tgt[tb_tgt["exptime"] > 0]
-    tb_tgt["exptime_PPP"] = (
-        np.ceil(tb_tgt["exptime"] / 900) * 900
-    )  # exptime needs to be multiples of 900s so netflow can be successfully executed
-    n_tgt2 = len(tb_tgt)
-    logger.info(f"There are {n_tgt2:.0f} / {n_tgt1:.0f} targets not completed")
-
-    if len(_tgt_select_l) > 0:
-        tgt_select_l = tgt_select_l[tgt_select_l["exptime"] > 0]
-        tb_tgt_l = tb_tgt_l[tb_tgt_l["exptime"] > 0]
-        tgt_select_l["exptime_PPP"] = np.ceil(tgt_select_l["exptime"] / 900) * 900
-        tb_tgt_l["exptime_PPP"] = np.ceil(tb_tgt_l["exptime"] / 900) * 900
-
-    if len(_tgt_select_m) > 0:
-        tgt_select_m = tgt_select_m[tgt_select_m["exptime"] > 0]
-        tb_tgt_m = tb_tgt_m[tb_tgt_m["exptime"] > 0]
-        tgt_select_m["exptime_PPP"] = np.ceil(tgt_select_m["exptime"] / 900) * 900
-        tb_tgt_m["exptime_PPP"] = np.ceil(tb_tgt_m["exptime"] / 900) * 900
-
+    tb_tgt.meta["single_exptime"] = list(set(tb_tgt["single_exptime"]))[0]
     logger.info(
-        f"[S1] Read targets done (takes {round(time.time()-time_start,3):.2f} sec)."
-    )
-    logger.info(f"[S1] There are {len(set(tb_tgt['proposal_id'])):.0f} proposals.")
-    logger.info(
-        f"[S1] n_tgt_low = {len(tb_tgt_l):.0f} ({len(tgt_select_l):.0f}), n_tgt_medium = {len(tb_tgt_m):.0f} ({len(tgt_select_m):.0f})"
+        f"[S1] The single exptime is set to {tb_tgt.meta['single_exptime']:.2f} sec."
     )
 
-    return tb_tgt, tgt_select_l, tgt_select_m, tb_tgt_l, tb_tgt_m
+    if mode == "queue":
+        # FIX!! just for this test
+        tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == "S24B-QT917"] = 2000.0
+        tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == "S24B-QT915"] = 750.0
+
+        tb_tgt["allocated_time_done"] = 0
+        tb_tgt["allocated_time"] = 0
+
+        # list of all psl_id
+        psl_id = sorted(set(tb_tgt["proposal_id"]))
+
+        # connect with queueDB
+        qdb = q_db.QueueDatabase(logger_qplan)
+        qdb.read_config(para["DBPath_qDB"])
+        qdb.connect()
+        qa = q_db.QueueAdapter(qdb)
+        qq = q_query.QueueQuery(qa, use_cache=False)
+
+        # determine observed exptime
+        nn = 0
+        tt = []
+        for psl_id_ in psl_id:
+            # if psl_id_ not in ['S24B-QT908','S24B-QT910','S24B-920']:continue
+            # print(psl_id_)
+            ex_obs = qq.get_executed_obs_by_proposal(psl_id_)
+            # if len(ex_obs)==0:
+            #    continue
+            for ex_ob in ex_obs:
+                exps = qq.get_exposures(ex_ob)
+                exptime_exe = sum([exp.effective_exptime for exp in exps])
+                exptime_usr = tb_tgt[
+                    (tb_tgt["proposal_id"] == ex_ob.ob_key[0])
+                    * (tb_tgt["ob_code"] == ex_ob.ob_key[1])
+                ]["exptime_usr"].data[0]
+                exptime_exe_fin = min(
+                    exptime_usr, exptime_exe
+                )  # ignore over-observation
+                # if exptime_exe>=0:
+                #    nn+=1
+                #    tt.append([nn, psl_id_, ex_ob.ob_key[1], exptime_usr, exptime_exe, len(exps)*900])
+                tb_tgt["exptime_done"][
+                    (tb_tgt["proposal_id"] == ex_ob.ob_key[0])
+                    * (tb_tgt["ob_code"] == ex_ob.ob_key[1])
+                ] = exptime_exe_fin
+        # tt_=Table(np.array(tt),names=["N","psl_id","ob_code","exptime","exptime_done","exptime_done_real"])
+        # tt_.write("/home/wanqqq/examples/tgt_queueDB.csv",overwrite=True)
+
+        tb_tgt["exptime"] = tb_tgt["exptime_usr"] - tb_tgt["exptime_done"]
+        # print(len(tt_),len(tb_tgt[tb_tgt["exptime"]==0]))
+
+        # update allocated time
+        for psl_id_ in psl_id:
+            tb_tgt_tem_l = tb_tgt[
+                (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "L")
+            ]
+            tb_tgt_tem_m = tb_tgt[
+                (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "M")
+            ]
+
+            if len(tb_tgt_tem_l) > 0:
+                # total observed FH for the proposal (LR)
+                FH_psl_done = sum(tb_tgt_tem_l["exptime_done"]) / 3600.0
+                tb_tgt["allocated_time_done"][
+                    (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "L")
+                ] = FH_psl_done
+                FH_psl = tb_tgt["allocated_time_tac"][
+                    (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "L")
+                ].data[0]
+                FH_comp = tb_tgt["allocated_time_done"][
+                    (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "L")
+                ].data[0]
+                logger.info(
+                    f"{psl_id_} (LR): allocated FH = {FH_psl:.2f}, achieved FH = {FH_comp:.2f}, CR = {FH_comp/FH_psl*100.0:.2f}%"
+                )
+
+            if len(tb_tgt_tem_m) > 0:
+                # total observed FH for the proposal (MR)
+                FH_psl_done = sum(tb_tgt_tem_m["exptime_done"]) / 3600.0
+                tb_tgt["allocated_time_done"][
+                    (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "M")
+                ] = FH_psl_done
+                FH_psl = tb_tgt["allocated_time_tac"][
+                    (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "M")
+                ].data[0]
+                FH_comp = tb_tgt["allocated_time_done"][
+                    (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "M")
+                ].data[0]
+                logger.info(
+                    f"{psl_id_} (MR): allocated FH = {FH_psl:.2f}, achieved FH = {FH_comp:.2f}, CR = {FH_comp/FH_psl*100.0:.2f}%"
+                )
+
+        tb_tgt["allocated_time"] = (
+            tb_tgt["allocated_time_tac"] - tb_tgt["allocated_time_done"]
+        )
+        tb_tgt["allocated_time"][tb_tgt["allocated_time"] < 0] = 0
+
+        # separete the sample by 'resolution' (L/M)
+        tb_tgt_l = tb_tgt[tb_tgt["resolution"] == "L"]
+        tb_tgt_m = tb_tgt[tb_tgt["resolution"] == "M"]
+
+        # select targets based on the allocated FH (for determining PPC)
+        _tgt_select_l = []
+        _tgt_select_m = []
+
+        for psl_id_ in psl_id:
+            # if psl_id_ != "S24B-920":continue
+            tb_tgt_tem_l = tb_tgt[
+                (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "L")
+            ]
+            tb_tgt_tem_m = tb_tgt[
+                (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "M")
+            ]
+
+            if len(tb_tgt_tem_l) > 0:
+                _tgt_select_l.append(tb_tgt_tem_l[tb_tgt_tem_l["exptime_done"] > 0])
+                FH_select = sum(
+                    tb_tgt_tem_l["exptime_usr"][tb_tgt_tem_l["exptime_done"] > 0]
+                )
+                FH_tac = tb_tgt_tem_l["allocated_time_tac"][0] * 3600.0
+                print(
+                    "1L",
+                    psl_id_,
+                    FH_select / 3600.0,
+                    FH_tac / 3600.0,
+                    len(_tgt_select_l[-1]),
+                )
+
+                #'''
+                tb_tgt_tem_l = tb_tgt_tem_l[tb_tgt_tem_l["exptime_done"] == 0]
+
+                size_step = max(int(0.02 * len(tb_tgt_tem_l)), 100)
+                size_ = max(int(0.02 * len(tb_tgt_tem_l)), 100)
+
+                while FH_select < FH_tac:
+                    tb_tgt_tem_l = count_N_overlap(tb_tgt_tem_l, tb_tgt_l)
+                    pri_ = (
+                        (10 - tb_tgt_tem_l["priority"])
+                        + 2
+                        * (
+                            tb_tgt_tem_l["local_count"]
+                            / max(tb_tgt_tem_l["local_count"])
+                        )
+                        + 2
+                        * (1 - tb_tgt_tem_l["exptime"] / max(tb_tgt_tem_l["exptime"]))
+                    )
+                    psl_pri_l = pri_ / sum(pri_)
+                    if len(tb_tgt_tem_l) < size_step:
+                        size_ = len(tb_tgt_tem_l)
+                    index_t = np.random.choice(
+                        np.arange(0, len(tb_tgt_tem_l), 1),
+                        size=size_,
+                        replace=False,
+                        p=psl_pri_l,
+                    )
+
+                    _tb_tem = Table.copy(tb_tgt_tem_l)
+                    _tgt_select_l.append(_tb_tem[index_t])
+                    FH_select += sum(tb_tgt_tem_l["exptime_usr"][index_t])
+                    tb_tgt_tem_l.remove_rows(index_t)
+
+                    if len(tb_tgt_tem_l) == 0:
+                        break
+
+                    print(
+                        "L",
+                        psl_id_,
+                        FH_select / 3600.0,
+                        FH_tac / 3600.0,
+                        len(_tgt_select_l[-1]),
+                    )
+                    #'''
+
+            if len(tb_tgt_tem_m) > 0:
+                _tgt_select_m.append(tb_tgt_tem_m[tb_tgt_tem_m["exptime_done"] > 0])
+                FH_select = sum(
+                    tb_tgt_tem_m["exptime_usr"][tb_tgt_tem_m["exptime_done"] > 0]
+                )
+                FH_tac = tb_tgt_tem_m["allocated_time_tac"][0] * 3600.0
+                print(
+                    "1M",
+                    psl_id_,
+                    FH_select / 3600.0,
+                    FH_tac / 3600.0,
+                    len(_tgt_select_m[-1]),
+                )
+
+                #'''
+                # if psl_id_=="S24B-QT915":continue
+                tb_tgt_tem_m = tb_tgt_tem_m[tb_tgt_tem_m["exptime_done"] == 0]
+
+                size_step = max(int(0.02 * len(tb_tgt_tem_m)), 100)
+                size_ = max(int(0.02 * len(tb_tgt_tem_m)), 100)
+
+                while FH_select < FH_tac:
+                    tb_tgt_tem_m = count_N_overlap(tb_tgt_tem_m, tb_tgt_m)
+                    pri_ = (
+                        (10 - tb_tgt_tem_m["priority"])
+                        + 2
+                        * (
+                            tb_tgt_tem_m["local_count"]
+                            / max(tb_tgt_tem_m["local_count"])
+                        )
+                        + 2
+                        * (1 - tb_tgt_tem_m["exptime"] / max(tb_tgt_tem_m["exptime"]))
+                    )
+                    psl_pri_m = pri_ / sum(pri_)
+                    if len(tb_tgt_tem_m) < size_step:
+                        size_ = len(tb_tgt_tem_m)
+                    index_t = np.random.choice(
+                        np.arange(0, len(tb_tgt_tem_m), 1),
+                        size=size_,
+                        replace=False,
+                        p=psl_pri_m,
+                    )
+
+                    _tb_tem = Table.copy(tb_tgt_tem_m)
+                    _tgt_select_m.append(_tb_tem[index_t])
+                    FH_select += sum(tb_tgt_tem_m["exptime_usr"][index_t])
+                    tb_tgt_tem_m.remove_rows(index_t)
+
+                    if len(tb_tgt_tem_m) == 0:
+                        break
+
+                    print(
+                        "M",
+                        psl_id_,
+                        FH_select / 3600.0,
+                        FH_tac / 3600.0,
+                        len(_tgt_select_m[-1]),
+                    )
+                    #'''
+
+        if len(_tgt_select_l) > 0:
+            tgt_select_l = vstack(_tgt_select_l)
+        else:
+            tgt_select_l = Table()
+
+        if len(_tgt_select_m) > 0:
+            tgt_select_m = vstack(_tgt_select_m)
+        else:
+            tgt_select_m = Table()
+
+        # remove complete targets
+        n_tgt1 = len(tb_tgt)
+        tb_tgt = tb_tgt[tb_tgt["exptime"] > 0]
+        tb_tgt["exptime_PPP"] = (
+            np.ceil(tb_tgt["exptime"] / 900) * 900
+        )  # exptime needs to be multiples of 900 so netflow can be successfully executed
+        n_tgt2 = len(tb_tgt)
+        logger.info(f"There are {n_tgt2:.0f} / {n_tgt1:.0f} targets not completed")
+
+        if len(_tgt_select_l) > 0:
+            tgt_select_l = tgt_select_l[tgt_select_l["exptime"] > 0]
+            tb_tgt_l = tb_tgt_l[tb_tgt_l["exptime"] > 0]
+            tgt_select_l["exptime_PPP"] = np.ceil(tgt_select_l["exptime"] / 900) * 900
+            tb_tgt_l["exptime_PPP"] = np.ceil(tb_tgt_l["exptime"] / 900) * 900
+
+        if len(_tgt_select_m) > 0:
+            tgt_select_m = tgt_select_m[tgt_select_m["exptime"] > 0]
+            tb_tgt_m = tb_tgt_m[tb_tgt_m["exptime"] > 0]
+            tgt_select_m["exptime_PPP"] = np.ceil(tgt_select_m["exptime"] / 900) * 900
+            tb_tgt_m["exptime_PPP"] = np.ceil(tb_tgt_m["exptime"] / 900) * 900
+
+        logger.info(f"[S1] observation mode = {mode}")
+        logger.info(
+            f"[S1] Read targets done (takes {round(time.time()-time_start,3):.2f} sec)."
+        )
+        logger.info(f"[S1] There are {len(set(tb_tgt['proposal_id'])):.0f} proposals.")
+        logger.info(
+            f"[S1] n_tgt_low = {len(tb_tgt_l):.0f} ({len(tgt_select_l):.0f}), n_tgt_medium = {len(tb_tgt_m):.0f} ({len(tgt_select_m):.0f})"
+        )
+
+        return tb_tgt, tgt_select_l, tgt_select_m, tb_tgt_l, tb_tgt_m
+
+    elif mode == "classic":
+        if "resolution" not in tb_tgt.colnames:
+            tb_tgt["resolution"] = [
+                "M" if v == "True" else "L" for v in tb_tgt["is_medium_resolution"]
+            ]
+        if "exptime" not in tb_tgt.colnames:
+            tb_tgt["exptime"] = tb_tgt["effective_exptime"]
+
+        tb_tgt["allocated_time"] = [
+            tb_tgt["allocated_time_lr"][ii]
+            if tb_tgt["resolution"][ii] == "L"
+            else tb_tgt["allocated_time_mr"][ii]
+            for ii in range(len(tb_tgt))
+        ]
+
+        # separete the sample by 'resolution' (L=false/M=true)
+        tb_tgt_l = tb_tgt[tb_tgt["resolution"] == "L"]
+        tb_tgt_m = tb_tgt[tb_tgt["resolution"] == "M"]
+
+        single_exptime_ = tb_tgt.meta["single_exptime"]
+        tb_tgt["exptime_PPP"] = (
+            np.ceil(tb_tgt["exptime"] / single_exptime_) * single_exptime_
+        )
+        tb_tgt_l["exptime_PPP"] = (
+            np.ceil(tb_tgt_l["exptime"] / single_exptime_) * single_exptime_
+        )
+        tb_tgt_m["exptime_PPP"] = (
+            np.ceil(tb_tgt_m["exptime"] / single_exptime_) * single_exptime_
+        )
+
+        if len(para["localPath_ppc"]) > 0:
+            tb_ppc_tem = Table.read(para["localPath_ppc"])
+            ppc_lst_tem = [
+                [
+                    ii,
+                    tb_ppc_tem["ppc_ra"][ii],
+                    tb_ppc_tem["ppc_dec"][ii],
+                    tb_ppc_tem["ppc_pa"][ii],
+                    0,
+                ]
+                for ii in range(len(tb_ppc_tem))
+            ]
+            ppc_lst_l = [
+                [
+                    ii,
+                    tb_ppc_tem["ppc_ra"][ii],
+                    tb_ppc_tem["ppc_dec"][ii],
+                    tb_ppc_tem["ppc_pa"][ii],
+                    0,
+                ]
+                for ii in range(len(tb_ppc_tem))
+                if tb_ppc_tem["ppc_resolution"][ii] == "L"
+            ]
+            ppc_lst_m = [
+                [
+                    ii,
+                    tb_ppc_tem["ppc_ra"][ii],
+                    tb_ppc_tem["ppc_dec"][ii],
+                    tb_ppc_tem["ppc_pa"][ii],
+                    0,
+                ]
+                for ii in range(len(tb_ppc_tem))
+                if tb_ppc_tem["ppc_resolution"][ii] == "M"
+            ]
+
+            tb_tgt.meta["PPC"] = np.array(ppc_lst_tem)
+            tb_tgt_l.meta["PPC"] = np.array(ppc_lst_l)
+            tb_tgt_m.meta["PPC"] = np.array(ppc_lst_m)
+
+            tb_tgt.meta["PPC_origin"] = "usr"
+            tb_tgt_l.meta["PPC_origin"] = "usr"
+            tb_tgt_m.meta["PPC_origin"] = "usr"
+
+            logger.info(f"[S1] PPC list is read from {para['localPath_ppc']}.")
+
+        logger.info(f"[S1] observation mode = {mode}")
+        logger.info(
+            f"[S1] Read targets done (takes {round(time.time()-time_start,3):.2f} sec)."
+        )
+        logger.info(f"[S1] There are {len(set(tb_tgt['proposal_id'])):.0f} proposals.")
+        logger.info(
+            f"[S1] n_tgt_low = {len(tb_tgt_l):.0f}, n_tgt_medium = {len(tb_tgt_m):.0f}"
+        )
+
+        return tb_tgt, tb_tgt_l, tb_tgt_m, tb_tgt_l, tb_tgt_m
 
 
 def count_N(_tb_tgt):
@@ -483,11 +649,15 @@ def weight(_tb_tgt, para_sci, para_exp, para_n):
 
     weight_t = (
         pow(para_sci, _tb_tgt["rank_fin"])
-        * pow(_tb_tgt["exptime_PPP"] / 900.0, para_exp)
+        * pow(_tb_tgt["exptime_PPP"] / _tb_tgt.meta["single_exptime"], para_exp)
         * pow(_tb_tgt["local_count"], para_n)
     )
 
     _tb_tgt["weight"] = weight_t
+    weight_max = max(_tb_tgt["weight"])
+    _tb_tgt["weight"][
+        (_tb_tgt["exptime_done"] > 0) | (_tb_tgt["exptime_PPP"] < _tb_tgt["exptime"])
+    ] += weight_max
 
     return _tb_tgt
 
@@ -599,7 +769,7 @@ def KDE(_tb_tgt, multiProcesing):
         positions1 = np.vstack([Y_.ravel(), X_.ravel()])
 
         if multiProcesing:
-            threads_count = round(multiprocessing.cpu_count() / 2)
+            threads_count = 4  # round(multiprocessing.cpu_count() / 2)
             thread_n = min(
                 threads_count, round(len(_tb_tgt) * 0.5)
             )  # threads_count=10 in this machine
@@ -626,18 +796,19 @@ def KDE(_tb_tgt, multiProcesing):
         return X_, Y_, obj_dis_sig_, peak_x, peak_y
 
 
-def PPP_centers(_tb_tgt, nPPC, weight_para, randomseed=0, mutiPro=True):
+def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=True):
     # determine pointing centers
     time_start = time.time()
     logger.info(f"[S2] Determine pointing centers started")
 
     para_sci, para_exp, para_n = weight_para
+    print(weight_para)
 
     ppc_lst = []
 
     if "PPC_origin" in _tb_tgt.meta.keys():
         logger.warning(
-            f"[S2] PPCs from uploader adopted (takes {round(time.time()-time_start,3):.2f} sec)."
+            f"[S2] PPCs from usr adopted (takes {round(time.time()-time_start,3):.2f} sec)."
         )
         ppc_lst = _tb_tgt.meta["PPC"]
         return ppc_lst
@@ -650,6 +821,11 @@ def PPP_centers(_tb_tgt, nPPC, weight_para, randomseed=0, mutiPro=True):
     _tb_tgt = count_N(_tb_tgt)
     _tb_tgt = weight(_tb_tgt, para_sci, para_exp, para_n)
 
+    single_exptime_ = _tb_tgt.meta["single_exptime"]
+
+    _tb_tgt_ = _tb_tgt[_tb_tgt["exptime_PPP"] > 0]
+
+    """
     ppc_totPri = []
 
     for _tb_tgt_t in target_DBSCAN(_tb_tgt, 1.38):
@@ -686,11 +862,22 @@ def PPP_centers(_tb_tgt, nPPC, weight_para, randomseed=0, mutiPro=True):
             lst_tgtID_assign = netflowRun4PPC(
                 _tb_tgt_t_[list(index_)], ppc_lst[-1][1], ppc_lst[-1][2]
             )
+            while len(lst_tgtID_assign) == 0:
+                ppc_lst[-1][1] += np.random.uniform(-0.15, 0.15, 1)[0]
+                ppc_lst[-1][2] += np.random.uniform(-0.15, 0.15, 1)[0]
+                lst_tgtID_assign = netflowRun4PPC(
+                    _tb_tgt_t_[list(index_)], ppc_lst[-1][1], ppc_lst[-1][2]
+                )
+                print(len(lst_tgtID_assign))
+                
+            lst_pslID_assign=[ii[5:10] for ii in lst_tgtID_assign]
+            pslID_=sorted(set(lst_pslID_assign))
+            pslID_n={tt:lst_pslID_assign.count(tt) for tt in pslID_}
 
             index_assign = np.in1d(_tb_tgt_t_["identify_code"], lst_tgtID_assign)
             _tb_tgt_t_["exptime_PPP"][
                 index_assign
-            ] -= 900  # targets in the PPC observed with 900 sec
+            ] -= single_exptime_  # targets in the PPC observed with single_exptime sec
 
             # add a small random so that PPCs determined would not have totally same weights
             weight_random = np.random.uniform(-0.05, 0.05, 1)[0]
@@ -698,12 +885,13 @@ def PPP_centers(_tb_tgt, nPPC, weight_para, randomseed=0, mutiPro=True):
             ppc_totPri_sub.append(
                 sum(_tb_tgt_t_["weight"][index_assign]) + weight_random
             )
+            ppc_lst[-1].append(sum(_tb_tgt_t_["weight"][index_assign]) + weight_random)
 
-            if len(lst_tgtID_assign) == 0:
+            #if len(lst_tgtID_assign) == 0:
                 # quit if no targets assigned
-                break
+                #break
 
-            if iter_n > 25 and ppc_totPri_sub[-1] < ppc_totPri_sub[0] * 0.15:
+            if iter_n>25 and len(lst_tgtID_assign)<2394*0.01: #ppc_totPri_sub[-1] < ppc_totPri_sub[0] * 0.1:
                 # quit if ppc contains too limited targets
                 break
 
@@ -714,33 +902,118 @@ def PPP_centers(_tb_tgt, nPPC, weight_para, randomseed=0, mutiPro=True):
             _tb_tgt_t_ = count_N(_tb_tgt_t_)
             _tb_tgt_t_ = weight(_tb_tgt_t_, para_sci, para_exp, para_n)
             iter_n += 1
-
+            
             print(
-                f"PPC_{len(ppc_lst):03d}: {len(_tb_tgt_t)-len(_tb_tgt_t_):5d}/{len(_tb_tgt_t):10d} targets are finished (w={ppc_totPri[-1]:.2f})."
+                f"PPC_{len(ppc_lst):03d}: {len(_tb_tgt_t)-len(_tb_tgt_t_):5d}/{len(_tb_tgt_t):10d} targets are finished (w={ppc_totPri[-1]:.2f}, fh={len(lst_tgtID_assign)*single_exptime_/3600.0:.2f})."
             )
+            print(pslID_n)
+            
+    #"""
+    FH_done = 0
+    FH_goal = _tb_tgt_["allocated_time"].data[0]
+    while FH_done < FH_goal and len(_tb_tgt_) > 0:
+        weight_peak = []
+
+        for _tb_tgt_t in target_DBSCAN(_tb_tgt_, 1.38):
+            _tb_tgt_t_ = _tb_tgt_t[_tb_tgt_t["exptime_PPP"] > 0]  # targets not finished
+
+            _df_tgt_t = Table.to_pandas(_tb_tgt_t_)
+            n_tgt = min(100, len(_tb_tgt_t_))
+            _df_tgt_t = _df_tgt_t.sample(n_tgt, ignore_index=True, random_state=1)
+            _tb_tgt_t_1 = Table.from_pandas(_df_tgt_t)
+
+            X_, Y_, obj_dis_sig_, peak_x, peak_y = KDE(_tb_tgt_t_1, mutiPro)
+
+            index_ = PFS_FoV(
+                peak_x, peak_y, 0, _tb_tgt_t_
+            )  # all PA set to be 0 for simplicity
+
+            while len(index_) == 0:
+                peak_x += np.random.uniform(-0.15, 0.15, 1)[0]
+                peak_y += np.random.uniform(-0.15, 0.15, 1)[0]
+                index_ = PFS_FoV(peak_x, peak_y, 0, _tb_tgt_t_)
+
+            lst_tgtID_assign = netflowRun4PPC(_tb_tgt_t_[list(index_)], peak_x, peak_y)
+            while len(lst_tgtID_assign) == 0:
+                peak_x += np.random.uniform(-0.15, 0.15, 1)[0]
+                peak_y += np.random.uniform(-0.15, 0.15, 1)[0]
+                lst_tgtID_assign = netflowRun4PPC(
+                    _tb_tgt_t_[list(index_)], peak_x, peak_y
+                )
+
+            index_assign = np.in1d(_tb_tgt_t_["identify_code"], lst_tgtID_assign)
+            weight_tem_tot = sum(_tb_tgt_t_["weight"][index_assign])
+            FH_tem = len(lst_tgtID_assign) * single_exptime_ / 3600.0
+            weight_peak.append(
+                [
+                    peak_x,
+                    peak_y,
+                    0,
+                    weight_tem_tot,
+                    FH_tem,
+                    lst_tgtID_assign,
+                    index_assign,
+                ]
+            )
+
+        weight_peak = sorted(weight_peak, key=lambda x: x[3])
+
+        ppc_lst.append(
+            np.array(
+                [
+                    len(ppc_lst),
+                    weight_peak[-1][0],
+                    weight_peak[-1][1],
+                    weight_peak[-1][2],
+                    weight_peak[-1][3],
+                    weight_peak[-1][4] / FH_goal,
+                    len(weight_peak[-1][5]) / 2394.0,
+                ]
+            )
+        )
+        # ppc_id, ppc_ra, ppc_dec, ppc_pa, ppc_weight, ppc_fh, ppc_FE
+        # print(ppc_lst[-1])
+
+        index_assign = np.in1d(_tb_tgt_["identify_code"], weight_peak[-1][5])
+        _tb_tgt_["exptime_PPP"][
+            index_assign
+        ] -= single_exptime_  # targets in the PPC observed with single_exptime sec
+
+        FH_done += weight_peak[-1][4]
+        # print(FH_done)
+
+        _tb_tgt_ = _tb_tgt_[_tb_tgt_["exptime_PPP"] > 0]  # targets not finished
+        _tb_tgt_ = count_N(_tb_tgt_)
+        _tb_tgt_ = weight(_tb_tgt_, para_sci, para_exp, para_n)
+
+        print(
+            f"PPC_{len(ppc_lst):3d}: {len(_tb_tgt)-len(_tb_tgt_):5d}/{len(_tb_tgt):10d} targets are finished (w={weight_peak[-1][3]:.2f}, fh={weight_peak[-1][4]:.2f}, fh_done={FH_done:.2f}, fh_goal={FH_goal:.2f})."
+        )
+    #
 
     if len(ppc_lst) > nPPC:
         ppc_totPri_limit = sorted(ppc_totPri, reverse=True)[nPPC - 1]
         ppc_lst_fin = [
             ppc_lst[iii]
             for iii in range(len(ppc_lst))
-            if ppc_totPri[iii] >= ppc_totPri_limit
+            if ppc_lst[iii][-1] >= ppc_totPri_limit
         ]
 
     else:
         ppc_lst_fin = ppc_lst[:]
 
+    ppc_lst_fin = np.array(ppc_lst_fin)
+
     logger.info(
         f"[S2] Determine pointing centers done ( nppc = {len(ppc_lst_fin):.0f}; takes {round(time.time()-time_start,3)} sec)"
     )
 
-    return np.array(ppc_lst_fin)
+    return ppc_lst_fin
 
 
 def ppc_DBSCAN(_tb_tgt):
     # separate pointings into different group (skip due to FH upper limit -24-02-07; NEED TO FIX)
     ppc_xy = _tb_tgt.meta["PPC"]
-    ppc_group = []
     """
     # haversine uses (dec,ra) in radian;
     ppc_cluster = DBSCAN(eps=np.radians(1.38), min_samples=1, metric="haversine").fit(
@@ -760,25 +1033,24 @@ def ppc_DBSCAN(_tb_tgt):
     ppc_group.sort(key=lambda x: len(x), reverse=True)
     #"""
 
-    ppc_group.append(ppc_xy)
-
-    return ppc_group
+    return np.array([ppc_xy])
 
 
 def sam2netflow(_tb_tgt, for_ppc=False):
     # put targets to the format which can be read by netflow
     tgt_lst_netflow = []
     _tgt_lst_psl_id = []
+    single_exptime_ = _tb_tgt.meta["single_exptime"]
 
     int_ = 0
     for tt in _tb_tgt:
         if for_ppc:
-            # set exptime = 900s if running netflow to determine PPC
+            # set exptime = single_exptime_ if running netflow to determine PPC
             tgt_id_, tgt_ra_, tgt_dec_, tgt_exptime_, tgt_proposal_id_ = (
                 tt["identify_code"],
                 tt["ra"],
                 tt["dec"],
-                900,
+                single_exptime_,
                 tt["proposal_id"],
             )
         else:
@@ -805,6 +1077,7 @@ def sam2netflow(_tb_tgt, for_ppc=False):
     # set FH limit bundle
     tgt_psl_FH_tac_ = {}
 
+    #'''
     if for_ppc == False:
         psl_id = sorted(set(_tb_tgt["proposal_id"]))
 
@@ -813,6 +1086,8 @@ def sam2netflow(_tb_tgt, for_ppc=False):
             tgt_psl_FH_tac_[tt_] = _tb_tgt[_tb_tgt["proposal_id"] == psl_id_][
                 "allocated_time"
             ][0]
+            print(f"{psl_id_}: FH_limit = {tgt_psl_FH_tac_[tt_]:.2f}")
+    #'''
 
     return tgt_lst_netflow, tgt_psl_FH_tac_
 
@@ -844,13 +1119,14 @@ def netflowRun_single(
     TraCollision=False,
     numReservedFibers=0,
     fiberNonAllocationCost=0.0,
-    otime="2024-05-20T08:00:00Z",
+    otime="2025-05-20T08:00:00Z",
     for_ppc=False,
 ):
     # run netflow (without iteration)
     Telra = ppc_lst[:, 1]
     Teldec = ppc_lst[:, 2]
     Telpa = ppc_lst[:, 3]
+    Telweight = ppc_lst[:, 4]
 
     tgt_lst_netflow, tgt_psl_FH_tac = sam2netflow(_tb_tgt, for_ppc)
     classdict = NetflowPreparation(_tb_tgt)
@@ -862,9 +1138,19 @@ def netflowRun_single(
         telescopes.append(nf.Telescope(Telra[ii], Teldec[ii], Telpa[ii], otime))
     tpos = [tele.get_fp_positions(tgt_lst_netflow) for tele in telescopes]
 
+    single_exptime_ = _tb_tgt.meta["single_exptime"]
+
     # optional: slightly increase the cost for later observations,
     # to observe as early as possible
-    vis_cost = [0 for i in range(nvisit)]
+    vis_cost = [0] * nvisit
+    # positions = {e: i for i, e in enumerate(sorted(Telweight, reverse = True), 0)}
+    # vis_cost = [positions[e] for e in Telweight]
+    # vis_cost_upper = min(_tb_tgt["weight"])*0.3
+    # if len(vis_cost)>1:
+    #    vis_cost = np.array(vis_cost)/max(vis_cost)*vis_cost_upper
+    # else:
+    #    vis_cost = [0]*nvisit
+    # print(vis_cost_upper,vis_cost)
 
     gurobiOptions = dict(
         seed=0,
@@ -889,7 +1175,7 @@ def netflowRun_single(
                 tgt_lst_netflow,
                 tpos,
                 classdict,
-                900,
+                single_exptime_,
                 vis_cost,
                 cobraMoveCost=cobraMoveCost,
                 collision_distance=2.0,
@@ -958,7 +1244,7 @@ def netflowRun_single(
             tgt_lst_netflow,
             tpos,
             classdict,
-            900,
+            single_exptime_,
             vis_cost,
             cobraMoveCost=cobraMoveCost,
             collision_distance=2.0,
@@ -1005,7 +1291,7 @@ def netflowRun_nofibAssign(
     #    if no fiber assignment in some PPCs, shift these PPCs with 0.15 deg
     # (skip due to FH upper limit -24-02-07; NEED TO FIX)
 
-    otime_ = "2024-05-20T08:00:00Z"
+    otime_ = "2025-05-10T08:00:00Z"
 
     res, telescope, tgt_lst_netflow = netflowRun_single(
         ppc_lst,
@@ -1127,7 +1413,9 @@ def netflowRun(
         for i, (vis, tel) in enumerate(zip(res, telescope)):
             ppc_fib_eff = len(vis) / 2394.0 * 100
 
-            logger.info(f"PPC {i:4d}: {ppc_fib_eff:.2f}% assigned Cobras")
+            logger.info(
+                f"PPC {i:4d}: {len(vis):.0f}/2394={ppc_fib_eff:.2f}% assigned Cobras"
+            )
 
             # assigned targets in each ppc
             tgt_assign_id_lst = []
@@ -1205,7 +1493,7 @@ def netflowRun4PPC(
     ppc_y,
 ):
     # run netflow (for PPP_centers)
-    ppc_lst = np.array([[0, ppc_x, ppc_y, 0]])
+    ppc_lst = np.array([[0, ppc_x, ppc_y, 0, 0]])
 
     res, telescope, tgt_lst_netflow = netflowRun_nofibAssign(
         ppc_lst, _tb_tgt_inuse, True
@@ -1236,7 +1524,7 @@ def netflowAssign(_tb_tgt, _tb_ppc):
         lst = np.where(
             np.in1d(_tb_tgt["identify_code"], ppc_t["ppc_allocated_targets"]) == True
         )[0]
-        _tb_tgt["exptime_assign"].data[lst] += 900
+        _tb_tgt["exptime_assign"].data[lst] += int(_tb_tgt.meta["single_exptime"])
 
     return _tb_tgt
 
@@ -1259,60 +1547,75 @@ def netflow_iter(
     if len(_tb_tgt) == 0 or len(_tb_ppc_netflow) == 0:
         return _tb_ppc_netflow
 
-    if (
-        sum(_tb_tgt["exptime_assign"] == _tb_tgt["exptime_PPP"]) == len(_tb_tgt)
-        or len(_tb_ppc_netflow) >= nPPC
-    ):
-        # remove ppc with fiber assignment < 0.1%
-        _tb_ppc_netflow.remove_rows(
-            np.where(_tb_ppc_netflow["ppc_fiber_usage_frac"] < 0.1)[0]
-        )
+    if _tb_tgt.meta["PPC_origin"] == "usr":
         return _tb_ppc_netflow
 
-    else:
-        _tb_ppc_netflow.remove_rows(
-            np.where(_tb_ppc_netflow["ppc_fiber_usage_frac"] == 0)[0]
+    FH_goal = _tb_tgt["allocated_time"].data[0]
+    FH_done = sum(_tb_tgt["exptime_assign"]) / 3600.0
+    while FH_done > FH_goal * 0.975:
+        ppc_lst = [
+            [0, tt["ppc_ra"], tt["ppc_dec"], tt["ppc_pa"], tt["ppc_fiber_usage_frac"]]
+            for tt in _tb_ppc_netflow
+        ]  # ppc_id, ppc_ra, ppc_dec, ppc_pa, ppc_FE
+
+        ppc_lst_new = sorted(ppc_lst, key=lambda x: x[-1])[1:]
+
+        _tb_tgt.meta["PPC"] = ppc_lst_new
+
+        _tb_ppc_netflow = netflowRun(
+            _tb_tgt,
+            randomseed,
+            TraCollision,
+            numReservedFibers,
+            fiberNonAllocationCost,
         )
-        return _tb_ppc_netflow
-        """ skip due to FH upper limit -24-02-07 NEED TO FIX
-        #  select non-assigned targets --> PPC determination --> netflow --> if no fibre assigned: shift PPC
-        iter_m2 = 0
 
-        while any(_tb_tgt["exptime_assign"] < _tb_tgt["exptime_PPP"]):
-            _tb_tgt_t1 = _tb_tgt[_tb_tgt["exptime_assign"] < _tb_tgt["exptime_PPP"]]
-            _tb_tgt_t1["exptime_PPP"] = (
-                _tb_tgt_t1["exptime_PPP"] - _tb_tgt_t1["exptime_assign"]
-            )  # remained exposure time
+        _tb_tgt = netflowAssign(_tb_tgt, _tb_ppc_netflow)
 
+        FH_done = sum(_tb_tgt["exptime_assign"]) / 3600.0
+
+        print(FH_done, np.mean(_tb_ppc_netflow["ppc_fiber_usage_frac"]))
+
+    """ skip due to FH upper limit -24-02-07 NEED TO FIX
+    #  select non-assigned targets --> PPC determination --> netflow --> if no fibre assigned: shift PPC
+    iter_m2 = 0
+
+    while any(_tb_tgt["exptime_assign"] < _tb_tgt["exptime_PPP"]):
+        _tb_tgt_t1 = _tb_tgt[_tb_tgt["exptime_assign"] < _tb_tgt["exptime_PPP"]]
+        _tb_tgt_t1["exptime_PPP"] = (
+            _tb_tgt_t1["exptime_PPP"] - _tb_tgt_t1["exptime_assign"]
+        )  # remained exposure time
+
+        _tb_ppc_netflow.remove_rows(np.where(_tb_ppc_netflow["ppc_fiber_usage_frac"] == 0)[0])
+        _tb_tgt_t2 = PPP_centers(
+            _tb_tgt_t1,
+            nPPC - len(_tb_ppc_netflow),
+            weight_para,
+            randomseed,
+        )
+
+        _tb_ppc_netflow_t = netflowRun(
+            _tb_tgt_t2, 
+            randomseed, 
+            TraCollision, 
+            numReservedFibers, 
+            fiberNonAllocationCost, 
+        )
+
+        if len(_tb_ppc_netflow) >= nPPC or iter_m2 >= 10:
+            # stop if n_ppc exceeds the requirment
+            return _tb_ppc_netflow
+
+        else:
+            _tb_ppc_netflow = vstack([_tb_ppc_netflow, _tb_ppc_netflow_t])
             _tb_ppc_netflow.remove_rows(np.where(_tb_ppc_netflow["ppc_fiber_usage_frac"] == 0)[0])
-            _tb_tgt_t2 = PPP_centers(
-                _tb_tgt_t1,
-                nPPC - len(_tb_ppc_netflow),
-                weight_para,
-                randomseed,
-            )
+            _tb_tgt = netflowAssign(_tb_tgt, _tb_ppc_netflow)
 
-            _tb_ppc_netflow_t = netflowRun(
-                _tb_tgt_t2, 
-                randomseed, 
-                TraCollision, 
-                numReservedFibers, 
-                fiberNonAllocationCost, 
-            )
+            iter_m2 += 1
 
-            if len(_tb_ppc_netflow) >= nPPC or iter_m2 >= 10:
-                # stop if n_ppc exceeds the requirment
-                return _tb_ppc_netflow
-
-            else:
-                _tb_ppc_netflow = vstack([_tb_ppc_netflow, _tb_ppc_netflow_t])
-                _tb_ppc_netflow.remove_rows(np.where(_tb_ppc_netflow["ppc_fiber_usage_frac"] == 0)[0])
-                _tb_tgt = netflowAssign(_tb_tgt, _tb_ppc_netflow)
-            
-                iter_m2 += 1
-                
-        return _tb_ppc_netflow 
-        #"""
+    return _tb_ppc_netflow 
+    #"""
+    return _tb_ppc_netflow
 
 
 def complete_ppc(_tb_tgt, mode):
@@ -1461,12 +1764,11 @@ def fun2opt(para, info):
     =======
     (2 - average_fibEfficiency_L - average_completion_L) + (2 - average_fibEfficiency_M - average_completion_M)
     """
-    para_sci, para_exp, para_n = para
+    # para_sci, para_exp, para_n = para
 
-    _tb_tgt, _tb_tgt_l, _tb_tgt_m = info["tb_tgt"]
+    _tb_tgt = info["tb_tgt"]
 
-    nppc_l = info["nPPC_l"]
-    nppc_m = info["nPPC_m"]
+    nppc_ = info["nPPC"]
 
     index_op1 = info["iter"]
     randomseed = info["randomSeed"]
@@ -1477,56 +1779,53 @@ def fun2opt(para, info):
 
     # --------------------
     tem1 = 0
-    tem2 = 0
 
     mfibEff1 = 0
     CR_fin1 = 0
-    mfibEff2 = 0
-    CR_fin2 = 0
 
-    if len(_tb_tgt_l) > 0:
-        _tb_tgt_l1 = PPP_centers(_tb_tgt_l, nppc_l, para, randomseed, True)
+    n_exptime = len(set(_tb_tgt["exptime"]))
+    n_rank = len(set(_tb_tgt["priority"]))
+    if n_rank <= 1 and n_exptime > 1:
+        para_exp, para_n = para
+        para_sci = 1.5
+        lst_ppc = PPP_centers(
+            _tb_tgt, nppc_, [para_sci, para_exp, para_n], randomseed, True
+        )
+    if n_rank > 1 and n_exptime <= 1:
+        para_sci, para_n = para
+        para_exp = 0
+        lst_ppc = PPP_centers(
+            _tb_tgt, nppc_, [para_sci, para_exp, para_n], randomseed, True
+        )
+    if n_rank > 1 and n_exptime > 1:
+        para_sci, para_exp, para_n = para
+        lst_ppc = PPP_centers(
+            _tb_tgt, nppc_, [para_sci, para_exp, para_n], randomseed, True
+        )
+    if n_rank <= 1 and n_exptime <= 1:
+        para_n = para[0]
+        para_sci = 1.5
+        para_exp = 0
+        lst_ppc = PPP_centers(
+            _tb_tgt, nppc_, [para_sci, para_exp, para_n], randomseed, True
+        )
+        # ppc_id, ppc_ra, ppc_dec, ppc_pa, ppc_weight, ppc_fh, ppc_FE
 
-        _tb_ppc_netflow_l = netflowRun(_tb_tgt_l1, randomseed)
-
-        _tb_tgt_l1 = netflowAssign(_tb_tgt_l1, _tb_ppc_netflow_l)
-
-        CR_l = complete_ppc(_tb_tgt_l1, completeMode)
-
-        CR_fin1 = sum(CR_l[-2][:, -2]) / len(CR_l[-1])
-
-        mfibEff1 = PPC_efficiency(_tb_ppc_netflow_l)[2]  # mean of fib --/max(fib)--
-
-        tem1 = 200 - (mfibEff1 + CR_fin1) * 100
-
-    if len(_tb_tgt_m) > 0:
-        _tb_tgt_m1 = PPP_centers(_tb_tgt_m, nppc_m, para, randomseed, True)
-
-        _tb_ppc_netflow_m = netflowRun(_tb_tgt_m1, randomseed)
-
-        _tb_tgt_m1 = netflowAssign(_tb_tgt_m1, _tb_ppc_netflow_m)
-
-        CR_m = complete_ppc(_tb_tgt_m1, completeMode)
-
-        CR_fin2 = sum(CR_m[-2][:, -2]) / len(CR_m[-1])
-
-        mfibEff2 = PPC_efficiency(_tb_ppc_netflow_m)[2]  # mean of fib --/max(fib)--
-
-        tem2 = 200 - (mfibEff2 + CR_fin2) * 100
+    tem1 = (
+        len(lst_ppc) / nppc_ + 1.5 - sum(lst_ppc[:, -2]) + 1 - np.mean(lst_ppc[:, -1])
+    )
+    print(len(lst_ppc) / nppc_, 1.5 - sum(lst_ppc[:, -2]), 1 - np.mean(lst_ppc[:, -1]))
 
     logger.info(
-        f"[S4] Iter {info['iter']+1:.0f}, w_para is [{para_sci:.3f}, {para_exp:.3f}, {para_n:.3f}]; \
-                objV is {mfibEff1:.2f} {CR_fin1:.2f} (low-mode) {mfibEff2:.2f} {CR_fin2:.2f} (medium-mode) {tem1+tem2:.2f} (total)."
+        f"[S4] Iter {info['iter']+1:.0f}, w_para is [{para_sci:.3f}, {para_exp:.3f}, {para_n:.3f}]; objV is {tem1:.2f}."
     )
 
     info["iter"] += 1
 
-    return tem1 + tem2
+    return tem1
 
 
-def iter_weight(
-    _tb_tgt, weight_initialGuess, nppc_l, nppc_m, crMode, randomSeed, TraCollision
-):
+def iter_weight(_tb_tgt, weight_initialGuess, nppc_, crMode, randomSeed, TraCollision):
     """optimize the weighting scheme
 
     Parameters
@@ -1553,32 +1852,92 @@ def iter_weight(
     time_s = time.time()
     logger.info("[S4] Optimization started")
 
-    best_weight = opt.fmin(
+    best_weight = opt.least_squares(
         fun2opt,
         weight_initialGuess,
-        xtol=0.1,
-        ftol=0.1,
+        # xtol=0.5,
+        ftol=0.002,
         args=(
             {
                 "tb_tgt": _tb_tgt,
-                "nPPC_l": nppc_l,
-                "nPPC_m": nppc_m,
+                "nPPC": nppc_,
                 "crMode": crMode,
                 "iter": 0,
                 "randomSeed": randomSeed,
                 "checkTraCollision": TraCollision,
             },
         ),
-        disp=True,
-        retall=False,
-        full_output=False,
-        maxiter=200,
-        maxfun=200,
+        diff_step=4,
+        gtol=0.002,
+        max_nfev=200,
+        # disp=True,
+        # retall=False,
+        # full_output=False,
+        # maxiter=200,
+        # maxfun=200,
     )
 
     logger.info(f"[S4] Optimization done (takes {time.time()-time_s:.3f} sec)")
 
-    return best_weight
+    return best_weight["x"]
+
+
+def optimize(_tb_tgt, nppc_, crMode, randomSeed, TraCollision):
+    n_exptime = len(set(_tb_tgt["exptime"]))
+    n_rank = len(set(_tb_tgt["priority"]))
+    if n_rank <= 1 and n_exptime > 1:
+        weight_guess = [0.1, 0.1]
+        para_sci = 1.5
+        para_exp, para_n = iter_weight(
+            _tb_tgt,
+            weight_guess,
+            nppc_,
+            crMode,
+            randomSeed,
+            TraCollision,
+            # numReservedFibers,
+            # fiberNonAllocationCost,
+        )
+    if n_rank > 1 and n_exptime <= 1:
+        weight_guess = [1.5, 0.1]
+        para_exp = 0
+        para_sci, para_n = iter_weight(
+            _tb_tgt,
+            weight_guess,
+            nppc_,
+            crMode,
+            randomSeed,
+            TraCollision,
+            # numReservedFibers,
+            # fiberNonAllocationCost,
+        )
+    if n_rank > 1 and n_exptime > 1:
+        weight_guess = [1.5, 0.1, 0.1]
+        para_sci, para_exp, para_n = iter_weight(
+            _tb_tgt,
+            weight_guess,
+            nppc_,
+            crMode,
+            randomSeed,
+            TraCollision,
+            # numReservedFibers,
+            # fiberNonAllocationCost,
+        )
+    if n_rank <= 1 and n_exptime <= 1:
+        weight_guess = [-0.1]
+        para_sci = 1.5
+        para_exp = 0
+        para_n = iter_weight(
+            _tb_tgt,
+            weight_guess,
+            nppc_,
+            crMode,
+            randomSeed,
+            TraCollision,
+            # numReservedFibers,
+            # fiberNonAllocationCost,
+        )
+    return para_sci, para_exp, para_n
 
 
 def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
@@ -1599,8 +1958,8 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
     ppc_pa = _tb_ppc_tot["ppc_pa"].data
     ppc_equinox = ["J2000"] * len(_tb_ppc_tot)
     ppc_priority = _tb_ppc_tot["ppc_priority"].data
-    ppc_exptime = [900] * len(_tb_ppc_tot)
-    ppc_totaltime = [900 + 240] * len(_tb_ppc_tot)
+    ppc_exptime = [_tb_tgt_tot.meta["single_exptime"]] * len(_tb_ppc_tot)
+    ppc_totaltime = [_tb_tgt_tot.meta["single_exptime"] + 240] * len(_tb_ppc_tot)
     ppc_resolution = _tb_ppc_tot["ppc_resolution"].data
     ppc_fibAlloFrac = _tb_ppc_tot["ppc_fiber_usage_frac"].data
     ppc_tgtAllo = _tb_ppc_tot["ppc_allocated_targets"].data
@@ -1652,6 +2011,7 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
     ob_parallaxs = _tb_tgt_tot["parallax"].data
     ob_priority = _tb_tgt_tot["priority"].data
     ob_exptime = _tb_tgt_tot["exptime"].data
+    ob_single_exptime = _tb_tgt_tot["single_exptime"].data
     ob_resolution = _tb_tgt_tot["resolution"].data
     proposal_id = _tb_tgt_tot["proposal_id"].data
     proposal_rank = _tb_tgt_tot["rank"].data
@@ -1687,6 +2047,7 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
             ob_parallaxs,
             ob_priority,
             ob_exptime,
+            ob_single_exptime,
             ob_resolution,
             proposal_id,
             proposal_rank,
@@ -1721,6 +2082,7 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
             "ob_parallax",
             "ob_priority",
             "ob_exptime",
+            "ob_single_exptime",
             "ob_resolution",
             "proposal_id",
             "proposal_rank",
@@ -1844,8 +2206,8 @@ def plotCR(CR, sub_lst, _tb_ppc_tot, dirName="output/", show_plots=False):
 def run(
     bench_info,
     readtgt_con,
-    TimeOnSource_l,
-    TimeOnSource_m,
+    nppc_l,
+    nppc_m,
     dirName="output/",
     numReservedFibers=0,
     fiberNonAllocationCost=0.0,
@@ -1858,9 +2220,6 @@ def run(
         readtgt_con["mode_readtgt"], readtgt_con["para_readtgt"]
     )
 
-    nppc_l = int(np.ceil(TimeOnSource_l / 900.0))
-    nppc_m = int(np.ceil(TimeOnSource_m / 900.0))
-
     randomseed = 2
 
     TraCollision = False
@@ -1868,33 +2227,34 @@ def run(
 
     crMode = "compOFpsl_n"
 
-    """
-    weight_guess = [2, -0.1, 0.05]
-    para_sci,para_exp,para_n = iter_weight(
-        [tb_tgt,tb_tgt_l,tb_tgt_m],
-        weight_guess,
-        nppc_l,
-        nppc_m,
-        crMode,
-        randomseed,
-        TraCollision,
-        numReservedFibers,
-        fiberNonAllocationCost,
-    )
-    #"""
-    para_sci, para_exp, para_n = [1.4, 0.1, 0.1]
+    para_sci_l, para_exp_l, para_n_l = [1.5, 0, 0]
+    para_sci_m, para_exp_m, para_n_m = [1.5, 0, 0]
+
+    # """ optimize
+    if len(readtgt_con["para_readtgt"]["localPath_ppc"]) == 0:
+        if len(tb_tgt_l) > 0:
+            para_sci_l, para_exp_l, para_n_l = optimize(
+                tb_tgt_l, nppc_l, crMode, randomseed, TraCollision
+            )
+
+        if len(tb_tgt_m) > 0:
+            para_sci_m, para_exp_m, para_n_m = optimize(
+                tb_tgt_m, nppc_m, crMode, randomseed, TraCollision
+            )
+    # """
 
     # LR--------------------------------------------
     ppc_lst_l = PPP_centers(
-        tb_sel_l, nppc_l, [para_sci, para_exp, para_n], randomseed, multiProcess
+        tb_sel_l, nppc_l, [para_sci_l, para_exp_l, para_n_l], randomseed, multiProcess
     )
 
     tb_tgt_l1 = Table.copy(tb_tgt_l)
     tb_tgt_l1.meta["PPC"] = ppc_lst_l
+    tb_tgt_l1.meta["PPC_origin"] = "ppp"
 
     tb_tgt_l1 = sciRank_pri(tb_tgt_l1)
     tb_tgt_l1 = count_N(tb_tgt_l1)
-    tb_tgt_l1 = weight(tb_tgt_l1, para_sci, para_exp, para_n)
+    tb_tgt_l1 = weight(tb_tgt_l1, para_sci_l, para_exp_l, para_n_l)
 
     tb_ppc_l = netflowRun(
         tb_tgt_l1,
@@ -1909,7 +2269,7 @@ def run(
     tb_ppc_l_fin = netflow_iter(
         tb_tgt_l1,
         tb_ppc_l,
-        [para_sci, para_exp, para_n],
+        [para_sci_l, para_exp_l, para_n_l],
         nppc_l,
         randomseed,
         TraCollision,
@@ -1920,15 +2280,16 @@ def run(
 
     # MR--------------------------------------------
     ppc_lst_m = PPP_centers(
-        tb_sel_m, nppc_m, [para_sci, para_exp, para_n], randomseed, multiProcess
+        tb_sel_m, nppc_m, [para_sci_m, para_exp_m, para_n_m], randomseed, multiProcess
     )
 
     tb_tgt_m1 = Table.copy(tb_tgt_m)
     tb_tgt_m1.meta["PPC"] = ppc_lst_m
+    tb_tgt_m1.meta["PPC_origin"] = "ppp"
 
     tb_tgt_m1 = sciRank_pri(tb_tgt_m1)
     tb_tgt_m1 = count_N(tb_tgt_m1)
-    tb_tgt_m1 = weight(tb_tgt_m1, para_sci, para_exp, para_n)
+    tb_tgt_m1 = weight(tb_tgt_m1, para_sci_m, para_exp_m, para_n_m)
 
     tb_ppc_m = netflowRun(
         tb_tgt_m1,
@@ -1943,7 +2304,7 @@ def run(
     tb_ppc_m_fin = netflow_iter(
         tb_tgt_m1,
         tb_ppc_m,
-        [para_sci, para_exp, para_n],
+        [para_sci_m, para_exp_m, para_n_m],
         nppc_m,
         randomseed,
         TraCollision,
