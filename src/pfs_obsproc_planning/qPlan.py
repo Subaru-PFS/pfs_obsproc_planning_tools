@@ -4,6 +4,7 @@
 import os
 import warnings
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -168,16 +169,19 @@ def run(
         if len(conf["qplan"]["start_time"]) > 0:
             start_time_too = datetime.strptime(
                 conf["qplan"]["start_time"], "%Y-%m-%d %H:%M:%S"
-            ).replace(tzinfo=timezone.utc)
+            ).replace(tzinfo=ZoneInfo("US/Hawaii"))
+            start_time_too = start_time_too.astimezone(ZoneInfo("UTC"))
         else:
             start_time_too = None
 
         if len(conf["qplan"]["stop_time"]) > 0:
             stop_time_too = datetime.strptime(
                 conf["qplan"]["stop_time"], "%Y-%m-%d %H:%M:%S"
-            ).replace(tzinfo=timezone.utc)
+            ).replace(tzinfo=ZoneInfo("US/Hawaii"))
+            stop_time_too = stop_time_too.astimezone(ZoneInfo("UTC"))
         else:
             stop_time_too = None
+
         ob = PPC_OB(
             id=ob_code,
             program=pgm,
