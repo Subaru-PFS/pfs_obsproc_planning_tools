@@ -46,9 +46,7 @@ from qplan.util.site import site_subaru as observer
 from dateutil import parser
 
 
-def run(
-    conf, ppcList, obs_dates, inputDirName=".", outputDirName=".", plotVisibility=False
-):
+def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False):
     # log file will let us debug scheduling, check it for error and debug messages
     # NOTE: any python (stdlib) logging compatible logger will work
     logger = get_logger(
@@ -209,7 +207,7 @@ def run(
     #       observation at sunset
     #       if scheduling a second half just set the start time to 00:30:00 etc
     rec = []
-    for date in obs_dates:
+    for date in conf["qplan"]["obs_dates"]:
         date_t = parser.parse(f"{date} 12:00 HST")
         observer.set_date(date_t)
         start_time_ = observer.evening_twilight_18()
@@ -312,7 +310,7 @@ def run(
     # plot visibility plots for each night
     if plotVisibility == True:
         figs = []
-        for obs_date in obs_dates:
+        for obs_date in conf["qplan"]["obs_dates"]:
             t = observer.get_date(obs_date)
             observer.set_date(t)
             sunset = observer.sunset()

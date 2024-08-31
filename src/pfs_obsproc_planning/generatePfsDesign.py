@@ -34,6 +34,9 @@ class GeneratePfsDesign(object):
         ## configuration file ##
         self.conf = read_conf(os.path.join(self.workDir, self.config))
 
+        ## set obs_dates
+        self.obs_dates = self.conf["qplan"]["obs_dates"]
+
         ## define directory of outputs from each component ##
         self.inputDirPPP = os.path.join(self.workDir, self.conf["ppp"]["inputDir"])
         self.outputDirPPP = os.path.join(self.workDir, self.conf["ppp"]["outputDir"])
@@ -95,11 +98,13 @@ class GeneratePfsDesign(object):
     def update_config(self):
         self.conf = read_conf(os.path.join(self.workDir, self.config))
 
+    """
     def update_obs_dates(self, obs_dates):
         if type(obs_dates) == list:
             self.obs_dates = obs_dates
         else:
             raise ("specify obs_dates as a list")
+    #"""
 
     def runPPP(self, n_pccs_l, n_pccs_m, show_plots=False):
         from . import PPP
@@ -163,10 +168,7 @@ class GeneratePfsDesign(object):
 
         return None
 
-    def runQPlan(self, obs_dates=["2023-05-20"], plotVisibility=False):
-        if obs_dates is not ["2023-05-20"]:
-            self.update_obs_dates(obs_dates)
-
+    def runQPlan(self, plotVisibility=False):
         ## update config before run qPlan ##
         self.update_config()
 
@@ -177,7 +179,6 @@ class GeneratePfsDesign(object):
         self.df_qplan, self.sdlr, self.figs_qplan = qPlan.run(
             self.conf,
             "ppcList.ecsv",
-            obs_dates,
             inputDirName=self.outputDirPPP,
             outputDirName=self.outputDirQplan,
             plotVisibility=plotVisibility,
