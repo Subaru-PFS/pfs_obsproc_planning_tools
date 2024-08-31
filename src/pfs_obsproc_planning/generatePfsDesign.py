@@ -107,38 +107,24 @@ class GeneratePfsDesign(object):
         ## update config before run PPP ##
         self.update_config()
 
-        ## read sample from local path ##
-        if self.conf["ppp"]["mode"] == "local":
-            readtgt_con = {
-                "mode_readtgt": "local",
-                "para_readtgt": os.path.join(
-                    self.workDir, f"{self.inputDirPPP}/mock_sim.csv"
-                ),
-            }
-        else:
-            readtgt_con = {
-                "mode_readtgt": "DB",
-                "para_readtgt": {
-                    "DBPath_tgt": [
-                        self.conf["targetdb"]["db"]["dialect"],
-                        self.conf["targetdb"]["db"]["user"],
-                        self.conf["targetdb"]["db"]["password"],
-                        self.conf["targetdb"]["db"]["host"],
-                        self.conf["targetdb"]["db"]["port"],
-                        self.conf["targetdb"]["db"]["dbname"],
-                    ],
-                    "sql_query": self.conf["ppp"]["sql_query"],
-                    "DBPath_qDB": self.conf["queuedb"]["filepath"],
-                },
-            }
-
-        ## define exposure time ##
-        onsourceT_L = (
-            self.conf["ppp"]["TEXP_NOMINAL"] * n_pccs_l
-        )  # in sec (assuming 300 PPCs given)  --  LR
-        onsourceT_M = (
-            self.conf["ppp"]["TEXP_NOMINAL"] * n_pccs_m
-        )  # in sec (assuming 0 PPCs given)  --  MR
+        ## read sample##
+        readtgt_con = {
+            "mode_readtgt": self.conf["ppp"]["mode"],
+            "para_readtgt": {
+                "localPath_tgt": self.conf["ppp"]["localPath_tgt"],
+                "localPath_ppc": self.conf["ppp"]["localPath_ppc"],
+                "DBPath_tgt": [
+                    self.conf["targetdb"]["db"]["dialect"],
+                    self.conf["targetdb"]["db"]["user"],
+                    self.conf["targetdb"]["db"]["password"],
+                    self.conf["targetdb"]["db"]["host"],
+                    self.conf["targetdb"]["db"]["port"],
+                    self.conf["targetdb"]["db"]["dbname"],
+                ],
+                "sql_query": self.conf["ppp"]["sql_query"],
+                "DBPath_qDB": self.conf["queuedb"]["filepath"],
+            },
+        }
 
         cobra_coach, bench_info = nfutils.getBench(
             self.conf["sfa"]["pfs_instdata_dir"],
@@ -162,8 +148,8 @@ class GeneratePfsDesign(object):
         PPP.run(
             bench_info,
             readtgt_con,
-            onsourceT_L,
-            onsourceT_M,
+            n_pccs_l,
+            n_pccs_m,
             dirName=self.outputDirPPP,
             numReservedFibers=num_reserved_fibers,
             fiberNonAllocationCost=fiber_non_allocation_cost,
@@ -232,6 +218,7 @@ class GeneratePfsDesign(object):
         ob_parallaxs = t["ob_parallax"]
         ob_equinoxs = t["ob_equinox"]
         ob_priorities = t["ob_priority"]
+        ob_single_exptimes = t["ob_single_exptime"]
         ob_filter_gs = t["ob_filter_g"]
         ob_filter_rs = t["ob_filter_r"]
         ob_filter_is = t["ob_filter_i"]
@@ -260,6 +247,7 @@ class GeneratePfsDesign(object):
                 ob_parallax,
                 ob_equinox,
                 "sci_P%d" % (int(ob_priority)),
+                ob_single_exptime,
                 ob_filter_g,
                 ob_filter_r,
                 ob_filter_i,
@@ -276,7 +264,7 @@ class GeneratePfsDesign(object):
                 ob_psf_flux_error_z,
                 ob_psf_flux_error_y,
             ]
-            for proposal_id, ob_code, ob_obj_id, ob_cat_id, ob_ra, ob_dec, ob_pmra, ob_pmdec, ob_parallax, ob_equinox, ob_priority, ob_filter_g, ob_filter_r, ob_filter_i, ob_filter_z, ob_filter_y, ob_psf_flux_g, ob_psf_flux_r, ob_psf_flux_i, ob_psf_flux_z, ob_psf_flux_y, ob_psf_flux_error_g, ob_psf_flux_error_r, ob_psf_flux_error_i, ob_psf_flux_error_z, ob_psf_flux_error_y in zip(
+            for proposal_id, ob_code, ob_obj_id, ob_cat_id, ob_ra, ob_dec, ob_pmra, ob_pmdec, ob_parallax, ob_equinox, ob_priority, ob_single_exptime, ob_filter_g, ob_filter_r, ob_filter_i, ob_filter_z, ob_filter_y, ob_psf_flux_g, ob_psf_flux_r, ob_psf_flux_i, ob_psf_flux_z, ob_psf_flux_y, ob_psf_flux_error_g, ob_psf_flux_error_r, ob_psf_flux_error_i, ob_psf_flux_error_z, ob_psf_flux_error_y in zip(
                 proposal_ids,
                 ob_codes,
                 ob_obj_ids,
@@ -288,6 +276,7 @@ class GeneratePfsDesign(object):
                 ob_parallaxs,
                 ob_equinoxs,
                 ob_priorities,
+                ob_single_exptimes,
                 ob_filter_gs,
                 ob_filter_rs,
                 ob_filter_is,
@@ -339,7 +328,7 @@ class GeneratePfsDesign(object):
 
         ## write to csv ##
         filename = "ppp+qplan_output.csv"
-        header = "pointing,ra_center,dec_center,pa_center,ob_unique_code,proposal_id,ob_code,obj_id,cat_id,ra_target,dec_target,pmra_target,pmdec_target,parallax_target,equinox_target,target_class,filter_g,filter_r,filter_i,filter_z,filter_y,psf_flux_g,psf_flux_r,psf_flux_i,psf_flux_z,psf_flux_y,psf_flux_error_g,psf_flux_error_r,psf_flux_error_i,psf_flux_error_z,psf_flux_error_y,obstime,obsdate_in_hst"
+        header = "pointing,ra_center,dec_center,pa_center,ob_unique_code,proposal_id,ob_code,obj_id,cat_id,ra_target,dec_target,pmra_target,pmdec_target,parallax_target,equinox_target,target_class,ob_single_exptime,filter_g,filter_r,filter_i,filter_z,filter_y,psf_flux_g,psf_flux_r,psf_flux_i,psf_flux_z,psf_flux_y,psf_flux_error_g,psf_flux_error_r,psf_flux_error_i,psf_flux_error_z,psf_flux_error_y,obstime,obsdate_in_hst"
         np.savetxt(
             os.path.join(self.outputDirPPP, filename),
             data,
@@ -385,6 +374,7 @@ class GeneratePfsDesign(object):
                             res[1].replace(":", ""),
                             res[2].replace(":", ""),
                             k,
+                            dictPointings[pointing.lower()]["single_exptime"],
                         ]
                     )
             info = pd.DataFrame(
@@ -397,6 +387,7 @@ class GeneratePfsDesign(object):
                     "ppc_ra",
                     "ppc_dec",
                     "obstime_in_hst",
+                    "single_exptime",
                 ],
             )
             info["obstime_in_hst"] = pd.to_datetime(info["obstime_in_hst"], utc=True)
