@@ -119,15 +119,15 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
     tgt_tbl = ""
     for t in tab:
         c = SkyCoord(t["ppc_ra"], t["ppc_dec"], unit="deg")
-        ra = c.ra.hms
-        dec = c.dec.dms
+        ra = c.ra.to_string(unit=u.hourangle, sep=":", precision=2, pad=True)
+        dec = c.dec.to_string(sep=":", precision=2, pad=True)
         line = "  "
         line += f"{t['ppc_code']}\t"
         line += f"{t['ppc_priority']}\t"
         line += f"{t['ppc_exptime'] + float(conf['qplan']['overhead'])*60.0}\t"
         line += f"{t['ppc_resolution']}\t"
-        line += f"{int(ra.h)}:{int(abs(ra.m))}:{abs(ra.s)}\t"
-        line += f"{int(dec.d)}:{int(abs(dec.m))}:{abs(dec.s)}\t"
+        line += f"{ra}\t"
+        line += f"{dec}\t"
         line += "2000\t"
         line += f"design_{t['ppc_code']}\t"
         line += f"catalog_{t['ppc_code']}\t"
