@@ -123,8 +123,9 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
         dec = c.dec.to_string(sep=":", precision=2, pad=True)
         line = "  "
         line += f"{t['ppc_code']}\t"
-        line += f"{t['ppc_priority']}\t"
+        line += f"{t['ppc_priority_usr']}\t"
         line += f"{t['ppc_exptime'] + float(conf['qplan']['overhead'])*60.0}\t"
+        line += f"{t['ppc_pa']}\t"
         line += f"{t['ppc_resolution']}\t"
         line += f"{ra}\t"
         line += f"{dec}\t"
@@ -144,6 +145,7 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
             ob_code,
             priority,
             exp_time,
+            pa,
             resolution,
             ra,
             dec,
@@ -154,6 +156,8 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
         ) = line.split("\t")
         # exp_time = float(exp_time) * 60.0  # assume table is in MINUTES
         exp_time = float(exp_time)  # exptime is in seconds
+        pa = float(pa)
+        priority = float(priority)
 
         if resolution == "L":
             resolution = "low"
@@ -185,7 +189,7 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
             program=pgm,
             target=tgt,
             telcfg=telcfg,
-            inscfg=PPCConfiguration(exp_time=exp_time, pa=0.0, resolution=resolution),
+            inscfg=PPCConfiguration(exp_time=exp_time, pa=pa, resolution=resolution),
             envcfg=EnvironmentConfiguration(
                 seeing=99.0,
                 transparency=0.0,
@@ -196,6 +200,7 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
             # acct_time is time we charge to the PI
             acct_time=exp_time,
             total_time=exp_time,
+            priority=priority,
             comment=f"{ra} / {dec}",
         )
         obs.append(ob)
@@ -289,6 +294,7 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
                 slot.ob.target.ra,
                 slot.ob.target.dec,
                 slot.ob.inscfg.pa,
+                slot.ob.priority,
             )
             for slot in schedule
             if slot.ob is not None and not slot.ob.derived
@@ -299,7 +305,15 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
             if slot.ob is not None and not slot.ob.derived
         ]
         df = pd.DataFrame(
-            data, columns=["obstime", "ppc_code", "ppc_ra", "ppc_dec", "ppc_pa"]
+            data,
+            columns=[
+                "obstime",
+                "ppc_code",
+                "ppc_ra",
+                "ppc_dec",
+                "ppc_pa",
+                "ppc_priority",
+            ],
         )
         return df, targets
 
