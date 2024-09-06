@@ -115,6 +115,12 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
     #
 
     # get PPC list
+    overhead_add = 0.0
+    if conf["ope"]["split_frame"]:
+        overhead_add = (
+            float(conf["ope"]["n_split_frame"]) - 1
+        ) * 60.0  # split into 1 more frame adds an readout time of ~60 seconds
+
     tab = Table.read(os.path.join(inputDirName, ppcList))
     tgt_tbl = ""
     for t in tab:
@@ -124,7 +130,7 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
         line = "  "
         line += f"{t['ppc_code']}\t"
         line += f"{t['ppc_priority_usr']}\t"
-        line += f"{t['ppc_exptime'] + float(conf['qplan']['overhead'])*60.0}\t"
+        line += f"{t['ppc_exptime'] + float(conf['qplan']['overhead'])*60.0 + overhead_add}\t"
         line += f"{t['ppc_pa']}\t"
         line += f"{t['ppc_resolution']}\t"
         line += f"{ra}\t"
