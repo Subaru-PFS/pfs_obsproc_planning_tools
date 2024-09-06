@@ -77,11 +77,11 @@ class OpeFile(object):
         # OBSERVATION_END_DATE
         obsdate2 = Time(obsdate) + TimeDelta(1.0 * u.day)
         obsdate2_new = obsdate2.strftime("%Y.%m.%d")
-        repl1 = "OBSERVATION_END_DATE=2023.07.31"
+        repl1 = "OBSERVATION_END_DATE=2023.7.31"
         repl2 = f"OBSERVATION_END_DATE={obsdate2_new}"
         self.contents1_updated = self.contents1_updated.replace(repl1, repl2)
 
-    def update_design(self, info):
+    def update_design(self, info, n_split_frame=1):
         def convRaDec(ra, dec):
             if dec > 0:
                 decsgn = "+"
@@ -128,38 +128,39 @@ class OpeFile(object):
         # update "Science Exposure" part
         self.contents2_updated = ""
         for i, val in enumerate(info):
-            tmpl = self.contents2
+            for iter_ in range(n_split_frame):
+                tmpl = self.contents2
 
-            # add PPC code
-            repl1 = "### SCIENCE:START ###"
-            repl2 = f"### {val[0]} ###\n### OBSTIME: {val[6]} ###"
-            tmpl = tmpl.replace(repl1, repl2)
+                # add PPC code
+                repl1 = "### SCIENCE:START ###"
+                repl2 = f"### {val[0]} ###\n### OBSTIME: {val[6]} ###"
+                tmpl = tmpl.replace(repl1, repl2)
 
-            # add pfsDesignId
-            repl1 = 'DESIGN_ID="designId"'
-            repl2 = f'DESIGN_ID="{val[3]:#013x}"'
-            tmpl = tmpl.replace(repl1, repl2)
+                # add pfsDesignId
+                repl1 = 'DESIGN_ID="designId"'
+                repl2 = f'DESIGN_ID="{val[3]:#013x}"'
+                tmpl = tmpl.replace(repl1, repl2)
 
-            # add objectname
-            repl1 = '"objectname"'
-            repl2 = f'"{val[0]}"'
-            tmpl = tmpl.replace(repl1, repl2)
+                # add objectname
+                repl1 = '"objectname"'
+                repl2 = f'"{val[0]}"'
+                tmpl = tmpl.replace(repl1, repl2)
 
-            # add exptime
-            repl1 = '"exptime"'
-            repl2 = f"{val[7]}"
-            tmpl = tmpl.replace(repl1, repl2)
+                # add exptime
+                repl1 = '"exptime"'
+                repl2 = f"{val[7]/n_split_frame}"
+                tmpl = tmpl.replace(repl1, repl2)
 
-            # remove unnecessary words
-            repl1 = "# SETUPFIELD WITH cobra convergence                     #!!! MODIFICATION NEEDED: designId, objectname !!!#"
-            repl2 = "# SETUPFIELD WITH cobra convergence"
-            tmpl = tmpl.replace(repl1, repl2)
+                # remove unnecessary words
+                repl1 = "# SETUPFIELD WITH cobra convergence                     #!!! MODIFICATION NEEDED: designId, objectname !!!#"
+                repl2 = "# SETUPFIELD WITH cobra convergence"
+                tmpl = tmpl.replace(repl1, repl2)
 
-            repl1 = "## Get spectrum                                         #!!! MODIFICATION NEEDED: objectname !!!#"
-            repl2 = "## Get spectrum"
-            tmpl = tmpl.replace(repl1, repl2)
+                repl1 = "## Get spectrum                                         #!!! MODIFICATION NEEDED: objectname !!!#"
+                repl2 = "## Get spectrum"
+                tmpl = tmpl.replace(repl1, repl2)
 
-            self.contents2_updated += tmpl
+                self.contents2_updated += tmpl
 
             self.contents3 = self.contents3.replace("### SCIENCE:END  ###", "")
 

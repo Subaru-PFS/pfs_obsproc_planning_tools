@@ -398,7 +398,7 @@ class GeneratePfsDesign(object):
                 .dt.strftime("%Y/%m/%d %H:%M:%S")
             )
             info = info.sort_values(by="obstime_in_utc", ascending=True).values.tolist()
-            ope.update_design(info)
+            ope.update_design(info, self.conf["ope"]["n_split_frame"])
             ope.write()  # save file
         # for pointing, (k,v) in zip(listPointings, pfsDesignIds.items()):
         #    ope.loadTemplate() # initialize
@@ -406,24 +406,19 @@ class GeneratePfsDesign(object):
         #    ope.write() # save file
 
         return None
-
+    
     def runValidation(self):
         from . import validation
 
         ## update config before run SFA ##
         self.update_config()
-
-        parentPath = os.path.join(self.workDir, self.conf["validation"]["parentPath"])
-        figpath = os.path.join(self.workDir, self.conf["validation"]["figpath"])
-        validation.validation(
-            parentPath,
-            figpath,
-            self.conf["validation"]["savefig"],
-            self.conf["validation"]["showfig"],
-        )
-
+        
+        parentPath=os.path.join(self.workDir, self.conf["validation"]["parentPath"])
+        figpath=os.path.join(self.workDir, self.conf["validation"]["figpath"])
+        validation.validation(parentPath, figpath, self.conf["validation"]["savefig"], self.conf["validation"]["showfig"])
+        
         logger.info(f"validation plots saved under {figpath}")
-
+        
         return None
 
 
