@@ -407,6 +407,25 @@ class GeneratePfsDesign(object):
 
         return None
 
+    def runValidation(self):
+        from . import validation
+
+        ## update config before run SFA ##
+        self.update_config()
+
+        parentPath = os.path.join(self.workDir, self.conf["validation"]["parentPath"])
+        figpath = os.path.join(self.workDir, self.conf["validation"]["figpath"])
+        validation.validation(
+            parentPath,
+            figpath,
+            self.conf["validation"]["savefig"],
+            self.conf["validation"]["showfig"],
+        )
+
+        logger.info(f"validation plots saved under {figpath}")
+
+        return None
+
 
 def get_arguments():
     parser = argparse.ArgumentParser()
