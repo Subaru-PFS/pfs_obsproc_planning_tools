@@ -128,39 +128,41 @@ class OpeFile(object):
         # update "Science Exposure" part
         self.contents2_updated = ""
         for i, val in enumerate(info):
-            for iter_ in range(n_split_frame):
-                tmpl = self.contents2
+            tmpl = self.contents2
 
-                # add PPC code
-                repl1 = "### SCIENCE:START ###"
-                repl2 = f"### {val[0]} ###\n### OBSTIME: {val[6]} ###"
-                tmpl = tmpl.replace(repl1, repl2)
+            # add PPC code
+            repl1 = "### SCIENCE:START ###"
+            repl2 = f"### {val[0]} ###\n### OBSTIME: {val[6]} ###"
+            tmpl = tmpl.replace(repl1, repl2)
 
-                # add pfsDesignId
-                repl1 = 'DESIGN_ID="designId"'
-                repl2 = f'DESIGN_ID="{val[3]:#013x}"'
-                tmpl = tmpl.replace(repl1, repl2)
+            # add pfsDesignId
+            repl1 = 'DESIGN_ID="designId"'
+            repl2 = f'DESIGN_ID="{val[3]:#013x}"'
+            tmpl = tmpl.replace(repl1, repl2)
 
-                # add objectname
-                repl1 = '"objectname"'
-                repl2 = f'"{val[0]}"'
-                tmpl = tmpl.replace(repl1, repl2)
+            # add objectname
+            repl1 = '"objectname"'
+            repl2 = f'"{val[0]}"'
+            tmpl = tmpl.replace(repl1, repl2)
 
-                # add exptime
-                repl1 = '"exptime"'
-                repl2 = f"{val[7]/n_split_frame}"
-                tmpl = tmpl.replace(repl1, repl2)
+            # add exptime
+            repl1 = '"exptime"'
+            repl2 = f"{val[7]}"
+            if n_split_frame > 1:
+                # if split_frame is true, separate each frame into n sub-frames with an exptime of exptime/n
+                repl2 = f"{val[7]/n_split_frame} NFRAME={n_split_frame}"
+            tmpl = tmpl.replace(repl1, repl2)
 
-                # remove unnecessary words
-                repl1 = "# SETUPFIELD WITH cobra convergence                     #!!! MODIFICATION NEEDED: designId, objectname !!!#"
-                repl2 = "# SETUPFIELD WITH cobra convergence"
-                tmpl = tmpl.replace(repl1, repl2)
+            # remove unnecessary words
+            repl1 = "# SETUPFIELD WITH cobra convergence                     #!!! MODIFICATION NEEDED: designId, objectname !!!#"
+            repl2 = "# SETUPFIELD WITH cobra convergence"
+            tmpl = tmpl.replace(repl1, repl2)
 
-                repl1 = "## Get spectrum                                         #!!! MODIFICATION NEEDED: objectname !!!#"
-                repl2 = "## Get spectrum"
-                tmpl = tmpl.replace(repl1, repl2)
+            repl1 = "## Get spectrum                                         #!!! MODIFICATION NEEDED: objectname !!!#"
+            repl2 = "## Get spectrum"
+            tmpl = tmpl.replace(repl1, repl2)
 
-                self.contents2_updated += tmpl
+            self.contents2_updated += tmpl
 
             self.contents3 = self.contents3.replace("### SCIENCE:END  ###", "")
 

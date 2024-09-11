@@ -116,10 +116,10 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
 
     # get PPC list
     overhead_add = 0.0
-    if conf["ope"]["split_frame"]:
+    if conf["ope"]["n_split_frame"] > 1:
         overhead_add = (
             float(conf["ope"]["n_split_frame"]) - 1
-        ) * 60.0  # split into 1 more frame adds an readout time of ~60 seconds
+        ) * 60.0  # splitting into 1 more frame adds an readout time of ~60 seconds
 
     tab = Table.read(os.path.join(inputDirName, ppcList))
     tgt_tbl = ""
