@@ -11,8 +11,8 @@ from loguru import logger
 class GeneratePfsDesignGUI(object):
     def __init__(self, repoDir=None):
         self.app = QtWidgets.QApplication([])  
-        self.app_window = uic.loadUi(f"{repoDir}/mainWindow.ui")  
-        self.config_window = uic.loadUi(f"{repoDir}/configWindow.ui")  
+        self.app_window = uic.loadUi(f"{repoDir}/GUI_window/mainWindow.ui")  
+        self.config_window = uic.loadUi(f"{repoDir}/GUI_window/configWindow.ui")  
     def obsmode_enable(self):
         #classic mode
         if self.app_window.radioButton_classic.isChecked():
