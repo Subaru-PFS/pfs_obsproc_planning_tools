@@ -24,7 +24,7 @@
 ## Run
 
 - **Step1**: start GUI
-    - if you install the package under folders other than the home folder, please open the script `test_ppp_qplanner_sfa_scripting_gui.py` under `examples/` folder, and set `repoDir` to the folder you install the package:
+    - please open the script `test_ppp_qplanner_sfa_scripting_gui.py` under `examples/` folder, and set `repoDir` to the folder you install the package:
         ```shell
         repoDir="<path_to_pfs_obsproc_planning_tools>/pfs_obsproc_planning_tools/src/pfs_obsproc_planning"
         ```
@@ -36,6 +36,10 @@
             ```shell
             ssh -X username@pfsa-usr01.subaru.nao.ac.jp
             ```
+    - the GUI should pop up like this:
+    <figure markdown>
+        ![Status indicators](tutorial_fig/gui_window.png){ width="1000" }
+    </figure>
 
 
 

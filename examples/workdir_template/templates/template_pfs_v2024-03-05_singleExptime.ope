@@ -1,0 +1,150 @@
+### template ope file for PFS operations
+### v2023-06-27:  created based on 2023 Apr run
+### v2024-02-23:  updated including new commands
+### v2024-03-05:  updated for ope file generation in SFA.py
+
+### The description which should be modified by PPP-Qplan-SFA are indicated.
+
+
+:Header
+
+OBSERVATION_FILE_NAME=template_pfs.ope
+OBSERVATION_FILE_TYPE=OPE
+OBSERVATION_START_DATE=2023.07.01                     #!!! MODIFICATION NEEDED !!!#
+OBSERVATION_START_TIME=17:00:00
+OBSERVATION_END_DATE=2023.7.31                        #!!! MODIFICATION NEEDED !!!#
+OBSERVATION_END_TIME=06:00:00
+
+
+:Parameter
+
+## Common parameters (No need to touch)
+DEF_PFSENG=OBE_ID=PFS OBE_MODE=SPEC_ENG
+DEF_PFS=OBE_ID=PFS OBE_MODE=SPEC
+DEF_CMNTOOL=OBE_ID=COMMON OBE_MODE=TOOL
+DEF_CMNLAN=OBE_ID=COMMON OBE_MODE=LAUNCHER F_SELECT="P_Opt2"
+# pfsDesign path directory
+PFSDSGNDIR="/data/pfsDesign/"
+
+## Objects                                            #!!! WHOLE LIST NEED TO BE MODIFIED !!!#
+# [FIELD_NAME] 05:28:40.1 +35:49:26
+FIELD_NAME=OBJECT="FIELD_NAME" RA=FIELD_RA DEC=FIELD_DEC EQUINOX=2000.0
+
+
+:Command
+
+#############################
+# Preparations & Pre-checks #
+#############################
+
+# 1. Start AG camera (see manual)
+
+# 2. Check and select the bucket for data storage
+
+# 3. Execute below EVERY NIGHT 
+PRECHECK $DEF_PFS CHK_HEX=YES CHK_ADC=YES CHK_MCS=YES CHK_SPS=YES CHK_AG=YES
+
+# 4. (If it is the first night of the PFS run,) execute below.
+PRECHECK2 $DEF_PFS CHK_GRA=YES CHK_COBRA=YES
+
+
+
+
+#############################
+### Focusing              ###
+#############################
+
+# 1. Prepare PFS_AG Plugin on Gen2/Guideview (see manual)
+
+# 2. Take one exposure with AG 
+PFS_TESTEXPOSURE $DEF_PFSENG CAM=AG MODE=OBJECT NFRAME=1 EXPTIME=3
+# TESTEXPOSURE $DEF_PFS... (TBD)
+
+# 3. Start PFS_Focus on Guideview and select suitable camera and stars for focusing
+
+# 4. Conduct focusing
+FOCUSAGPFS $DEF_PFS Z=3.3 DELTAZ=0.1 NSTEP=7 NFRAME=3 MODE=AGEXP EXPTIME=3
+
+
+
+
+
+#############################
+### Science Exposure      ###
+#############################
+
+### SCIENCE:START ###
+
+# SETUPFIELD WITH cobra convergence                     #!!! MODIFICATION NEEDED: designId, objectname !!!#
+#SetupField_TOLERANCE $DEF_PFSENG DESIGN_ID="designId" OBJECT="objectname" AG=OFF OFFSET_RA=0 OFFSET_DEC=0 TOLERANCE=0.005 CC_NITERATION=8
+SETUPFIELD $DEF_PFS DESIGN_ID="designId" OBJECT="objectname" AG=OFF OFFSET_RA=0 OFFSET_DEC=0 TOLERANCE=0.005 CC_NITERATION=8
+
+# AG Tuning (via launcher, see manual)
+
+# Autoguide start (use launcher OR command below)
+AGSTARTCALC $DEF_PFS EXPTIME=3 CADENCE=5 FIT_DSCALE=YES FIT_DNIR=YES
+AGSTARTCORRECTION $DEF_PFS MOTOR=ON
+
+## Get spectrum                                         #!!! MODIFICATION NEEDED: objectname !!!#
+GETOBJECT $DEF_PFS EXPTIME="exptime" SEQ_NAME="objectname" 
+
+
+### SCIENCE:END  ###
+
+#############################
+### Calibrations          ###
+#############################
+
+### Trace ###
+# Move cobra to home (via launcher)
+# Move rotator to 0 deg (via launcher, telescope 2 tab)
+
+## trace for red (low resolution)
+# change to low res. (if needed)
+SETUPRES $DEF_PFS RESOLUTION=LOW
+
+GETTRACE $DEF_PFS EXPTIME=120 NFRAME=1 CAMERA="b1,r1,n1,b2,r2,n2,b3,r3,n3,b4,r4,n4"
+GETTRACE $DEF_PFS EXPTIME=120 NFRAME=24 CAMERA="b1,r1,n1,b2,r2,n2,b3,r3,n3,b4,r4,n4"
+
+#change to med res.
+SETUPRES $DEF_PFS RESOLUTION=MED
+
+GETTRACE $DEF_PFS EXPTIME=120 NFRAME=1 CAMERA="b1,r1,n1,b2,r2,n2,b3,r3,n3,b4,r4,n4"
+GETTRACE $DEF_PFS EXPTIME=120 NFRAME=12 CAMERA="b1,r1,n1,b2,r2,n2,b3,r3,n3,b4,r4,n4"
+
+
+
+
+### Arc ###
+# Move cobra to home (via launcher)
+# Move rotator to 0 deg (maybe with launcher? but need to check if it can be used with PFS)
+
+
+# arc (low resolution)
+# change to low res. (if needed)
+SETUPRES $DEF_PFS RESOLUTION=LOW
+
+# arc especially for blue 
+GETARC $DEF_PFS NFRAME=5 HGCD=60 ARM="b" SEQ_COMMENT="b arm"
+
+# arc for all arms 
+GETARC $DEF_PFS NFRAME=5 AR=10 SEQ_COMMENT="brn arm"
+GETARC $DEF_PFS NFRAME=5 XE=45 SEQ_COMMENT="brn arm"
+GETARC $DEF_PFS NFRAME=3 NE=10 SEQ_COMMENT="brn arm"
+GETARC $DEF_PFS NFRAME=5 KR=70 SEQ_COMMENT="brn arm"
+
+# arc for red med resolution
+#change to med res.
+SETUPRES $DEF_PFS RESOLUTION=MED
+
+GETARC $DEF_PFS NFRAME=5 AR=60 ARM="r" SEQ_COMMENT="m arm"
+GETARC $DEF_PFS NFRAME=5 XE=90 ARM="r" SEQ_COMMENT="m arm"
+GETARC $DEF_PFS NFRAME=5 NE=20 ARM="r" SEQ_COMMENT="m arm"
+GETARC $DEF_PFS NFRAME=5 KR=60 ARM="r" SEQ_COMMENT="m arm"
+
+
+
+
+### Dark ###
+
+GETSPSDARK $DEF_PFS EXPTIME=300 NFRAME=30 CAMERA="b1,r1,n1,b2,r2,n2,b3,r3,n3,b4,r4"
