@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>372</width>
-    <height>241</height>
+    <width>803</width>
+    <height>418</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -19,12 +19,37 @@
      <rect>
       <x>0</x>
       <y>0</y>
-      <width>371</width>
-      <height>241</height>
+      <width>801</width>
+      <height>391</height>
      </rect>
+    </property>
+    <property name="editTriggers">
+     <set>QAbstractItemView::NoEditTriggers</set>
+    </property>
+    <property name="dragEnabled">
+     <bool>true</bool>
     </property>
     <property name="selectionMode">
      <enum>QAbstractItemView::MultiSelection</enum>
+    </property>
+    <property name="selectionBehavior">
+     <enum>QAbstractItemView::SelectRows</enum>
+    </property>
+    <property name="sortingEnabled">
+     <bool>true</bool>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="pushButton_pslDone">
+    <property name="geometry">
+     <rect>
+      <x>720</x>
+      <y>392</y>
+      <width>79</width>
+      <height>25</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Done</string>
     </property>
    </widget>
   </widget>
