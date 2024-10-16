@@ -43,6 +43,14 @@ Set the path to your Gurobi license:
 export GRB_LICENSE_FILE = <path_to_gurobi_license>/gurobi.lic
 ```
 
+If you have not set `GUROBI_HOME`, please also do so:
+
+```shell
+export GUROBI_HOME="YOUR_GUROBI_HOME/linux64"
+export PATH=$GUROBI_HOME/bin:$PATH
+export LD_LIBRARY_PATH=$GUROBI_HOME/lib:$LD_LIBRARY_PATH
+```
+
 ## Configuration
 
 ### Work directory
