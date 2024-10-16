@@ -8,7 +8,7 @@
         git clone -b u/wanqqq/update_2024aug https://github.com/Subaru-PFS/pfs_obsproc_planning_tools.git
         ```
 - Key points:
-    1. Please ensure the Gurobi environment and license are correctly set;
+    1. Please ensure the Gurobi environment and license are correctly set **every time when you start a new terminal** (it is recommended to save the settings in e.g. ~/.bashrc);
     2. Please ensure a work directory has been correctly set;
         ```shell
         workdir_example/
@@ -59,11 +59,11 @@
                 - `pfs_instdata`: `<path_to_pfs_obsproc_planning_tools>/src/pfs_instdata`
                 - `cobra_coach`: `<path_to_cobracoach>` (you need to create this cobracoach folder somewhere in advance)
                 - `SCHEMA`: please do not revise it for now (Oct. 2024)
-            - check `Split 900-sec frame?` and set `n_frame=2` (or 3 if needed)
+            - check `Split 900-sec frame?` (checked by default) and set `n_frame=2` (or 3 if needed)
             - check `Enable sky uniformity` (checked by default) to enable uniform assignment of sky fibers
                 - `cobra_location_group_n`: number of sub-regions to separate on the focal plane
                 - `min_sky_targets_per_location`: minimal sky fibers on each sub-region
-                - currently we set 50 sub-regions and 8 sky fibers on each of them at least, so 400 sky fibers per pointing in total (Oct. 2024); if you do not want to modify the total number of sky fibers per pointing, please do not change the settings
+                - (Oct. 2024) currently we set 50 sub-regions and 8 sky fibers on each of them at least, so 400 sky fibers per pointing in total; if you do not want to modify the total number of sky fibers per pointing, please do not change the settings
             - set selection criteria of flux-calibration stars 
                 - (Oct. 2024) current criteria are determined according to Ishigaki-san, Yabe-san and Tanaka-san; please do not change the settings unless requested
             - before moving to the next tab, it is recommended to view the current config file by clicking `Check config`:
@@ -74,10 +74,10 @@
             - click `from targetDB`, a window should pop up:
                 ![Run gui](tutorial_fig/gui_psl.png){ width="500" }
                 select all programs you want to include by clicking on the relevant rows; if everything is ok, click `Done` 
-                (Oct. 2024: proposal type classic/queue/filler is not recorded in tgtDB...) 
+                (Oct. 2024: proposal type classic/queue/filler is not recorded in tgtDB, we can only use proposal ID to select programs to generate design files) 
             - check `Include fillers?` to include fillers if needed; the magnitude range of fillers can be modified (18 < g-mag < 22.5 is set by default)
             - set calibrators
-                - (Oct. 2024) current settings are tested to work fine (?) in the previous runs; please do not change the settings unless requested
+                - (Oct. 2024) current settings have been tested to work fine (?) in the previous runs; please do not change the settings unless requested
             - set observation dates:
                 - `overheads`: set to be 5 minutes by default (need to be updated with Arai-san and Vera-san)
                 - `dates`: 
@@ -92,7 +92,20 @@
     - move to the `Parameters` tab, and set `Nppc_low` and `Nppc_med`, which mean number of pointings given to the low- and medium-resolution modes, respectively
         - for [Example 1](#example1), following the mock TAC allocation, we set `Nppc_low=30` and `Nppc_med=12`
     - set `workDir` to your work directory (`workdir_example`)
-    - check the sub-process you want to run (`PPP`, `Qplan`, `SFA`, `validate`), and click `Run` button
+    - check the sub-progress you want to run (`PPP`, `Qplan`, `SFA`, `validate`), and click `Run` button; you should see the progress you selected are running in the terminal:
+    ![Run gui](tutorial_fig/gui_run.png){ width="700" }
+    - outputs are stored under `output/` folder of your `workDir`:
+        ```shell
+        workdir_example/
+        ├── ...
+        └── output
+            └── ppp
+            └── qplan
+            └── design
+            └── ope
+            └── figure_pfsDesign_validation
+        └── ....
+        ```
 
 
 

@@ -272,8 +272,6 @@ class GeneratePfsDesignGUI(object):
         # obs_starttimes = ''
         # obs_stoptimes = ''
         for row_temp in range(nrow_dates):
-            print(self.app_window.listWidget_obstime.item(row_temp).text())
-            print(self.app_window.listWidget_obstime.item(row_temp).text().split(" "))
             obs_date_temp, obs_starttime_temp, obs_stoptime_temp = (
                 self.app_window.listWidget_obstime.item(row_temp).text().split(" ")
             )
