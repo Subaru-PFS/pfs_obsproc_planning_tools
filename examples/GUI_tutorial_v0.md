@@ -87,10 +87,23 @@
                 ![Run gui](tutorial_fig/gui_tab2.png){ width="250" }
                 ![Run gui](tutorial_fig/gui_config_tab2.png){ width="500" }
                 If there is no problem, click `Save` button to automatically save the config file.
+    - <a id="example2">Example 2</a>: **Classical**
+        - set `Observation mode` to `Calssical/ToO`
+        - the `Parameters` tab:
+            - please refer to [Example 1](#example1)
+        - the `Targets/obstime` tab:
+            - it is allowed to select target list from local; you can do that by clicking `from local` button
+            - you can also select targets from target database by clicking the `from targetDB` button
+                - please take care that **only one program** should be selected under this mode:
+                ![Run gui](tutorial_fig/gui_psl_cla.png){ width="500" }
+            - if user prefers using their own pointing list, please check `Use user pointings?` and select the pointing list (*.csv) from local:
+            ![Run gui](tutorial_fig/gui_tab2_cla.png){ width="250" }
+            - for other parameters please refer to [Example 1](#example1)
 - <a id="step3">**Step3**: run the integrated codes</a>
     - please confirm the `config.toml` file has been correctly generated under your `workDir`
     - move to the `Parameters` tab, and set `Nppc_low` and `Nppc_med`, which mean number of pointings given to the low- and medium-resolution modes, respectively
         - for [Example 1](#example1), following the mock TAC allocation, we set `Nppc_low=30` and `Nppc_med=12`
+        - for [Example 2](#example2), following the mock TAC allocation, we set `Nppc_low=24` and `Nppc_med=0`
     - set `workDir` to your work directory (`workdir_example`)
     - check the sub-progress you want to run (`PPP`, `Qplan`, `SFA`, `validate`), and click `Run` button; you should see the progress you selected are running in the terminal:
     ![Run gui](tutorial_fig/gui_run.png){ width="700" }
