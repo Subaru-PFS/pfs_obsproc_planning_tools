@@ -266,6 +266,9 @@
       <property name="text">
        <string>Split 900-sec frame?</string>
       </property>
+      <property name="checked">
+       <bool>true</bool>
+      </property>
      </widget>
      <widget class="QDoubleSpinBox" name="doubleSpinBox_nsplit">
       <property name="geometry">
@@ -286,7 +289,7 @@
        <number>0</number>
       </property>
       <property name="singleStep">
-       <double>0.100000000000000</double>
+       <double>1.000000000000000</double>
       </property>
       <property name="value">
        <double>2.000000000000000</double>
@@ -1000,7 +1003,7 @@
       <double>500.000000000000000</double>
      </property>
      <property name="singleStep">
-      <double>0.100000000000000</double>
+      <double>1.000000000000000</double>
      </property>
      <property name="value">
       <double>1.000000000000000</double>
@@ -1028,7 +1031,7 @@
       <double>500.000000000000000</double>
      </property>
      <property name="singleStep">
-      <double>0.100000000000000</double>
+      <double>1.000000000000000</double>
      </property>
      <property name="value">
       <double>1.000000000000000</double>
@@ -1527,24 +1530,24 @@
         </property>
         <property name="dateTime">
          <datetime>
-          <hour>0</hour>
+          <hour>15</hour>
           <minute>0</minute>
           <second>0</second>
           <year>2024</year>
           <month>12</month>
-          <day>29</day>
+          <day>28</day>
          </datetime>
         </property>
         <property name="date">
          <date>
           <year>2024</year>
           <month>12</month>
-          <day>29</day>
+          <day>28</day>
          </date>
         </property>
         <property name="time">
          <time>
-          <hour>0</hour>
+          <hour>15</hour>
           <minute>0</minute>
           <second>0</second>
          </time>
@@ -1553,14 +1556,14 @@
          <date>
           <year>2024</year>
           <month>12</month>
-          <day>29</day>
+          <day>28</day>
          </date>
         </property>
         <property name="minimumDate">
          <date>
           <year>2024</year>
           <month>12</month>
-          <day>29</day>
+          <day>28</day>
          </date>
         </property>
         <property name="minimumTime">
@@ -1622,24 +1625,24 @@
         </property>
         <property name="dateTime">
          <datetime>
-          <hour>0</hour>
+          <hour>15</hour>
           <minute>0</minute>
           <second>0</second>
           <year>2024</year>
           <month>12</month>
-          <day>29</day>
+          <day>28</day>
          </datetime>
         </property>
         <property name="date">
          <date>
           <year>2024</year>
           <month>12</month>
-          <day>29</day>
+          <day>28</day>
          </date>
         </property>
         <property name="time">
          <time>
-          <hour>0</hour>
+          <hour>15</hour>
           <minute>0</minute>
           <second>0</second>
          </time>
