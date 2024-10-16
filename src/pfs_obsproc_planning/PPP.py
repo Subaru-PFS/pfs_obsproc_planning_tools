@@ -324,7 +324,8 @@ def readTarget(mode, para):
         tb_tgt["allocated_time"] = (
             tb_tgt["allocated_time_tac"] - tb_tgt["allocated_time_done"]
         )
-        tb_tgt["allocated_time"][tb_tgt["allocated_time"] < 0] = 0
+        #tb_tgt["allocated_time"][tb_tgt["allocated_time"] < 0] = 0
+        tb_tgt = tb_tgt[tb_tgt["allocated_time"]>0]
 
         # separete the sample by 'resolution' (L/M)
         tb_tgt_l = tb_tgt[tb_tgt["resolution"] == "L"]

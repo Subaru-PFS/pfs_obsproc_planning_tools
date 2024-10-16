@@ -254,7 +254,7 @@ class GeneratePfsDesignGUI(object):
         config_ori = config_ori.replace(repl_old, repl_new)
 
         # PROPOSAL_ID
-        psl_id = self.app_window.lineEdit_pslid_db.text()
+        psl_id = self.app_window.lineEdit_pslid_db.text()[:-2]
         if len(psl_id) > 0:
             repl_old = "PROPOSAL_ID"
             repl_new = f"{psl_id}"
