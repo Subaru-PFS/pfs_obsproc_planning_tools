@@ -216,7 +216,7 @@ class GeneratePfsDesign(object):
         ob_decs = t["ob_dec"]
         ob_pmras = t["ob_pmra"]
         ob_pmdecs = t["ob_pmdec"]
-        ob_parallaxs = t["ob_parallax"]
+        ob_parallaxs = np.array([float(ii) for ii in t["ob_parallax"]])
         ob_equinoxs = t["ob_equinox"]
         ob_priorities = t["ob_priority"]
         ob_single_exptimes = t["ob_single_exptime"]
