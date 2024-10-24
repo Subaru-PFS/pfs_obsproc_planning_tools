@@ -223,8 +223,8 @@ class GeneratePfsDesign(object):
         ob_cat_ids = t["ob_cat_id"]
         ob_ras = t["ob_ra"]
         ob_decs = t["ob_dec"]
-        ob_pmras = t["ob_pmra"]
-        ob_pmdecs = t["ob_pmdec"]
+        ob_pmras = np.array([float(ii) for ii in t["ob_pmra"]])
+        ob_pmdecs = np.array([float(ii) for ii in t["ob_pmdec"]])
         ob_parallaxs = np.array([float(ii) for ii in t["ob_parallax"]])
         ob_equinoxs = t["ob_equinox"]
         ob_priorities = t["ob_priority"]
