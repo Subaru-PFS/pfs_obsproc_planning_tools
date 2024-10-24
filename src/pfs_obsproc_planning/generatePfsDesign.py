@@ -128,6 +128,15 @@ class GeneratePfsDesign(object):
                 ],
                 "sql_query": self.conf["ppp"]["sql_query"],
                 "DBPath_qDB": self.conf["queuedb"]["filepath"],
+                "visibility_check": self.conf["ppp"]["visibility_check"],
+                "obstimes": np.array(
+                    [
+                        [
+                            self.conf["qplan"]["start_time"],
+                            self.conf["qplan"]["stop_time"],
+                        ]
+                    ]
+                ),
             },
         }
 
@@ -406,19 +415,24 @@ class GeneratePfsDesign(object):
         #    ope.write() # save file
 
         return None
-    
+
     def runValidation(self):
         from . import validation
 
         ## update config before run SFA ##
         self.update_config()
-        
-        parentPath=os.path.join(self.workDir, self.conf["validation"]["parentPath"])
-        figpath=os.path.join(self.workDir, self.conf["validation"]["figpath"])
-        validation.validation(parentPath, figpath, self.conf["validation"]["savefig"], self.conf["validation"]["showfig"])
-        
+
+        parentPath = os.path.join(self.workDir, self.conf["validation"]["parentPath"])
+        figpath = os.path.join(self.workDir, self.conf["validation"]["figpath"])
+        validation.validation(
+            parentPath,
+            figpath,
+            self.conf["validation"]["savefig"],
+            self.conf["validation"]["showfig"],
+        )
+
         logger.info(f"validation plots saved under {figpath}")
-        
+
         return None
 
 

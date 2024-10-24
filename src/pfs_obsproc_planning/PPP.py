@@ -14,6 +14,7 @@ import scipy.optimize as opt
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.table import Table, vstack, join
+from dateutil import parser, tz
 from functools import partial
 from itertools import chain
 from loguru import logger
@@ -21,6 +22,7 @@ from matplotlib.path import Path
 from sklearn.cluster import DBSCAN, AgglomerativeClustering
 from sklearn.neighbors import KernelDensity
 from qplan import q_db, q_query, entity
+from qplan.util.site import site_subaru as observer
 from ginga.misc.log import get_logger
 
 logger_qplan = get_logger("qplan_test", null=True)
@@ -68,6 +70,75 @@ def count_N_overlap(_tb_tgt_psl, _tb_tgt):
     _tb_tgt_psl["local_count"] = den_local
 
     return _tb_tgt_psl
+
+
+def visibility_checker(tb_tgt, obstimes):
+    tz_HST = tz.gettz("US/Hawaii")
+
+    min_el = 30.0
+    max_el = 85.0
+
+    tb_tgt["is_visible"] = False
+
+    for i in range(len(tb_tgt)):
+        target = entity.StaticTarget(
+            name=tb_tgt["ob_code"][i],
+            ra=tb_tgt["ra"][i],
+            dec=tb_tgt["dec"][i],
+            equinox=2000.0,
+        )
+        total_time = np.ceil(tb_tgt["exptime_usr"][i] / tb_tgt["single_exptime"][i]) * (
+            tb_tgt["single_exptime"][i] + 300.0
+        )  # SEC
+
+        t_obs_ok = 0
+
+        for obstime_ in obstimes:
+            night_begin = parser.parse(obstime_[0]).replace(tzinfo=tz_HST)
+            night_end = parser.parse(obstime_[1]).replace(tzinfo=tz_HST)
+            observer.set_date(night_begin)
+
+            obs_ok, t_start, t_stop = observer.observable(
+                target,
+                night_begin,
+                night_end,
+                min_el,
+                max_el,
+                total_time,
+                airmass=None,
+                moon_sep=None,
+            )
+
+            if t_start is None or t_stop is None:
+                t_obs_ok += 0
+                continue
+
+            if t_stop > t_start:
+                t_obs_ok += (t_stop - t_start).seconds  # SEC
+            else:
+                t_obs_ok += 0
+
+        if t_obs_ok >= total_time:
+            tb_tgt["is_visible"][i] = True
+
+    logger.info(
+        f'{sum(tb_tgt["is_visible"])}/{len(tb_tgt)} are visible during the given obstimes.'
+    )
+
+    tb_tgt = tb_tgt[tb_tgt["is_visible"] == True]
+
+    psl_id = sorted(set(tb_tgt["proposal_id"]))
+
+    for psl_id_ in psl_id:
+        tb_tgt_ = tb_tgt[tb_tgt["proposal_id"] == psl_id_]
+
+        if sum(tb_tgt_["exptime_usr"]) / 3600.0 < tb_tgt_["allocated_time_tac"][0]:
+            logger.error(
+                f"{psl_id_}: visible targets too limited to achieve the allocated FHs. Please change obstime."
+            )
+            return
+
+    return tb_tgt
 
 
 def removeObjIdDuplication(df):
@@ -230,6 +301,9 @@ def readTarget(mode, para):
     tb_tgt.meta["PPC"] = np.array([])
     tb_tgt.meta["PPC_origin"] = "auto"
 
+    if para["visibility_check"]:
+        tb_tgt = visibility_checker(tb_tgt, para["obstimes"])
+
     if mode == "queue":
         # FIX!! just for this test
         tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == "S24B-QT917"] = 2000.0
@@ -324,8 +398,8 @@ def readTarget(mode, para):
         tb_tgt["allocated_time"] = (
             tb_tgt["allocated_time_tac"] - tb_tgt["allocated_time_done"]
         )
-        #tb_tgt["allocated_time"][tb_tgt["allocated_time"] < 0] = 0
-        tb_tgt = tb_tgt[tb_tgt["allocated_time"]>0]
+        # tb_tgt["allocated_time"][tb_tgt["allocated_time"] < 0] = 0
+        tb_tgt = tb_tgt[tb_tgt["allocated_time"] > 0]
 
         # separete the sample by 'resolution' (L/M)
         tb_tgt_l = tb_tgt[tb_tgt["resolution"] == "L"]
@@ -1174,7 +1248,7 @@ def netflowRun_single(
     TraCollision=False,
     numReservedFibers=0,
     fiberNonAllocationCost=0.0,
-    otime="2025-05-20T08:00:00Z",
+    otime="2025-04-20T08:00:00Z",
     for_ppc=False,
 ):
     # run netflow (without iteration)
@@ -1341,7 +1415,7 @@ def netflowRun_nofibAssign(
     TraCollision=False,
     numReservedFibers=0,
     fiberNonAllocationCost=0.0,
-    otime="2025-05-20T08:00:00Z",
+    otime="2025-04-20T08:00:00Z",
 ):
     # run netflow (with iteration)
     #    if no fiber assignment in some PPCs, shift these PPCs with 0.15 deg
