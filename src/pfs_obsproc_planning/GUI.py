@@ -415,8 +415,8 @@ class GeneratePfsDesignGUI(object):
         workDir = self.app_window.lineEdit_workdir_path.text()
         config = "config.toml"
 
-        n_pccs_l = self.app_window.doubleSpinBox_nppc_l.value()
-        n_pccs_m = self.app_window.doubleSpinBox_nppc_m.value()
+        n_pccs_l = int(self.app_window.doubleSpinBox_nppc_l.value())
+        n_pccs_m = int(self.app_window.doubleSpinBox_nppc_m.value())
 
         run_proc = ""
 
