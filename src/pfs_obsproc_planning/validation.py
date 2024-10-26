@@ -21,8 +21,8 @@ from datetime import datetime
 # The script to make a figure to check pfsDesign
 import sys
 
-sys.path.append("/work/moritani/codes/obstools/")
-import plotPfsDesign as pldes
+#sys.path.append("/work/moritani/codes/obstools/")
+from . import plotPfsDesign as pldes
 
 import warnings
 
@@ -77,6 +77,7 @@ def validation(parentPath, figpath, save, show):
         df_fib = pd.DataFrame(
             data=np.column_stack(
                 (
+                    pfsDesign0.fiberId, 
                     pfsDesign0.targetType,
                     pfsDesign0.pfiNominal,
                     pfsDesign0.spectrograph,
@@ -84,7 +85,7 @@ def validation(parentPath, figpath, save, show):
                     pfsflux,
                 )
             ),
-            columns=["targetType", "pfi_x", "pfi_y", "spec", "fh", "pfsFlux"],
+            columns=["fiberId", "targetType", "pfi_x", "pfi_y", "spec", "fh", "pfsFlux"],
         )
         df_fib["proposalId"] = pfsDesign0.proposalId
         df_fib["psfMag"] = njy_mag(df_fib["pfsFlux"])
