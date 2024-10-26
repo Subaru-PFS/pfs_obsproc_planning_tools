@@ -113,8 +113,8 @@ def validation(parentPath, figpath, save, show):
 
         df = pldes.check_design(designId, df_fib, df_ag)
         df_ch = pd.concat([df_ch, df], ignore_index=True)
-        title = f"designId=0x{designId:x} ({pfsDesign0.raBoresight:.2f},{pfsDesign0.decBoresight:.2f},PA={pfsDesign0.posAng:.1f})\n{pfsDesign0.designName}"
-        fname = f"{figpath}/check_0x{designId:x}"
+        title = f"designId=0x{designId:016x} ({pfsDesign0.raBoresight:.2f},{pfsDesign0.decBoresight:.2f},PA={pfsDesign0.posAng:.1f})\n{pfsDesign0.designName}"
+        fname = f"{figpath}/check_0x{designId:016x}"
         pldes.plot_FoV(
             df_fib, df_ag, alpha=1.0, title=title, fname=fname, save=save, show=show
         )
