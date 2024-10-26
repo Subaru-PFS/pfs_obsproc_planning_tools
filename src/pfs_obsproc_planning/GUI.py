@@ -291,7 +291,7 @@ class GeneratePfsDesignGUI(object):
         # version_fstar
         version_fstar = f"{self.app_window.lineEdit_fstar_ver.text()}"
         repl_old = "[targetdb.fluxstd]\nversion="
-        repl_new = f"[targetdb.sfluxstdky]\n{version_fstar}"
+        repl_new = f"[targetdb.fluxstd]\n{version_fstar}"
         config_ori = config_ori.replace(repl_old, repl_new)
 
         # queuedb
