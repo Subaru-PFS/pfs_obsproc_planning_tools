@@ -24,6 +24,74 @@ def read_conf(conf):
     return config
 
 
+def check_versions(package, repo_url, repo_path, version_desire):
+    """Clone the dependent package from repo_url to repo_path, and checkout to version_desire branch/tag."""
+
+    def clone_repo(repo_url, repo_path="repo"):
+        """Clone a GitHub repository if it’s not already cloned."""
+        if not os.path.exists(repo_path):
+            git.Repo.clone_from(repo_url, repo_path)
+            logger.info(f"({package}) Cloned repository to {repo_path}")
+        else:
+            logger.info(f"({package}) Repository already exists at {repo_path}")
+
+    def fetch_all_branches_and_tags(repo):
+        """Fetch all branches and tags from a repository."""
+        repo.remotes.origin.fetch()
+        logger.info(f"({package}) Fetched all branches and tags.")
+
+    def get_branches_and_tags(repo):
+        """Get a list of all branches and tags."""
+        branches = [ref.name for ref in repo.remote().refs]
+        tags = [tag.name for tag in repo.tags]
+        return branches, tags
+
+    def get_current_tag_branch(repo):
+        """Get the current tag of the repository if HEAD matches a tag."""
+        # Get the current commit
+        current_commit = repo.head.commit
+
+        # Find if the current commit matches any tag
+        for tag in repo.tags:
+            if tag.commit == current_commit:
+                logger.info(f"({package}) Current tag = {tag.name}")
+
+        # Find if the current commit matches any branch
+        for ref in repo.remote().refs:
+            if ref.commit == current_commit:
+                logger.info(f"({package}) Current branch = {ref.name}")
+
+    def checkout_version(repo, version):
+        """Checkout a specified branch or tag."""
+        if version.strip() == "":
+            logger.info(f"({package}) Do not change the current branch/tag.")
+            get_current_tag_branch(repo)
+        elif version in [ref.name for ref in repo.remote().refs] or version in [
+            tag.name for tag in repo.tags
+        ]:
+            repo.git.checkout(version)
+            logger.info(f"({package}) Checked out to {version}.")
+            get_current_tag_branch(repo)
+        else:
+            logger.warning(
+                f"({package}) Version '{version}' not found in branches or tags."
+            )
+            get_current_tag_branch(repo)
+
+    # Step 1: Clone the repository if not done already
+    clone_repo(repo_url, repo_path)
+
+    # Step 2: Load the repository and fetch all branches and tags
+    repo = git.Repo(repo_path)
+    fetch_all_branches_and_tags(repo)
+
+    # Step 3: Get list of branches and tags
+    branches, tags = get_branches_and_tags(repo)
+
+    # Step 4: Checkout the specified branch or tag
+    checkout_version(repo, version_desire)
+
+
 class GeneratePfsDesign(object):
     def __init__(self, config, workDir=".", repoDir=None):
         self.config = config
@@ -65,7 +133,26 @@ class GeneratePfsDesign(object):
         self.conf["sfa"]["cobra_coach_dir_orig"] = self.conf["sfa"]["cobra_coach_dir"]
         self.conf["sfa"]["cobra_coach_dir"] = self.cobraCoachDir
 
-        # check if pfs_instdata exists and clone from GitHub when not found
+        # check if pfs_instdata exists; if no, clone from GitHub when not found; if version specified, switch to it
+        repo_url = "https://github.com/Subaru-PFS/pfs_instdata.git"
+        repo_path = self.conf["sfa"]["pfs_instdata_dir"]
+        version_desire = self.conf["version"]["pfs_instdata"]
+
+        check_versions("pfs_instdata", repo_url, repo_path, version_desire)
+
+        # check if pfs_utils exists; if no, clone from GitHub when not found; if version specified, switch to it
+        repo_url = "https://github.com/Subaru-PFS/pfs_utils.git"
+        try:
+            import pfs.utils
+
+            repo_path = os.path.join(pfs.utils.__path__[0], "../../../")
+        except:
+            repo_path = self.conf["sfa"]["pfs_utils_dir"]
+        version_desire = self.conf["version"]["pfs_utils"]
+
+        check_versions("pfs_utils", repo_url, repo_path, version_desire)
+
+        """
         instdata_dir = self.conf["sfa"]["pfs_instdata_dir"]
         if os.path.exists(instdata_dir):
             logger.info(f"pfs_instdata found: {instdata_dir}")
@@ -92,6 +179,7 @@ class GeneratePfsDesign(object):
             self.conf["sfa"]["pfs_instdata_dir"] = os.path.join(
                 self.workDir, os.path.basename(instdata_dir)
             )
+        #"""
 
         return None
 
