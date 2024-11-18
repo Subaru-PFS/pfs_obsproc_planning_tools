@@ -9,11 +9,13 @@ from PyQt5 import QtWidgets, uic
 from PyQt5.QtWidgets import *
 from loguru import logger
 import toml
+import os
 
 
 class GeneratePfsDesignGUI(object):
     def __init__(self, repoDir=None):
         self.app = QtWidgets.QApplication([])
+        self.repoDir = repoDir
         self.app_window = uic.loadUi(f"{repoDir}/GUI_window/mainWindow.ui")
         self.config_window = uic.loadUi(f"{repoDir}/GUI_window/configWindow.ui")
         self.proposal_window = uic.loadUi(f"{repoDir}/GUI_window/proposalWindow.ui")
@@ -151,6 +153,22 @@ class GeneratePfsDesignGUI(object):
         fname = QFileDialog.getExistingDirectory()
         self.app_window.lineEdit_workdir_path.setText(fname)
 
+        workdir = self.app_window.lineEdit_workdir_path.text().strip()
+        repodir = self.repoDir.strip()
+
+        if workdir != "":
+            instdata_path = os.path.join(repodir, "../pfs_instdata")
+
+            try:
+                import pfs.utils
+
+                pfsutils_path = os.path.join(pfs.utils.__path__[0], "../../../")
+            except:
+                pfsutils_path = ""
+
+            self.app_window.lineEdit_instdata_path.setText(instdata_path)
+            self.app_window.lineEdit_pfsutils_path.setText(pfsutils_path)
+
     def getfolder_instdata(self):
         fname = QFileDialog.getExistingDirectory()
         self.app_window.lineEdit_instdata_path.setText(fname)
@@ -159,9 +177,9 @@ class GeneratePfsDesignGUI(object):
         fname = QFileDialog.getExistingDirectory()
         self.app_window.lineEdit_cobra_path.setText(fname)
 
-    def getfolder_schema(self):
+    def getfolder_utils(self):
         fname = QFileDialog.getExistingDirectory()
-        self.app_window.lineEdit_schema_path.setText(fname)
+        self.app_window.lineEdit_pfsutils_path.setText(fname)
 
     def obstime_add(self):
         obsdate = self.app_window.dateEdit_obstime_date.date().toString("yyyy-MM-dd")
@@ -300,16 +318,30 @@ class GeneratePfsDesignGUI(object):
         repl_new = f'[queuedb]\nfilepath="{template}"'
         config_ori = config_ori.replace(repl_old, repl_new)
 
-        # SCHEMACRAWLERDIR
-        SCHEMACRAWLERDIR = f"{self.app_window.lineEdit_schema_path.text()}"
-        repl_old = "SCHEMACRAWLERDIR="
-        repl_new = f'SCHEMACRAWLERDIR="{SCHEMACRAWLERDIR}"'
+        # pfs_utils_dir
+        pfs_utils_dir = f"{self.app_window.lineEdit_pfsutils_path.text()}"
+        repl_old = "pfs_utils_dir="
+        repl_new = f'pfs_utils_dir="{pfs_utils_dir}"'
         config_ori = config_ori.replace(repl_old, repl_new)
 
         # pfs_instdata_dir
         pfs_instdata_dir = f"{self.app_window.lineEdit_instdata_path.text()}"
         repl_old = "pfs_instdata_dir="
         repl_new = f'pfs_instdata_dir="{pfs_instdata_dir}"'
+        config_ori = config_ori.replace(repl_old, repl_new)
+
+        # pfs_utils_ver
+        pfs_utils_ver = (
+            f'{self.app_window.lineEdit_pfsutils_ver.text().replace("version=", "", 1)}'
+        )
+        repl_old = "pfs_utils_ver="
+        repl_new = f'pfs_utils_ver="{pfs_utils_ver}"'
+        config_ori = config_ori.replace(repl_old, repl_new)
+
+        # pfs_instdata_ver
+        pfs_instdata_ver = f'{self.app_window.lineEdit_pfsinstdata_ver.text().replace("version=", "", 1)}'
+        repl_old = "pfs_instdata_ver="
+        repl_new = f'pfs_instdata_ver="{pfs_instdata_ver}"'
         config_ori = config_ori.replace(repl_old, repl_new)
 
         # ope_template
@@ -422,7 +454,9 @@ class GeneratePfsDesignGUI(object):
 
         # initialize a GeneratePfsDesign instance
         time_start = time.time()
-        gpd = generatePfsDesign.GeneratePfsDesign(config, workDir=workDir)
+        gpd = generatePfsDesign.GeneratePfsDesign(
+            config, workDir=workDir, repoDir=self.repoDir
+        )
 
         # Run PPP
         if self.app_window.checkBox_runPPP.isChecked():
@@ -470,7 +504,7 @@ class GeneratePfsDesignGUI(object):
         self.app_window.pushButton_workdir.clicked.connect(self.getfolder_workdir)
         self.app_window.pushButton_pfs_instdata.clicked.connect(self.getfolder_instdata)
         self.app_window.pushButton_cobra_coach.clicked.connect(self.getfolder_cobra)
-        self.app_window.pushButton_schema.clicked.connect(self.getfolder_schema)
+        self.app_window.pushButton_pfsutils.clicked.connect(self.getfolder_utils)
         self.app_window.pushButton_viewConfig.clicked.connect(self.load_template_config)
         self.app_window.pushButton_tgt_db.clicked.connect(self.getPslID_tgtDB)
         self.app_window.pushButton_runCode.clicked.connect(self.rungpd)

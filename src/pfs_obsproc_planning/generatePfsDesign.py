@@ -63,7 +63,8 @@ def check_versions(package, repo_url, repo_path, version_desire):
 
     def checkout_version(repo, version):
         """Checkout a specified branch or tag."""
-        if version.strip() == "":
+        version = version.strip()
+        if version == "":
             logger.info(f"({package}) Do not change the current branch/tag.")
             get_current_tag_branch(repo)
         elif version in [ref.name for ref in repo.remote().refs] or version in [
@@ -86,7 +87,7 @@ def check_versions(package, repo_url, repo_path, version_desire):
     fetch_all_branches_and_tags(repo)
 
     # Step 3: Get list of branches and tags
-    branches, tags = get_branches_and_tags(repo)
+    get_branches_and_tags(repo)
 
     # Step 4: Checkout the specified branch or tag
     checkout_version(repo, version_desire)
@@ -136,7 +137,7 @@ class GeneratePfsDesign(object):
         # check if pfs_instdata exists; if no, clone from GitHub when not found; if version specified, switch to it
         repo_url = "https://github.com/Subaru-PFS/pfs_instdata.git"
         repo_path = self.conf["sfa"]["pfs_instdata_dir"]
-        version_desire = self.conf["version"]["pfs_instdata"]
+        version_desire = self.conf["sfa"]["pfs_instdata_ver"]
 
         check_versions("pfs_instdata", repo_url, repo_path, version_desire)
 
@@ -148,7 +149,7 @@ class GeneratePfsDesign(object):
             repo_path = os.path.join(pfs.utils.__path__[0], "../../../")
         except:
             repo_path = self.conf["sfa"]["pfs_utils_dir"]
-        version_desire = self.conf["version"]["pfs_utils"]
+        version_desire = self.conf["sfa"]["pfs_utils_ver"]
 
         check_versions("pfs_utils", repo_url, repo_path, version_desire)
 

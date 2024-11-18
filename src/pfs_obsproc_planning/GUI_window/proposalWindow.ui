@@ -42,8 +42,8 @@
    <widget class="QPushButton" name="pushButton_pslDone">
     <property name="geometry">
      <rect>
-      <x>720</x>
-      <y>392</y>
+      <x>700</x>
+      <y>390</y>
       <width>79</width>
       <height>25</height>
      </rect>
