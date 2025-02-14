@@ -4,6 +4,7 @@
 import os
 import warnings
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -45,9 +46,7 @@ from qplan.util.site import site_subaru as observer
 from dateutil import parser
 
 
-def run(
-    conf, ppcList, obs_dates, inputDirName=".", outputDirName=".", plotVisibility=False
-):
+def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False):
     # log file will let us debug scheduling, check it for error and debug messages
     # NOTE: any python (stdlib) logging compatible logger will work
     logger = get_logger(
@@ -116,19 +115,26 @@ def run(
     #
 
     # get PPC list
+    overhead_add = 0.0
+    if conf["ope"]["n_split_frame"] > 1:
+        overhead_add = (
+            float(conf["ope"]["n_split_frame"]) - 1
+        ) * 60.0  # splitting into 1 more frame adds an readout time of ~60 seconds
+
     tab = Table.read(os.path.join(inputDirName, ppcList))
     tgt_tbl = ""
     for t in tab:
         c = SkyCoord(t["ppc_ra"], t["ppc_dec"], unit="deg")
-        ra = c.ra.hms
-        dec = c.dec.dms
+        ra = c.ra.to_string(unit=u.hourangle, sep=":", precision=2, pad=True)
+        dec = c.dec.to_string(sep=":", precision=2, pad=True)
         line = "  "
         line += f"{t['ppc_code']}\t"
-        line += f"{t['ppc_priority']}\t"
-        line += f"{t['ppc_exptime'] + float(conf['qplan']['overhead'])*60.0}\t"
+        line += f"{t['ppc_priority_usr']}\t"
+        line += f"{t['ppc_exptime'] + float(conf['qplan']['overhead'])*60.0 + overhead_add}\t"
+        line += f"{t['ppc_pa']}\t"
         line += f"{t['ppc_resolution']}\t"
-        line += f"{int(ra.h)}:{int(abs(ra.m))}:{abs(ra.s)}\t"
-        line += f"{int(dec.d)}:{int(abs(dec.m))}:{abs(dec.s)}\t"
+        line += f"{ra}\t"
+        line += f"{dec}\t"
         line += "2000\t"
         line += f"design_{t['ppc_code']}\t"
         line += f"catalog_{t['ppc_code']}\t"
@@ -145,6 +151,7 @@ def run(
             ob_code,
             priority,
             exp_time,
+            pa,
             resolution,
             ra,
             dec,
@@ -155,6 +162,8 @@ def run(
         ) = line.split("\t")
         # exp_time = float(exp_time) * 60.0  # assume table is in MINUTES
         exp_time = float(exp_time)  # exptime is in seconds
+        pa = float(pa)
+        priority = float(priority)
 
         if resolution == "L":
             resolution = "low"
@@ -168,22 +177,25 @@ def run(
         if len(conf["qplan"]["start_time"]) > 0:
             start_time_too = datetime.strptime(
                 conf["qplan"]["start_time"], "%Y-%m-%d %H:%M:%S"
-            ).replace(tzinfo=timezone.utc)
+            ).replace(tzinfo=ZoneInfo("US/Hawaii"))
+            start_time_too = start_time_too.astimezone(ZoneInfo("UTC"))
         else:
             start_time_too = None
 
         if len(conf["qplan"]["stop_time"]) > 0:
             stop_time_too = datetime.strptime(
                 conf["qplan"]["stop_time"], "%Y-%m-%d %H:%M:%S"
-            ).replace(tzinfo=timezone.utc)
+            ).replace(tzinfo=ZoneInfo("US/Hawaii"))
+            stop_time_too = stop_time_too.astimezone(ZoneInfo("UTC"))
         else:
             stop_time_too = None
+
         ob = PPC_OB(
             id=ob_code,
             program=pgm,
             target=tgt,
             telcfg=telcfg,
-            inscfg=PPCConfiguration(exp_time=exp_time, pa=0.0, resolution=resolution),
+            inscfg=PPCConfiguration(exp_time=exp_time, pa=pa, resolution=resolution),
             envcfg=EnvironmentConfiguration(
                 seeing=99.0,
                 transparency=0.0,
@@ -194,6 +206,7 @@ def run(
             # acct_time is time we charge to the PI
             acct_time=exp_time,
             total_time=exp_time,
+            priority=priority,
             comment=f"{ra} / {dec}",
         )
         obs.append(ob)
@@ -205,7 +218,7 @@ def run(
     #       observation at sunset
     #       if scheduling a second half just set the start time to 00:30:00 etc
     rec = []
-    for date in obs_dates:
+    for date in conf["qplan"]["obs_dates"]:
         date_t = parser.parse(f"{date} 12:00 HST")
         observer.set_date(date_t)
         start_time_ = observer.evening_twilight_18()
@@ -287,6 +300,7 @@ def run(
                 slot.ob.target.ra,
                 slot.ob.target.dec,
                 slot.ob.inscfg.pa,
+                slot.ob.priority,
             )
             for slot in schedule
             if slot.ob is not None and not slot.ob.derived
@@ -297,7 +311,15 @@ def run(
             if slot.ob is not None and not slot.ob.derived
         ]
         df = pd.DataFrame(
-            data, columns=["obstime", "ppc_code", "ppc_ra", "ppc_dec", "ppc_pa"]
+            data,
+            columns=[
+                "obstime",
+                "ppc_code",
+                "ppc_ra",
+                "ppc_dec",
+                "ppc_pa",
+                "ppc_priority",
+            ],
         )
         return df, targets
 
@@ -308,7 +330,7 @@ def run(
     # plot visibility plots for each night
     if plotVisibility == True:
         figs = []
-        for obs_date in obs_dates:
+        for obs_date in conf["qplan"]["obs_dates"]:
             t = observer.get_date(obs_date)
             observer.set_date(t)
             sunset = observer.sunset()
