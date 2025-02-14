@@ -21,7 +21,7 @@ from datetime import datetime
 # The script to make a figure to check pfsDesign
 import sys
 
-#sys.path.append("/work/moritani/codes/obstools/")
+# sys.path.append("/work/moritani/codes/obstools/")
 from . import plotPfsDesign as pldes
 
 import warnings
@@ -71,13 +71,14 @@ def validation(parentPath, figpath, save, show):
     df_ch = pldes.init_check_design()
     for designId in pfsDesignIds:
         pfsDesign0 = PfsDesign.read(designId, dirName=pfsDesignDir)
+        pfsDesign0.validate()
         print(f"{pfsDesign0.designName}, {pfsDesign0.arms}")
         pfsflux = np.array([a[0] if len(a) > 0 else np.nan for a in pfsDesign0.psfFlux])
         # print(len(pfsDesign0[pfsDesign0.fiberStatus==3]))
         df_fib = pd.DataFrame(
             data=np.column_stack(
                 (
-                    pfsDesign0.fiberId, 
+                    pfsDesign0.fiberId,
                     pfsDesign0.targetType,
                     pfsDesign0.pfiNominal,
                     pfsDesign0.spectrograph,
@@ -85,7 +86,15 @@ def validation(parentPath, figpath, save, show):
                     pfsflux,
                 )
             ),
-            columns=["fiberId", "targetType", "pfi_x", "pfi_y", "spec", "fh", "pfsFlux"],
+            columns=[
+                "fiberId",
+                "targetType",
+                "pfi_x",
+                "pfi_y",
+                "spec",
+                "fh",
+                "pfsFlux",
+            ],
         )
         df_fib["proposalId"] = pfsDesign0.proposalId
         df_fib["psfMag"] = njy_mag(df_fib["pfsFlux"])
@@ -117,7 +126,14 @@ def validation(parentPath, figpath, save, show):
         title = f"designId=0x{designId:016x} ({pfsDesign0.raBoresight:.2f},{pfsDesign0.decBoresight:.2f},PA={pfsDesign0.posAng:.1f})\n{pfsDesign0.designName}"
         fname = f"{figpath}/check_0x{designId:016x}"
         pldes.plot_FoV(
-            df_fib, df_ag, alpha=1.0, title=title, fname=fname, save=save, show=show
+            df_fib,
+            df_ag,
+            alpha=1.0,
+            title=title,
+            fname=fname,
+            save=save,
+            show=show,
+            pa=pfsDesign0.posAng,
         )
     df_ch["inr"] = df_design["inr"]
 
