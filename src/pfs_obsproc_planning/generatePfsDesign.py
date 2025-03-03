@@ -832,6 +832,23 @@ class GeneratePfsDesign(object):
             # read ppcList.ecsv
             tb_ppc = Table.read(self.workDir + "/targets/" + WG + "/ppcList.ecsv")
 
+            req_cols = [
+                "ppc_code",
+                "ppc_ra",
+                "ppc_dec",
+                "ppc_pa",
+                "ppc_resolution",
+                "ppc_obstime",
+                "ppc_exptime",
+                "ppc_nframes",
+            ]
+
+            missing_cols = [col for col in req_cols if col not in tb_ppc.colnames]
+            if missing_cols:
+                logger.error(
+                    f"[Validation of ppcList] The following required columns are missing: {missing_cols}"
+                )
+
             # Convert each timestamp from HST to UTC
             ppc_obstime_utc = []
             for hst_string in tb_ppc["ppc_obstime"]:
