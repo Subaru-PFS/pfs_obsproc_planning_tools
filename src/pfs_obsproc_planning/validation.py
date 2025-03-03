@@ -73,6 +73,16 @@ def validation(parentPath, figpath, save, show):
         pfsDesign0 = PfsDesign.read(designId, dirName=pfsDesignDir)
         pfsDesign0.validate()
         print(f"{pfsDesign0.designName}, {pfsDesign0.arms}")
+
+        # check fiber duplicates
+        df_t = pd.DataFrame(
+            {"fiberId": pfsDesign0.fiberId, "obCode": pfsDesign0.obCode}
+        )
+        index_dup = df_t.duplicated(subset=["fiberId"], keep=False)
+        if sum(index_dup) > 0:
+            logger.warning(f"There are duplicated fibers: {df_t[index_dup]}")
+        else:
+            logger.info("No duplicated fiber")
         pfsflux = np.array([a[0] if len(a) > 0 else np.nan for a in pfsDesign0.psfFlux])
         # print(len(pfsDesign0[pfsDesign0.fiberStatus==3]))
         df_fib = pd.DataFrame(
