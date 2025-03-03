@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from dataclasses import make_dataclass
 import os
+from logzero import logger
 
 # from pfs.drp.stella.readLineList import ReadLineListTask,  ReadLineListConfig
 # from pfs.drp.stella import DetectorMap
@@ -47,11 +48,18 @@ def calc_inr(df):
     return inr
 
 
-def validation(parentPath, figpath, save, show):
-    pfsDesignDir = f"{parentPath}/design"
-    df_design = pd.read_csv(
-        f"{parentPath}/summary_reconfigure_ppp-ppp+qplan_output.csv"
-    )
+def validation(parentPath, figpath, save, show, ssp):
+    if not ssp:
+        pfsDesignDir = f"{parentPath}/design"
+        df_design = pd.read_csv(
+            f"{parentPath}/summary_reconfigure_ppp-ppp+qplan_output.csv"
+        )
+
+    else:
+        pfsDesignDir = parentPath
+        df_design = pd.read_csv(
+            f"{parentPath}/../{parentPath[-2:]}_summary_reconfigure.csv"
+        )
 
     # Calcurate InR at observing time
     # df_design['pa']=0.
@@ -80,9 +88,11 @@ def validation(parentPath, figpath, save, show):
         )
         index_dup = df_t.duplicated(subset=["fiberId"], keep=False)
         if sum(index_dup) > 0:
-            logger.warning(f"There are duplicated fibers: {df_t[index_dup]}")
+            logger.warning(
+                f"[Validation of output] There are duplicated fibers: {df_t[index_dup]}"
+            )
         else:
-            logger.info("No duplicated fiber")
+            logger.info("[Validation of output] No duplicated fiber")
         pfsflux = np.array([a[0] if len(a) > 0 else np.nan for a in pfsDesign0.psfFlux])
         # print(len(pfsDesign0[pfsDesign0.fiberStatus==3]))
         df_fib = pd.DataFrame(
@@ -94,6 +104,7 @@ def validation(parentPath, figpath, save, show):
                     pfsDesign0.spectrograph,
                     pfsDesign0.fiberHole,
                     pfsflux,
+                    pfsDesign0.catId,
                 )
             ),
             columns=[
@@ -104,6 +115,7 @@ def validation(parentPath, figpath, save, show):
                 "spec",
                 "fh",
                 "pfsFlux",
+                "catId",
             ],
         )
         df_fib["proposalId"] = pfsDesign0.proposalId

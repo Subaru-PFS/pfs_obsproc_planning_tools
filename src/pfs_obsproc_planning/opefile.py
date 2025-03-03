@@ -81,7 +81,7 @@ class OpeFile(object):
         repl2 = f"OBSERVATION_END_DATE={obsdate2_new}"
         self.contents1_updated = self.contents1_updated.replace(repl1, repl2)
 
-    def update_design(self, info, n_split_frame=1):
+    def update_design(self, info):
         def convRaDec(ra, dec):
             if dec > 0:
                 decsgn = "+"
@@ -148,9 +148,9 @@ class OpeFile(object):
             # add exptime
             repl1 = '"exptime"'
             repl2 = f"{val[7]}"
-            if n_split_frame > 1:
+            if val[8] > 1:
                 # if split_frame is true, separate each frame into n sub-frames with an exptime of exptime/n
-                repl2 = f"{val[7]/n_split_frame} NFRAME={n_split_frame}"
+                repl2 = f"{val[7]/val[8]} NFRAME={val[8]}"
             tmpl = tmpl.replace(repl1, repl2)
 
             # remove unnecessary words
