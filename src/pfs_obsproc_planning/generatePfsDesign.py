@@ -653,6 +653,7 @@ class GeneratePfsDesign(object):
 
                 invalid_rows = []
                 for i, val in enumerate(tb[col_name]):
+                    if np.ma.is_masked(val): continue
                     if val not in valid_values:
                         invalid_rows.append((i, val))
 
@@ -855,7 +856,10 @@ class GeneratePfsDesign(object):
                 try:
                     dt_naive = datetime.strptime(hst_string, "%Y-%m-%d %H:%M:%S")
                 except ValueError:
-                    dt_naive = datetime.strptime(hst_string, "%Y-%m-%dT%H:%M:%SZ")
+                    try:
+                        dt_naive = datetime.strptime(hst_string, "%Y-%m-%dT%H:%M:%SZ")
+                    except ValueError:
+                        dt_naive = datetime.strptime(hst_string, "%Y-%m-%d %H:%M:%S.%f")
                 dt_hst = hawaii_tz.localize(dt_naive)
                 dt_utc = dt_hst.astimezone(pytz.utc)
                 ppc_obstime_utc.append(dt_utc.strftime("%Y-%m-%dT%H:%M:%SZ"))
@@ -1203,7 +1207,10 @@ class GeneratePfsDesign(object):
                     try:
                         dt_naive = datetime.strptime(hst_string, "%Y-%m-%d %H:%M:%S")
                     except ValueError:
-                        dt_naive = datetime.strptime(hst_string, "%Y-%m-%dT%H:%M:%SZ")
+                        try:
+                            dt_naive = datetime.strptime(hst_string, "%Y-%m-%dT%H:%M:%SZ")
+                        except ValueError:
+                            dt_naive = datetime.strptime(hst_string, "%Y-%m-%d %H:%M:%S.%f")
                     dt_hst = hawaii_tz.localize(dt_naive)
                     dt_utc = dt_hst.astimezone(pytz.utc)
                     ppc_obstime_utc.append(dt_utc.strftime("%Y-%m-%d %H:%M:%S"))
@@ -1211,12 +1218,7 @@ class GeneratePfsDesign(object):
                 tb_ppc_t["obstime_in_utc"] = ppc_obstime_utc
 
                 tb_ppc_t["pfs_design_id"] = tb_ppc_t["pfsDesignId"]
-                tb_ppc_t["obstime_in_hst"] = [
-                    datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").strftime(
-                        "%Y-%m-%dT%H:%M:%SZ"
-                    )
-                    for value in tb_ppc_t["ppc_obstime"]
-                ]
+                tb_ppc_t["obstime_in_hst"] = tb_ppc_t["ppc_obstime"]
                 tb_ppc_t["single_exptime"] = tb_ppc_t["ppc_exptime"]
                 tb_ppc_t["n_split_frame"] = tb_ppc_t["ppc_nframes"]
 

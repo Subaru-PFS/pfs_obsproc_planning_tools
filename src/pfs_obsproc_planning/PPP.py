@@ -1212,9 +1212,13 @@ def sam2netflow(_tb_tgt, for_ppc=False):
 
         for psl_id_ in psl_id:
             tt_ = tuple([tt for tt in _tgt_lst_psl_id if psl_id_ in tt])
-            tgt_psl_FH_tac_[tt_] = _tb_tgt[_tb_tgt["proposal_id"] == psl_id_][
-                "allocated_time"
-            ][0]
+            fh_ = _tb_tgt[_tb_tgt["proposal_id"] == psl_id_][
+                    "allocated_time"
+                ][0]
+            if fh_>0:
+                tgt_psl_FH_tac_[tt_] = fh_
+            else:
+                tgt_psl_FH_tac_[tt_] = 2394.0 * 50.0
             print(f"{psl_id_}: FH_limit = {tgt_psl_FH_tac_[tt_]:.2f}")
     #'''
 
@@ -1327,6 +1331,9 @@ def netflowRun_single(
 
             prob.solve()
 
+            status = prob._prob.status  # or prob.getStatus() / prob.solverStatus, etc.
+            print("Model status:", status)
+
             res = [{} for _ in range(min(nvisit, len(Telra)))]
             for k1, v1 in prob._vardict.items():
                 if k1.startswith("Tv_Cv_"):
@@ -1395,6 +1402,9 @@ def netflowRun_single(
         )
 
         prob.solve()
+
+        status = prob._prob.status  # or prob.getStatus() / prob.solverStatus, etc.
+        print("Model status:", status)
 
         res = [{} for _ in range(min(nvisit, len(Telra)))]
         for k1, v1 in prob._vardict.items():
