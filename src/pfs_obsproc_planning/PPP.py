@@ -607,7 +607,22 @@ def readTarget(mode, para):
         )
 
         if len(para["localPath_ppc"]) > 0:
-            tb_ppc_tem = Table.read(para["localPath_ppc"])
+            path_ppc = para["localPath_ppc"]
+            if path_ppc.endswith(".ecsv"):
+                tb_ppc_tem = Table.read(para["localPath_ppc"])
+            else:
+                from glob import glob 
+                
+                tables = []
+                n = 0               
+                for file in glob(path_ppc+"*"):
+                    print(file)
+                    tbl = Table.read(file)
+                    tbl["ppc_code"] = [code + "_" + str(n+1) for code in tbl["ppc_code"]]
+                    tables.append(tbl)
+                    n += 1
+                tb_ppc_tem = vstack(tables, join_type="outer")
+                logger.info(f"[S1] Multiple PPC list is combined:\n{tb_ppc_tem['ppc_code','ppc_ra','ppc_dec','ppc_pa']}.")
 
             if "ppc_priority" not in tb_ppc_tem.colnames:
                 tb_ppc_tem["ppc_priority"] = 0
@@ -1218,7 +1233,7 @@ def sam2netflow(_tb_tgt, for_ppc=False):
             if fh_>0:
                 tgt_psl_FH_tac_[tt_] = fh_
             else:
-                tgt_psl_FH_tac_[tt_] = 2394.0 * 50.0
+                tgt_psl_FH_tac_[tt_] = 2394.0 * 100.0
             print(f"{psl_id_}: FH_limit = {tgt_psl_FH_tac_[tt_]:.2f}")
     #'''
 

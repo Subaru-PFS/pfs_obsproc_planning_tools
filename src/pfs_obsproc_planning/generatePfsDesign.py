@@ -159,6 +159,7 @@ class GeneratePfsDesign(object):
             import pfs.utils
 
             repo_path = os.path.join(pfs.utils.__path__[0], "../../../")
+            PFS_UTILS_DIR = os.path.join(pfs.utils.__path__[0], "../../../")
         except:
             repo_path = self.conf["sfa"]["pfs_utils_dir"]
         version_desire = self.conf["sfa"]["pfs_utils_ver"]
