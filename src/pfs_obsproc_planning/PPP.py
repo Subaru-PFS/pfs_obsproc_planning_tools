@@ -591,6 +591,9 @@ def readTarget(mode, para):
         if "allocated_time" not in tb_tgt.colnames:
             tb_tgt.rename_column("allocated_time_tac", "allocated_time")
 
+        if np.any(tb_tgt["allocated_time"]<0):
+            tb_tgt["allocated_time"] = sum(tb_tgt["exptime"]/3600.0)
+
         # separete the sample by 'resolution' (L=false/M=true)
         tb_tgt_l = tb_tgt[tb_tgt["resolution"] == "L"]
         tb_tgt_m = tb_tgt[tb_tgt["resolution"] == "M"]
@@ -616,13 +619,13 @@ def readTarget(mode, para):
                 tables = []
                 n = 0               
                 for file in glob(path_ppc+"*"):
-                    print(file)
                     tbl = Table.read(file)
                     tbl["ppc_code"] = [code + "_" + str(n+1) for code in tbl["ppc_code"]]
+                    tbl["ppc_priority"] = 0
                     tables.append(tbl)
                     n += 1
                 tb_ppc_tem = vstack(tables, join_type="outer")
-                logger.info(f"[S1] Multiple PPC list is combined:\n{tb_ppc_tem['ppc_code','ppc_ra','ppc_dec','ppc_pa']}.")
+                logger.info(f"[S1] Multiple PPC list is combined:\n{tb_ppc_tem['ppc_code','ppc_ra','ppc_dec','ppc_pa','ppc_priority']}.")
 
             if "ppc_priority" not in tb_ppc_tem.colnames:
                 tb_ppc_tem["ppc_priority"] = 0
@@ -1057,7 +1060,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
             X_, Y_, obj_dis_sig_, peak_x, peak_y = KDE(_tb_tgt_t_1, mutiPro)
 
             index_ = PFS_FoV(
-                peak_x, peak_y, 0, _tb_tgt_t_
+                peak_x, peak_y, 90, _tb_tgt_t_
             )  # all PA set to be 0 for simplicity
 
             iter_tem = 0
@@ -1080,7 +1083,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
                 )
                 iter_tem += 1
 
-            lst_pslID_assign = [ii[:10] for ii in lst_tgtID_assign]
+            lst_pslID_assign = [ii.split("_")[0] for ii in lst_tgtID_assign]
             pslID_ = sorted(set(lst_pslID_assign))
             pslID_n = {
                 tt: lst_pslID_assign.count(tt) * single_exptime_ / 3600.0
@@ -1093,7 +1096,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
                 [
                     peak_x,
                     peak_y,
-                    0,
+                    90,
                     weight_tem_tot,
                     pslID_n,
                     lst_tgtID_assign,
@@ -1103,6 +1106,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
 
         weight_peak = sorted(weight_peak, key=lambda x: x[3])
 
+        print(f"{weight_peak[-1][0]}, {weight_peak[-1][1]}, {len(weight_peak[-1][5])}")
         ppc_lst.append(
             np.array(
                 [
@@ -1125,8 +1129,8 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
         ] -= single_exptime_  # targets in the PPC observed with single_exptime sec
 
         for tt in list(weight_peak[-1][4].keys()):
-            tb_fh["FH_done"][tb_fh["proposal_id"] == tt] += weight_peak[-1][4][tt]
-            tb_fh["N_done"][tb_fh["proposal_id"] == tt] += sum(
+            tb_fh["FH_done"].data[tb_fh["proposal_id"] == tt] += weight_peak[-1][4][tt]
+            tb_fh["N_done"].data[tb_fh["proposal_id"] == tt] += sum(
                 (_tb_tgt_["exptime_PPP"] <= 0) * (_tb_tgt_["proposal_id"] == tt)
             )
 
@@ -1190,21 +1194,24 @@ def sam2netflow(_tb_tgt, for_ppc=False):
     for tt in _tb_tgt:
         if for_ppc:
             # set exptime = single_exptime_ if running netflow to determine PPC
-            tgt_id_, tgt_ra_, tgt_dec_, tgt_exptime_, tgt_proposal_id_ = (
+            tgt_id_, tgt_ra_, tgt_dec_, tgt_exptime_, tgt_proposal_id_, tgt_pri_ = (
                 tt["identify_code"],
                 tt["ra"],
                 tt["dec"],
                 single_exptime_,
                 tt["proposal_id"],
+                int(tt["priority"]),
             )
         else:
-            tgt_id_, tgt_ra_, tgt_dec_, tgt_exptime_, tgt_proposal_id_ = (
+            tgt_id_, tgt_ra_, tgt_dec_, tgt_exptime_, tgt_proposal_id_, tgt_pri_ = (
                 tt["identify_code"],
                 tt["ra"],
                 tt["dec"],
                 tt["exptime_PPP"],
                 tt["proposal_id"],
+                int(tt["priority"]),
             )
+        """  
         tgt_lst_netflow.append(
             nf.ScienceTarget(
                 tgt_id_,
@@ -1217,11 +1224,24 @@ def sam2netflow(_tb_tgt, for_ppc=False):
         )
         _tgt_lst_psl_id.append("sci_" + tgt_proposal_id_ + "_P" + str(int(int_)))
         int_ += 1
+        #"""
+          
+        tgt_lst_netflow.append(
+            nf.ScienceTarget(
+                tgt_id_,
+                tgt_ra_,
+                tgt_dec_,
+                tgt_exptime_,
+                tgt_pri_,
+                "sci",
+            )
+        )
+        _tgt_lst_psl_id.append("sci_P" + str(int(tgt_pri_)))
 
     # set FH limit bundle
     tgt_psl_FH_tac_ = {}
 
-    #'''
+    '''
     if for_ppc == False:
         psl_id = sorted(set(_tb_tgt["proposal_id"]))
 
@@ -1230,10 +1250,8 @@ def sam2netflow(_tb_tgt, for_ppc=False):
             fh_ = _tb_tgt[_tb_tgt["proposal_id"] == psl_id_][
                     "allocated_time"
                 ][0]
-            if fh_>0:
-                tgt_psl_FH_tac_[tt_] = fh_
-            else:
-                tgt_psl_FH_tac_[tt_] = 2394.0 * 100.0
+            tgt_psl_FH_tac_[tt_] = fh_
+            
             print(f"{psl_id_}: FH_limit = {tgt_psl_FH_tac_[tt_]:.2f}")
     #'''
 
@@ -1241,6 +1259,7 @@ def sam2netflow(_tb_tgt, for_ppc=False):
 
 
 def NetflowPreparation(_tb_tgt):
+    """
     # assign cost to each target
     classdict = {}
 
@@ -1252,6 +1271,70 @@ def NetflowPreparation(_tb_tgt):
             "calib": False,
         }
         int_ += 1
+    #"""
+    classdict = {
+        # Priorities correspond to the magnitudes of bright stars (in most case for the 2022 June Engineering)
+        "sci_P0": {
+            "nonObservationCost": 100,
+            "partialObservationCost": 1e11,
+            "calib": False,
+        },
+        "sci_P1": {
+            "nonObservationCost": 90,
+            "partialObservationCost": 1e11,
+            "calib": False,
+        },
+        "sci_P2": {
+            "nonObservationCost": 80,
+            "partialObservationCost": 1e11,
+            "calib": False,
+        },
+        "sci_P3": {
+            "nonObservationCost": 70,
+            "partialObservationCost": 1e11,
+            "calib": False,
+        },
+        "sci_P4": {
+            "nonObservationCost": 60,
+            "partialObservationCost": 1e11,
+            "calib": False,
+        },
+        "sci_P5": {
+            "nonObservationCost": 50,
+            "partialObservationCost": 1e11,
+            "calib": False,
+        },
+        "sci_P6": {
+            "nonObservationCost": 40,
+            "partialObservationCost": 1e11,
+            "calib": False,
+        },
+        "sci_P7": {
+            "nonObservationCost": 30,
+            "partialObservationCost": 1e11,
+            "calib": False,
+        },
+        "sci_P8": {
+            "nonObservationCost": 20,
+            "partialObservationCost": 1e11,
+            "calib": False,
+        },
+        "sci_P9": {
+            "nonObservationCost": 10,
+            "partialObservationCost": 1e11,
+            "calib": False,
+        },
+        "cal": {
+            "numRequired": 200,
+            "nonObservationCost": 6e10,
+            "calib": True,
+        },
+        "sky": {
+            "numRequired": 400,
+            "nonObservationCost": 6e10,
+            "calib": True,
+        },
+    }
 
     return classdict
 
@@ -1727,7 +1810,7 @@ def netflow_iter(
     if _tb_tgt.meta["PPC_origin"] == "usr":
         return _tb_ppc_netflow
 
-    """
+    #"""
     FH_goal = _tb_tgt["allocated_time"].data[0]
     FH_done = sum(_tb_tgt["exptime_assign"]) / 3600.0
     print(f"FH_goal = {FH_goal}, FH_done = {FH_done}")

@@ -160,6 +160,7 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
             cat_id,
             comment,
         ) = line.split("\t")
+        pa =70
         # exp_time = float(exp_time) * 60.0  # assume table is in MINUTES
         exp_time = float(exp_time)  # exptime is in seconds
         pa = float(pa)
@@ -173,7 +174,8 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
         tgt = StaticTarget(
             name=ob_code, ra=ra, dec=dec, equinox=float(eq), comment=comment
         )
-
+        
+        """
         if len(conf["qplan"]["start_time"]) > 0:
             start_time_too = datetime.strptime(
                 conf["qplan"]["start_time"], "%Y-%m-%d %H:%M:%S"
@@ -189,7 +191,10 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
             stop_time_too = stop_time_too.astimezone(ZoneInfo("UTC"))
         else:
             stop_time_too = None
-
+        #"""
+        start_time_too = None
+        stop_time_too = None
+        
         ob = PPC_OB(
             id=ob_code,
             program=pgm,
@@ -218,18 +223,47 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
     #       observation at sunset
     #       if scheduling a second half just set the start time to 00:30:00 etc
     rec = []
+
+    start_time_list = conf["qplan"].get("start_time", [])
+    stop_time_list = conf["qplan"].get("stop_time", [])
+
     for date in conf["qplan"]["obs_dates"]:
         date_t = parser.parse(f"{date} 12:00 HST")
         observer.set_date(date_t)
-        start_time_ = observer.evening_twilight_18()
-        stop_time_ = observer.morning_twilight_18()
-        print(f"{date}: start obs. at {start_time_}, stop obs. at {stop_time_}")
+        default_start_time = observer.evening_twilight_18()
+        default_stop_time = observer.morning_twilight_18()
+
+        start_override = None
+        stop_override = None
+        
+        for item in start_time_list:
+            if date in item:
+                start_override = parser.parse(f"{item} HST")
+
+        for item in stop_time_list:
+            next_date = (datetime.strptime(date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+            if date in item:
+                stop_override = parser.parse(f"{item} HST")
+            elif (next_date in item) and parser.parse(f"{item} HST") < default_stop_time:
+                stop_override = parser.parse(f"{item} HST")
+
+        if start_override is not None:
+            start_time = start_override
+        else:
+            start_time = default_start_time
+
+        if stop_override is not None:
+            stop_time = stop_override
+        else:
+            stop_time = default_stop_time
+
+        print(f"{date}: start obs. at {start_time}, stop obs. at {stop_time}")
 
         rec.append(
             Bunch(
                 date=date,  # date HST
-                starttime=start_time_,  # time HST
-                stoptime=stop_time_,  # time HST
+                starttime=start_time,  # time HST
+                stoptime=stop_time,  # time HST
                 categories=["open"],
                 skip=False,
                 note="",
