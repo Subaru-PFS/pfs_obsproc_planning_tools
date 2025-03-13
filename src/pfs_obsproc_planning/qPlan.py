@@ -160,7 +160,7 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
             cat_id,
             comment,
         ) = line.split("\t")
-        pa =70
+        # pa =70
         # exp_time = float(exp_time) * 60.0  # assume table is in MINUTES
         exp_time = float(exp_time)  # exptime is in seconds
         pa = float(pa)
