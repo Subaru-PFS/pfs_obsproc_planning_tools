@@ -621,7 +621,10 @@ def readTarget(mode, para):
                 for file in glob(path_ppc+"*"):
                     tbl = Table.read(file)
                     tbl["ppc_code"] = [code + "_" + str(n+1) for code in tbl["ppc_code"]]
-                    tbl["ppc_priority"] = 0
+                    if "55bf3ca22fda5257" in file:
+                        tbl["ppc_priority"] = 0
+                    else:
+                        tbl["ppc_priority"] = 5
                     tables.append(tbl)
                     n += 1
                 tb_ppc_tem = vstack(tables, join_type="outer")

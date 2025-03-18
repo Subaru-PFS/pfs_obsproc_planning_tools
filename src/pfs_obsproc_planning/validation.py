@@ -36,10 +36,10 @@ def njy_mag(j):
 
 def calc_inr(df):
     az, el, inr = radec_to_subaru(
-        df["ra_center"],
-        df["dec_center"],
-        df["pa_center"],
-        df["observation_time"],
+        df["ppc_ra"],
+        df["ppc_dec"],
+        df["ppc_pa"],
+        df["ppc_obstime_utc"],
         2016.0,
         0.0,
         0.0,
@@ -159,14 +159,20 @@ def validation(parentPath, figpath, save, show, ssp):
         )
     df_ch["inr"] = df_design["inr"]
 
-    """
-    df_ch.style.applymap(pldes.colour_background_warning_sky_min, subset=['sky_min'])\
-         .applymap(pldes.colour_background_warning_std_min, subset=['std_min'])\
-         .applymap(pldes.colour_background_warning_sky_tot, subset=['sky_sum'])\
-         .applymap(pldes.colour_background_warning_std_tot, subset=['std_sum'])\
-         .applymap(pldes.colour_background_warning_ag_min, subset=['ag1', 'ag2', 'ag3', 'ag4', 'ag5', 'ag6'])\
-         .applymap(pldes.colour_background_warning_ag_tot, subset=['ag_sum'])\
-         .applymap(pldes.colour_background_warning_inr, subset=['inr']).format(precision=1)
+    #"""
+    styled_html= df_ch.style.applymap(pldes.colour_background_warning_sky_min, subset=['sky_min'])\
+                 .applymap(pldes.colour_background_warning_std_min, subset=['std_min'])\
+                 .applymap(pldes.colour_background_warning_sky_tot, subset=['sky_sum'])\
+                 .applymap(pldes.colour_background_warning_std_tot, subset=['std_sum'])\
+                 .applymap(pldes.colour_background_warning_ag_min, subset=['ag1', 'ag2', 'ag3', 'ag4', 'ag5', 'ag6'])\
+                 .applymap(pldes.colour_background_warning_ag_tot, subset=['ag_sum'])\
+                 .applymap(pldes.colour_background_warning_inr, subset=['inr']).format(precision=1)
     #"""
 
-    df_ch.to_csv(f"{figpath}/validation_report.csv")
+    # Convert the Styler object to an HTML string
+    html_str = styled_html.to_html()
+
+    with open(f"{figpath}/validation_report.html", "w") as f:
+        f.write(html_str)
+    
+    #df_ch.to_csv(f"{figpath}/validation_report.csv")
