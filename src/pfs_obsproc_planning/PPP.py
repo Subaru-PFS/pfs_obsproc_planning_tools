@@ -1279,62 +1279,62 @@ def NetflowPreparation(_tb_tgt):
         # Priorities correspond to the magnitudes of bright stars (in most case for the 2022 June Engineering)
         "sci_P0": {
             "nonObservationCost": 100,
-            "partialObservationCost": 1e11,
+            "partialObservationCost": 200,
             "calib": False,
         },
         "sci_P1": {
             "nonObservationCost": 90,
-            "partialObservationCost": 1e11,
+            "partialObservationCost": 200,
             "calib": False,
         },
         "sci_P2": {
             "nonObservationCost": 80,
-            "partialObservationCost": 1e11,
+            "partialObservationCost": 200,
             "calib": False,
         },
         "sci_P3": {
             "nonObservationCost": 70,
-            "partialObservationCost": 1e11,
+            "partialObservationCost": 200,
             "calib": False,
         },
         "sci_P4": {
             "nonObservationCost": 60,
-            "partialObservationCost": 1e11,
+            "partialObservationCost": 200,
             "calib": False,
         },
         "sci_P5": {
             "nonObservationCost": 50,
-            "partialObservationCost": 1e11,
+            "partialObservationCost": 200,
             "calib": False,
         },
         "sci_P6": {
             "nonObservationCost": 40,
-            "partialObservationCost": 1e11,
+            "partialObservationCost": 200,
             "calib": False,
         },
         "sci_P7": {
             "nonObservationCost": 30,
-            "partialObservationCost": 1e11,
+            "partialObservationCost": 200,
             "calib": False,
         },
         "sci_P8": {
             "nonObservationCost": 20,
-            "partialObservationCost": 1e11,
+            "partialObservationCost": 200,
             "calib": False,
         },
         "sci_P9": {
             "nonObservationCost": 10,
-            "partialObservationCost": 1e11,
+            "partialObservationCost": 200,
             "calib": False,
         },
         "cal": {
             "numRequired": 200,
-            "nonObservationCost": 6e10,
+            "nonObservationCost": 200,
             "calib": True,
         },
         "sky": {
             "numRequired": 400,
-            "nonObservationCost": 6e10,
+            "nonObservationCost": 200,
             "calib": True,
         },
     }
