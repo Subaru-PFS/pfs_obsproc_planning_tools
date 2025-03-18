@@ -31,7 +31,10 @@ warnings.filterwarnings("ignore")
 
 
 def njy_mag(j):
-    return 23.9 - 2.5 * np.log10(j / 1e3)
+    if j>0:
+        return 23.9 - 2.5 * np.log10(j / 1e3)
+    else:
+        return np.nan
 
 
 def calc_inr(df):
