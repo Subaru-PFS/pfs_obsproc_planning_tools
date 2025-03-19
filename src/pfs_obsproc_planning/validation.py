@@ -38,16 +38,28 @@ def njy_mag(j):
 
 
 def calc_inr(df):
-    az, el, inr = radec_to_subaru(
-        df["ppc_ra"],
-        df["ppc_dec"],
-        df["ppc_pa"],
-        df["ppc_obstime_utc"],
-        2016.0,
-        0.0,
-        0.0,
-        0.0,
-    )
+    try:
+        az, el, inr = radec_to_subaru(
+            df["ppc_ra"],
+            df["ppc_dec"],
+            df["ppc_pa"],
+            df["ppc_obstime_utc"],
+            2016.0,
+            0.0,
+            0.0,
+            0.0,
+        )
+    except KeyError:
+        az, el, inr = radec_to_subaru(
+            df["ra_center"],
+            df["dec_center"],
+            df["pa_center"],
+            df["observation_time"],
+            2016.0,
+            0.0,
+            0.0,
+            0.0,
+        )
     return inr
 
 

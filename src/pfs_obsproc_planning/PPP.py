@@ -613,6 +613,12 @@ def readTarget(mode, para):
             path_ppc = para["localPath_ppc"]
             if path_ppc.endswith(".ecsv"):
                 tb_ppc_tem = Table.read(para["localPath_ppc"])
+                
+                #only for s25a-039
+                if tb_tgt["proposal_id"] == "S25A-039":
+                    tb_ppc_tem["ppc_priority"][tb_ppc_tem["ppc_ra"]<120] = 0
+                    tb_ppc_tem["ppc_priority"][tb_ppc_tem["ppc_ra"]>=120] = 5
+                    
             else:
                 from glob import glob 
                 
@@ -621,17 +627,22 @@ def readTarget(mode, para):
                 for file in glob(path_ppc+"*"):
                     tbl = Table.read(file)
                     tbl["ppc_code"] = [code + "_" + str(n+1) for code in tbl["ppc_code"]]
-                    if "55bf3ca22fda5257" in file:
-                        tbl["ppc_priority"] = 0
-                    else:
-                        tbl["ppc_priority"] = 5
+                    
+                    #only for s25a-039
+                    if tb_tgt["proposal_id"] == "S25A-039":
+                        if "55bf3ca22fda5257" in file:
+                            tbl["ppc_priority"] = 0
+                        else:
+                            tbl["ppc_priority"] = 5
+                            
                     tables.append(tbl)
                     n += 1
                 tb_ppc_tem = vstack(tables, join_type="outer")
-                logger.info(f"[S1] Multiple PPC list is combined:\n{tb_ppc_tem['ppc_code','ppc_ra','ppc_dec','ppc_pa','ppc_priority']}.")
 
             if "ppc_priority" not in tb_ppc_tem.colnames:
                 tb_ppc_tem["ppc_priority"] = 0
+
+            logger.info(f"[S1] PPC list from usr:\n{tb_ppc_tem['ppc_code','ppc_ra','ppc_dec','ppc_pa','ppc_priority']}.")
 
             ppc_lst_tem = [
                 [
