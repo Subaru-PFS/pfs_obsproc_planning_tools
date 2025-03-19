@@ -451,7 +451,12 @@ class GeneratePfsDesign(object):
         )
         ## curate csv (FIXME) ##
         df = pd.read_csv(os.path.join(self.outputDirPPP, filename))
-        df = df.replace("[]", "")
+        df['filter_g'] = df['filter_g'].apply(lambda x: "none" if x in ["[]","--"] else x)
+        df['filter_r'] = df['filter_r'].apply(lambda x: "none" if x in ["[]","--"] else x)
+        df['filter_i'] = df['filter_i'].apply(lambda x: "none" if x in ["[]","--"] else x)
+        df['filter_z'] = df['filter_z'].apply(lambda x: "none" if x in ["[]","--"] else x)
+        df['filter_y'] = df['filter_y'].apply(lambda x: "none" if x in ["[]","--"] else x)
+        #df = df.replace("[]", "")
         df.to_csv(os.path.join(self.outputDirPPP, filename), index=False)
 
         ## run SFA ##

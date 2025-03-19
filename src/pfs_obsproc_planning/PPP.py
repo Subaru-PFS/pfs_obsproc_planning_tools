@@ -615,9 +615,9 @@ def readTarget(mode, para):
                 tb_ppc_tem = Table.read(para["localPath_ppc"])
                 
                 #only for s25a-039
-                if tb_tgt["proposal_id"] == "S25A-039":
-                    tb_ppc_tem["ppc_priority"][tb_ppc_tem["ppc_ra"]<120] = 0
-                    tb_ppc_tem["ppc_priority"][tb_ppc_tem["ppc_ra"]>=120] = 5
+                if list(set(tb_tgt["proposal_id"])) == ["S25A-039"]:
+                    tb_ppc_tem["ppc_priority"][(tb_ppc_tem["ppc_ra"]<120)] = 0
+                    tb_ppc_tem["ppc_priority"][(tb_ppc_tem["ppc_ra"]>=120)] = 5
                     
             else:
                 from glob import glob 
@@ -629,7 +629,7 @@ def readTarget(mode, para):
                     tbl["ppc_code"] = [code + "_" + str(n+1) for code in tbl["ppc_code"]]
                     
                     #only for s25a-039
-                    if tb_tgt["proposal_id"] == "S25A-039":
+                    if list(set(tb_tgt["proposal_id"])) == ["S25A-039"]:
                         if "55bf3ca22fda5257" in file:
                             tbl["ppc_priority"] = 0
                         else:
