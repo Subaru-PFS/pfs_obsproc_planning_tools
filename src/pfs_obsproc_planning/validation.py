@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
 # validation.py : Subaru Fiber Allocation software
 
+import os
+
+# The script to make a figure to check pfsDesign
+import sys
+import warnings
+from dataclasses import make_dataclass
+from datetime import datetime
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from dataclasses import make_dataclass
-import os
 from logzero import logger
+from mpl_toolkits.mplot3d import Axes3D
 
 # from pfs.drp.stella.readLineList import ReadLineListTask,  ReadLineListConfig
 # from pfs.drp.stella import DetectorMap
@@ -15,23 +23,14 @@ from pfs.utils.coordinates.CoordTransp import ag_pixel_to_pfimm
 from pfs.utils.coordinates.DistortionCoefficients import radec_to_subaru
 from pfs.utils.fiberids import FiberIds
 
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-from datetime import datetime
-
-# The script to make a figure to check pfsDesign
-import sys
-
 # sys.path.append("/work/moritani/codes/obstools/")
 from . import plotPfsDesign as pldes
-
-import warnings
 
 warnings.filterwarnings("ignore")
 
 
 def njy_mag(j):
-    if j>0:
+    if j > 0:
         return 23.9 - 2.5 * np.log10(j / 1e3)
     else:
         return np.nan
@@ -73,7 +72,7 @@ def validation(parentPath, figpath, save, show, ssp):
     else:
         pfsDesignDir = parentPath
         df_design = pd.read_csv(
-            f"{parentPath}/../{parentPath[-2:]}_summary_reconfigure.csv"
+            os.path.join(parentPath, "..", f"{parentPath[-2:]}_summary_reconfigure.csv")
         )
 
     # Calcurate InR at observing time
@@ -174,20 +173,28 @@ def validation(parentPath, figpath, save, show, ssp):
         )
     df_ch["inr"] = df_design["inr"]
 
-    #"""
-    styled_html= df_ch.style.applymap(pldes.colour_background_warning_sky_min, subset=['sky_min'])\
-                 .applymap(pldes.colour_background_warning_std_min, subset=['std_min'])\
-                 .applymap(pldes.colour_background_warning_sky_tot, subset=['sky_sum'])\
-                 .applymap(pldes.colour_background_warning_std_tot, subset=['std_sum'])\
-                 .applymap(pldes.colour_background_warning_ag_min, subset=['ag1', 'ag2', 'ag3', 'ag4', 'ag5', 'ag6'])\
-                 .applymap(pldes.colour_background_warning_ag_tot, subset=['ag_sum'])\
-                 .applymap(pldes.colour_background_warning_inr, subset=['inr']).format(precision=1)
-    #"""
+    # """
+    styled_html = (
+        df_ch.style.applymap(
+            pldes.colour_background_warning_sky_min, subset=["sky_min"]
+        )
+        .applymap(pldes.colour_background_warning_std_min, subset=["std_min"])
+        .applymap(pldes.colour_background_warning_sky_tot, subset=["sky_sum"])
+        .applymap(pldes.colour_background_warning_std_tot, subset=["std_sum"])
+        .applymap(
+            pldes.colour_background_warning_ag_min,
+            subset=["ag1", "ag2", "ag3", "ag4", "ag5", "ag6"],
+        )
+        .applymap(pldes.colour_background_warning_ag_tot, subset=["ag_sum"])
+        .applymap(pldes.colour_background_warning_inr, subset=["inr"])
+        .format(precision=1)
+    )
+    # """
 
     # Convert the Styler object to an HTML string
     html_str = styled_html.to_html()
 
-    with open(f"{figpath}/validation_report.html", "w") as f:
+    with open(os.path.join(figpath, "validation_report.html"), "w") as f:
         f.write(html_str)
-    
-    #df_ch.to_csv(f"{figpath}/validation_report.csv")
+
+    # df_ch.to_csv(f"{figpath}/validation_report.csv")

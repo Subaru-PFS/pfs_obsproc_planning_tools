@@ -4,7 +4,8 @@
 import argparse
 import os
 import warnings
-from datetime import timedelta, datetime
+from datetime import datetime, timedelta
+
 import pytz
 import yaml
 
@@ -19,14 +20,59 @@ from logzero import logger
 
 warnings.filterwarnings("ignore")
 
-from .opefile import OpeFile
-from pfs_design_tool.pointing_utils import nfutils
 import ets_fiber_assigner.netflow as nf
 from pfs_design_tool import reconfigure_fibers_ppp as sfa
+from pfs_design_tool.pointing_utils import nfutils
+
+from .opefile import OpeFile
 
 
 def read_conf(conf):
     config = toml.load(conf)
+
+    # get some parameters from environmet variables
+    # if not in the config file and already set as enviroment variables
+    if ("pfs_utils_dir" not in config["sfa"]) and (
+        os.environ.get("PFS_UTILS_DIR") is not None
+    ):
+        config["sfa"]["pfs_utils_dir"] = os.environ.get("PFS_UTILS_DIR")
+        logger.info(
+            f"Setting config['sfa']['pfs_utils_dir'] from environment as {config['sfa']['pfs_utils_dir']}"
+        )
+
+    if ("pfs_instdata_dir" not in config["sfa"]) and (
+        os.environ.get("PFS_INSTDATA_DIR") is not None
+    ):
+        config["sfa"]["pfs_instdata_dir"] = os.environ.get("PFS_INSTDATA_DIR")
+        logger.info(
+            f"Setting config['sfa']['pfs_instdata_dir'] from environment as {config['sfa']['pfs_instdata_dir']}"
+        )
+
+    if ("cobra_coach_dir" not in config["sfa"]) and (
+        os.environ.get("COBRA_COACH_DIR") is not None
+    ):
+        config["sfa"]["cobra_coach_dir"] = os.environ.get("COBRA_COACH_DIR")
+        logger.info(
+            f"Setting config['sfa']['cobra_coach_dir'] from environment as {config['sfa']['cobra_coach_dir']}"
+        )
+
+    if ("template" not in config["ope"]) and (
+        os.environ.get("OPE_TEMPLATE") is not None
+    ):
+        config["ope"]["template"] = os.environ.get("OPE_TEMPLATE", None)
+        logger.info(
+            f"Setting config['ope']['template'] from environmentas {config['ope']['template']}"
+        )
+
+    if "guidestar_mag_min" not in config["sfa"]:
+        config["sfa"]["guidestar_mag_min"] = 12
+    if "guidestar_mag_max" not in config["sfa"]:
+        config["sfa"]["guidestar_mag_max"] = 22
+    if "guidestar_neighbor_mag_min" not in config["sfa"]:
+        config["sfa"]["guidestar_neighbor_mag_min"] = 21
+    if "guidestar_minsep_deg" not in config["sfa"]:
+        config["sfa"]["guidestar_minsep_deg"] = 0.0002778
+
     return config
 
 
@@ -123,7 +169,9 @@ class GeneratePfsDesign_ssp(object):
             import pfs.utils
 
             repo_path = os.path.join(pfs.utils.__path__[0], "../../../")
-            os.environ["PFS_UTILS_DIR"] = os.path.join(pfs.utils.__path__[0], "../../../")
+            os.environ["PFS_UTILS_DIR"] = os.path.join(
+                pfs.utils.__path__[0], "../../../"
+            )
         except:
             repo_path = self.conf["sfa"]["pfs_utils_dir"]
         version_desire = self.conf["sfa"]["pfs_utils_ver"]
@@ -134,88 +182,89 @@ class GeneratePfsDesign_ssp(object):
 
     def update_config(self):
         self.conf = read_conf(os.path.join(self.workDir, self.config))
-        
+
     def ssp_tgt_validate(self, tb, ppc_code, tgt_type):
         validate_success = True
 
+        # fmt: off
         # check whether required columns included
         expected_science = {
-            "obj_id":             {"dtype": int,   "default": None},
-            "ra":                 {"dtype": float, "default": None},
-            "dec":                {"dtype": float, "default": None},
-            "pmra":               {"dtype": float, "default": 0.0},
-            "pmdec":              {"dtype": float, "default": 0.0},
-            "parallax":           {"dtype": float, "default": 1.0e-7},
-            "epoch":              {"dtype": str,        "default": "J2000.0"},
-            "target_type_id":     {"dtype": int,   "default": None},
-            "input_catalog_id":   {"dtype": int,   "default": None},
-            "ob_code":            {"dtype": str,        "default": None},
-            "proposal_id":        {"dtype": str,        "default": None},
-            "priority":           {"dtype": int,   "default": None},
-            "effective_exptime":  {"dtype": float, "default": None},
-            "filter_g":           {"dtype": str,        "default": None},
-            "filter_r":           {"dtype": str,        "default": None},
-            "filter_i":           {"dtype": str,        "default": None},
-            "filter_z":           {"dtype": str,        "default": None},
-            "filter_y":           {"dtype": str,        "default": None},
-            "psf_flux_g":         {"dtype": float, "default": 0.0},
-            "psf_flux_r":         {"dtype": float, "default": 0.0},
-            "psf_flux_i":         {"dtype": float, "default": 0.0},
-            "psf_flux_z":         {"dtype": float, "default": 0.0},
-            "psf_flux_y":         {"dtype": float, "default": 0.0},
-            "psf_flux_error_g":   {"dtype": float, "default": 0.0},
-            "psf_flux_error_r":   {"dtype": float, "default": 0.0},
-            "psf_flux_error_i":   {"dtype": float, "default": 0.0},
-            "psf_flux_error_z":   {"dtype": float, "default": 0.0},
-            "psf_flux_error_y":   {"dtype": float, "default": 0.0},
-            "cobraId":            {"dtype": int,   "default": None},
-            "pfi_X":              {"dtype": float, "default": None},
-            "pfi_Y":              {"dtype": float, "default": None},
+            "obj_id"           : {"dtype": int  , "default": None     },
+            "ra"               : {"dtype": float, "default": None     },
+            "dec"              : {"dtype": float, "default": None     },
+            "pmra"             : {"dtype": float, "default": 0.0      },
+            "pmdec"            : {"dtype": float, "default": 0.0      },
+            "parallax"         : {"dtype": float, "default": 1.0e-7   },
+            "epoch"            : {"dtype": str  , "default": "J2000.0"},
+            "target_type_id"   : {"dtype": int  , "default": None     },
+            "input_catalog_id" : {"dtype": int  , "default": None     },
+            "ob_code"          : {"dtype": str  , "default": None     },
+            "proposal_id"      : {"dtype": str  , "default": None     },
+            "priority"         : {"dtype": int  , "default": None     },
+            "effective_exptime": {"dtype": float, "default": None     },
+            "filter_g"         : {"dtype": str  , "default": None     },
+            "filter_r"         : {"dtype": str  , "default": None     },
+            "filter_i"         : {"dtype": str  , "default": None     },
+            "filter_z"         : {"dtype": str  , "default": None     },
+            "filter_y"         : {"dtype": str  , "default": None     },
+            "psf_flux_g"       : {"dtype": float, "default": 0.0      },
+            "psf_flux_r"       : {"dtype": float, "default": 0.0      },
+            "psf_flux_i"       : {"dtype": float, "default": 0.0      },
+            "psf_flux_z"       : {"dtype": float, "default": 0.0      },
+            "psf_flux_y"       : {"dtype": float, "default": 0.0      },
+            "psf_flux_error_g" : {"dtype": float, "default": 0.0      },
+            "psf_flux_error_r" : {"dtype": float, "default": 0.0      },
+            "psf_flux_error_i" : {"dtype": float, "default": 0.0      },
+            "psf_flux_error_z" : {"dtype": float, "default": 0.0      },
+            "psf_flux_error_y" : {"dtype": float, "default": 0.0      },
+            "cobraId"          : {"dtype": int  , "default": None     },
+            "pfi_X"            : {"dtype": float, "default": None     },
+            "pfi_Y"            : {"dtype": float, "default": None     },
         }
 
         expected_sky = {
-            "obj_id":             {"dtype": int,   "default": None},
-            "ra":                 {"dtype": float, "default": None},
-            "dec":                {"dtype": float, "default": None},
-            "target_type_id":     {"dtype": int,   "default": None},
-            "input_catalog_id":   {"dtype": int,   "default": None},
-            "cobraId":            {"dtype": int,   "default": None},
-            "pfi_X":              {"dtype": float, "default": None},
-            "pfi_Y":              {"dtype": float, "default": None},
+            "obj_id"          : {"dtype": int  , "default": None},
+            "ra"              : {"dtype": float, "default": None},
+            "dec"             : {"dtype": float, "default": None},
+            "target_type_id"  : {"dtype": int  , "default": None},
+            "input_catalog_id": {"dtype": int  , "default": None},
+            "cobraId"         : {"dtype": int  , "default": None},
+            "pfi_X"           : {"dtype": float, "default": None},
+            "pfi_Y"           : {"dtype": float, "default": None},
         }
 
         expected_fluxstd = {
-            "obj_id":             {"dtype": int,   "default": None},
-            "ra":                 {"dtype": float, "default": None},
-            "dec":                {"dtype": float, "default": None},
-            "epoch":              {"dtype": str,        "default": "J2000.0"},
-            "pmra":               {"dtype": float, "default": 0.0},
-            "pmdec":              {"dtype": float, "default": 0.0},
-            "parallax":           {"dtype": float, "default": 1.0e-7},
-            "target_type_id":     {"dtype": int,   "default": None},
-            "input_catalog_id":   {"dtype": int,   "default": None},
-            "prob_f_star":        {"dtype": float, "default": 0.0},
-            "filter_g":           {"dtype": str,        "default": None},
-            "filter_r":           {"dtype": str,        "default": None},
-            "filter_i":           {"dtype": str,        "default": None},
-            "filter_z":           {"dtype": str,        "default": None},
-            "filter_y":           {"dtype": str,        "default": None},
-            "psf_flux_g":         {"dtype": float, "default": 0.0},
-            "psf_flux_r":         {"dtype": float, "default": 0.0},
-            "psf_flux_i":         {"dtype": float, "default": 0.0},
-            "psf_flux_z":         {"dtype": float, "default": 0.0},
-            "psf_flux_y":         {"dtype": float, "default": 0.0},
-            "psf_flux_error_g":   {"dtype": float, "default": 0.0},
-            "psf_flux_error_r":   {"dtype": float, "default": 0.0},
-            "psf_flux_error_i":   {"dtype": float, "default": 0.0},
-            "psf_flux_error_z":   {"dtype": float, "default": 0.0},
-            "psf_flux_error_y":   {"dtype": float, "default": 0.0},
-            "cobraId":            {"dtype": int,   "default": None},
-            "pfi_X":              {"dtype": float, "default": None},
-            "pfi_Y":              {"dtype": float, "default": None},
+            "obj_id"          : {"dtype": int  , "default": None     },
+            "ra"              : {"dtype": float, "default": None     },
+            "dec"             : {"dtype": float, "default": None     },
+            "epoch"           : {"dtype": str  , "default": "J2000.0"},
+            "pmra"            : {"dtype": float, "default": 0.0      },
+            "pmdec"           : {"dtype": float, "default": 0.0      },
+            "parallax"        : {"dtype": float, "default": 1.0e-7   },
+            "target_type_id"  : {"dtype": int  , "default": None     },
+            "input_catalog_id": {"dtype": int  , "default": None     },
+            "prob_f_star"     : {"dtype": float, "default": 0.0      },
+            "filter_g"        : {"dtype": str  , "default": None     },
+            "filter_r"        : {"dtype": str  , "default": None     },
+            "filter_i"        : {"dtype": str  , "default": None     },
+            "filter_z"        : {"dtype": str  , "default": None     },
+            "filter_y"        : {"dtype": str  , "default": None     },
+            "psf_flux_g"      : {"dtype": float, "default": 0.0      },
+            "psf_flux_r"      : {"dtype": float, "default": 0.0      },
+            "psf_flux_i"      : {"dtype": float, "default": 0.0      },
+            "psf_flux_z"      : {"dtype": float, "default": 0.0      },
+            "psf_flux_y"      : {"dtype": float, "default": 0.0      },
+            "psf_flux_error_g": {"dtype": float, "default": 0.0      },
+            "psf_flux_error_r": {"dtype": float, "default": 0.0      },
+            "psf_flux_error_i": {"dtype": float, "default": 0.0      },
+            "psf_flux_error_z": {"dtype": float, "default": 0.0      },
+            "psf_flux_error_y": {"dtype": float, "default": 0.0      },
+            "cobraId"         : {"dtype": int  , "default": None     },
+            "pfi_X"           : {"dtype": float, "default": None     },
+            "pfi_Y"           : {"dtype": float, "default": None     },
         }
+        # fmt: on
 
-        
         if tgt_type == "science":
             req_cols = list(expected_science.keys())
             expected = expected_science
@@ -225,7 +274,7 @@ class GeneratePfsDesign_ssp(object):
         elif tgt_type == "fluxstd":
             req_cols = list(expected_fluxstd.keys())
             expected = expected_fluxstd
-            
+
         missing_cols = [col for col in req_cols if col not in tb.colnames]
         if missing_cols:
             validate_success = False
@@ -238,23 +287,29 @@ class GeneratePfsDesign_ssp(object):
             if col in tb.colnames:
                 col_dtype = tb[col].dtype
                 expected_dtype = col_info["dtype"]
-                
+
                 # For string types, expected_dtype == str; check dtype.kind for Unicode ('U') or bytes ('S').
                 if expected_dtype == str:
                     # Check for string: dtype.kind should be 'U' (Unicode) or 'S' (bytes)
-                    if col_dtype.kind not in ['U', 'S']:
+                    if col_dtype.kind not in ["U", "S"]:
                         validate_success = False
-                        logger.error(f"Column '{col}' expected to be a string type but got {col_dtype}")
+                        logger.error(
+                            f"Column '{col}' expected to be a string type but got {col_dtype}"
+                        )
                 elif expected_dtype == float:
                     # Check for any floating type (np.float32, np.float64, or Python float)
                     if not np.issubdtype(col_dtype, np.floating):
                         validate_success = False
-                        logger.error(f"Column '{col}' expected to be a float type but got {col_dtype}")
+                        logger.error(
+                            f"Column '{col}' expected to be a float type but got {col_dtype}"
+                        )
                 elif expected_dtype == int:
                     # Check for any integer type
                     if not np.issubdtype(col_dtype, np.integer):
                         validate_success = False
-                        logger.error(f"Column '{col}' expected to be an int type but got {col_dtype}")
+                        logger.error(
+                            f"Column '{col}' expected to be an int type but got {col_dtype}"
+                        )
 
                 # If a default is provided, check that at least one value is non-missing.
                 default_val = col_info["default"]
@@ -262,15 +317,19 @@ class GeneratePfsDesign_ssp(object):
                     # For numeric columns, consider a value missing if it is NaN.
                     for i, val in enumerate(tb[col]):
                         if val is None:
-                            logger.error(f"Column '{col}' has None; expected default {default_val}.")
+                            logger.error(
+                                f"Column '{col}' has None; expected default {default_val}."
+                            )
                             validate_success = False
                             break
                         # Check for NaN (only applicable if the value is a float).
                         if isinstance(val, float) and np.isnan(val):
-                            logger.error(f"Column '{col}' has np.nan; expected default {default_val}.")
+                            logger.error(
+                                f"Column '{col}' has np.nan; expected default {default_val}."
+                            )
                             validate_success = False
                             break
-                
+
         # check no duplicated cobraId
         unique_vals, counts = np.unique(tb["cobraId"], return_counts=True)
         duplicates = unique_vals[counts > 1]
@@ -317,19 +376,20 @@ class GeneratePfsDesign_ssp(object):
 
             invalid_rows = []
             for i, val in enumerate(tb[col_name]):
-                if np.ma.is_masked(val): continue
-                if val == None: continue
+                if np.ma.is_masked(val):
+                    continue
+                if val == None:
+                    continue
                 if val not in valid_values:
                     invalid_rows.append((i, val))
 
             if invalid_rows:
                 validate_success = False
                 invalid_str = ", ".join(
-                    f"Row {row_idx} => '{bad_val}'"
-                    for row_idx, bad_val in invalid_rows
+                    f"Row {row_idx} => '{bad_val}'" for row_idx, bad_val in invalid_rows
                 )
                 logger.error(
-                    f"[Validation of input] Invalid values in flux column '{col_name}' ({ppc_code}, {tgt_type})"#: {invalid_str} "
+                    f"[Validation of input] Invalid values in flux column '{col_name}' ({ppc_code}, {tgt_type})"  #: {invalid_str} "
                 )
 
         # check flux in at least one band / all bands are there for science / fluxstd
@@ -458,14 +518,14 @@ class GeneratePfsDesign_ssp(object):
 
     def read_tgt(self, ppc_code, WG):
         logger.info(f"[For SSP] Reading in target lists for pointing - {ppc_code}")
-        filepath_sci = (
-            self.workDir + "/targets/" + WG + "/science/" + ppc_code + ".ecsv"
+        filepath_sci = os.path.join(
+            self.workDir, "targets", WG, "science", f"{ppc_code}.ecsv"
         )
-        filepath_sky = (
-            self.workDir + "/targets/" + WG + "/sky/" + ppc_code + ".ecsv"
+        filepath_sky = os.path.join(
+            self.workDir, "targets", WG, "sky", f"{ppc_code}.ecsv"
         )
-        filepath_fluxstd = (
-            self.workDir + "/targets/" + WG + "/fluxstd/" + ppc_code + ".ecsv"
+        filepath_fluxstd = os.path.join(
+            self.workDir, "targets", WG, "fluxstd", f"{ppc_code}.ecsv"
         )
 
         tb_sci = Table.read(filepath_sci)
@@ -483,11 +543,7 @@ class GeneratePfsDesign_ssp(object):
             tb_fluxstd, ppc_code, "fluxstd"
         )
 
-        if (
-            validate_success_sci
-            and validate_success_sky
-            and validate_success_fluxstd
-        ):
+        if validate_success_sci and validate_success_sky and validate_success_fluxstd:
             logger.info(f"[Validation of input] Validation passed ({ppc_code})")
 
         return tb_sci, tb_sky, tb_fluxstd
@@ -515,7 +571,7 @@ class GeneratePfsDesign_ssp(object):
             )
 
         # check if no duplicated ppc_code in ppcList
-        df = tb.to_pandas()  
+        df = tb.to_pandas()
 
         duplicates_mask = df.duplicated(subset=["ppc_code"], keep=False)
         if duplicates_mask.any():
@@ -526,11 +582,9 @@ class GeneratePfsDesign_ssp(object):
             )
 
         # check if nframes > 1
-        if np.any(tb["ppc_nframes"]<=1):
+        if np.any(tb["ppc_nframes"] <= 1):
             validate_success = False
-            logger.error(
-                f"[Validation of ppcList] ppc_nframes should be more than 1"
-            )
+            logger.error("[Validation of ppcList] ppc_nframes should be more than 1")
 
         return validate_success
 
@@ -538,7 +592,7 @@ class GeneratePfsDesign_ssp(object):
         logger.info(f"[For SSP] Make design for {WG}")
 
         # read ppcList.ecsv
-        tb_ppc = Table.read(self.workDir + "/targets/" + WG + "/ppcList.ecsv")
+        tb_ppc = Table.read(os.path.join(self.workDir, "targets", WG, "ppcList.ecsv"))
 
         # Convert each timestamp from HST to UTC
         ppc_obstime_utc = []
@@ -553,9 +607,13 @@ class GeneratePfsDesign_ssp(object):
                         dt_naive = datetime.strptime(hst_string, "%Y-%m-%dT%H:%M:%S.%f")
                     except ValueError:
                         try:
-                            dt_naive = datetime.strptime(hst_string, "%Y-%m-%dT%H:%M:%S")
+                            dt_naive = datetime.strptime(
+                                hst_string, "%Y-%m-%dT%H:%M:%S"
+                            )
                         except ValueError:
-                            dt_naive = datetime.strptime(hst_string, "%Y-%m-%d %H:%M:%S.%f")
+                            dt_naive = datetime.strptime(
+                                hst_string, "%Y-%m-%d %H:%M:%S.%f"
+                            )
             dt_hst = hawaii_tz.localize(dt_naive)
             dt_utc = dt_hst.astimezone(pytz.utc)
             ppc_obstime_utc.append(dt_utc.strftime("%Y-%m-%dT%H:%M:%SZ"))
@@ -763,9 +821,7 @@ class GeneratePfsDesign_ssp(object):
             tel = telescopes[0]
             tgt = targets
             tgt_class_dict = target_class_dict
-            bench = (
-                None  # do not set bench as it is determined when running netflow
-            )
+            bench = None  # do not set bench as it is determined when running netflow
 
             if tb_ppc_t["ppc_resolution"] == "L":
                 arm_ = "brn"
@@ -798,18 +854,24 @@ class GeneratePfsDesign_ssp(object):
                 tb_ppc_t["ppc_obstime_utc"],  # obstime should be in UTC
                 telescope_elevation=None,
                 conf=self.conf,
-                guidestar_mag_min=12,
-                guidestar_mag_max=22,
-                guidestar_neighbor_mag_min=21,
-                guidestar_minsep_deg=0.0002778,
-                # gaiadb_epoch=2015.0,
-                # gaiadb_input_catalog_id=2,
+                guidestar_mag_min=self.conf["sfa"]["guidestar_mag_min"],
+                guidestar_mag_max=self.conf["sfa"]["guidestar_mag_max"],
+                guidestar_neighbor_mag_min=self.conf["sfa"][
+                    "guidestar_neighbor_mag_min"
+                ],
+                guidestar_minsep_deg=self.conf["sfa"]["guidestar_minsep_deg"],
+                # guidestar_mag_min=12,
+                # guidestar_mag_max=22,
+                # guidestar_neighbor_mag_min=21,
+                # guidestar_minsep_deg=0.0002778,
+                # # gaiadb_epoch=2015.0,
+                # # gaiadb_input_catalog_id=2,
             )
             design.guideStars = guidestars
 
             # show assigned targets
             logger.info(
-                f"[Make design] pfsDesign file {design.filename} is created in the {self.workDir + 'pfs_designs/' + WG + '/'} directory."
+                f"[Make design] pfsDesign file {design.filename} is created in the {os.path.join(self.workDir,'pfs_designs', WG)} directory."
             )
             logger.info(
                 "Number of SCIENCE fibers: {:}".format(
@@ -830,7 +892,7 @@ class GeneratePfsDesign_ssp(object):
 
             # write design to output folder
             design.write(
-                dirName=self.workDir + "pfs_designs/" + WG + "/",
+                dirName=os.path.join(self.workDir, self.conf["ope"]["designPath"], WG),
                 fileName=design.filename,
             )
 
@@ -848,20 +910,24 @@ class GeneratePfsDesign_ssp(object):
             f"pfsDesign-{ii}.fits" for ii in tb_ppc["pfsDesignId_hex"]
         ]
         tb_ppc_ = tb_ppc[
-                    "ppc_code",
-                    "ppc_ra",
-                    "ppc_dec",
-                    "ppc_pa",
-                    "design_filename",
-                    "pfsDesignId",
-                    "ppc_exptime",
-                    "ppc_nframes",
-                    "ppc_obstime_utc",
-                    "ppc_obstime",
-                ]
+            "ppc_code",
+            "ppc_ra",
+            "ppc_dec",
+            "ppc_pa",
+            "design_filename",
+            "pfsDesignId",
+            "ppc_exptime",
+            "ppc_nframes",
+            "ppc_obstime_utc",
+            "ppc_obstime",
+        ]
         df_ppc_ = Table.to_pandas(tb_ppc_)
         df_ppc_.to_csv(
-            os.path.join(self.workDir, f"pfs_designs/{WG}_summary_reconfigure.csv"),
+            os.path.join(
+                self.workDir,
+                self.conf["ope"]["designPath"],
+                f"{WG}_summary_reconfigure.csv",
+            ),
             index=False,
         )
 
@@ -874,7 +940,12 @@ class GeneratePfsDesign_ssp(object):
         tb_ppc["ppc_obsdate"] = [row[:10] for row in tb_ppc["ppc_obstime"]]
         for obsdate in obsdates:
             logger.info(f"[Make ope] generating ope file for {obsdate}...")
-            ope.loadTemplate()  # initialize
+            template_file = (
+                self.conf["ope"]["template"]
+                if os.path.exists(self.conf["ope"]["template"])
+                else None
+            )
+            ope.loadTemplate(filename=template_file)  # initialize
             ope.update_obsdate(obsdate)  # update observation date
 
             tb_ppc_t = tb_ppc[tb_ppc["ppc_obsdate"] == obsdate]
@@ -894,12 +965,18 @@ class GeneratePfsDesign_ssp(object):
                         dt_naive = datetime.strptime(hst_string, "%Y-%m-%dT%H:%M:%SZ")
                     except ValueError:
                         try:
-                            dt_naive = datetime.strptime(hst_string, "%Y-%m-%dT%H:%M:%S.%f")
+                            dt_naive = datetime.strptime(
+                                hst_string, "%Y-%m-%dT%H:%M:%S.%f"
+                            )
                         except ValueError:
                             try:
-                                dt_naive = datetime.strptime(hst_string, "%Y-%m-%dT%H:%M:%S")
+                                dt_naive = datetime.strptime(
+                                    hst_string, "%Y-%m-%dT%H:%M:%S"
+                                )
                             except ValueError:
-                                dt_naive = datetime.strptime(hst_string, "%Y-%m-%d %H:%M:%S.%f")
+                                dt_naive = datetime.strptime(
+                                    hst_string, "%Y-%m-%d %H:%M:%S.%f"
+                                )
                 dt_hst = hawaii_tz.localize(dt_naive)
                 dt_utc = dt_hst.astimezone(pytz.utc)
                 ppc_obstime_utc.append(dt_utc.strftime("%Y-%m-%d %H:%M:%S"))
@@ -925,27 +1002,27 @@ class GeneratePfsDesign_ssp(object):
                 ]
             )
 
-            info = info.sort_values(
-                by="obstime_in_utc", ascending=True
-            ).values.tolist()
+            info = info.sort_values(by="obstime_in_utc", ascending=True).values.tolist()
             ope.update_design(info)
             ope.write()  # save file
 
     def ssp_input_validation(self):
         for wg_ in self.conf["ssp"]["WG"]:
             # read ppcList.ecsv
-            tb_ppc = Table.read(self.workDir + "/targets/" + wg_ + "/ppcList.ecsv")
-    
+            tb_ppc = Table.read(
+                os.path.join(self.workDir, "targets", wg_, "ppcList.ecsv")
+            )
+
             validate_success_ppc = self.ssp_ppc_validate(tb_ppc)
-    
+
             if validate_success_ppc:
                 logger.info(f"[Validation of ppcList] Validation passed ({wg_})")
-    
+
             for tb_ppc_t in tb_ppc:
                 ppc_code = tb_ppc_t["ppc_code"]
                 tb_sci, tb_sky, tb_fluxstd = self.read_tgt(ppc_code, wg_)
 
-        return None                        
+        return None
 
     def runSFA_ssp(self):
         tb_ppc_ = []
@@ -961,11 +1038,15 @@ class GeneratePfsDesign_ssp(object):
         tb_ppc_ = []
         for wg_ in self.conf["ssp"]["WG"]:
             df_ppc_ = pd.read_csv(
-                os.path.join(self.workDir, f"pfs_designs/{wg_}_summary_reconfigure.csv"),
+                os.path.join(
+                    self.workDir,
+                    self.conf["ope"]["designPath"],
+                    f"{wg_}_summary_reconfigure.csv",
+                ),
             )
             tb_ppc_.append(Table.from_pandas(df_ppc_))
 
-        tb_ppc_mix = vstack(tb_ppc_)  
+        tb_ppc_mix = vstack(tb_ppc_)
         logger.info(f"ppclist updated:\n{tb_ppc_mix}")
         self.makeope(tb_ppc_mix)
         return None
@@ -977,8 +1058,10 @@ class GeneratePfsDesign_ssp(object):
         self.update_config()
 
         for wg_ in self.conf["ssp"]["WG"]:
-            parentPath = self.workDir + "pfs_designs/" + wg_
-            figpath = self.workDir + "validations/" + wg_
+            parentPath = os.path.join(self.workDir, self.conf["ope"]["designPath"], wg_)
+            figpath = os.path.join(
+                self.workDir, self.conf["ope"]["validationPath"], wg_
+            )
 
             validation.validation(
                 parentPath,
@@ -991,6 +1074,3 @@ class GeneratePfsDesign_ssp(object):
             logger.info(f"validation plots saved under {figpath}")
 
         return None
-
-
-
