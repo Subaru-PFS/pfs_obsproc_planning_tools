@@ -17,9 +17,16 @@ warnings.filterwarnings("ignore")
 
 class OpeFile(object):
     def __init__(self, conf, workDir):
-        self.template = os.path.join(workDir, conf["ope"]["template"])
+        if os.path.exists(os.path.join(workDir, conf["ope"]["template"])):
+            self.template = os.path.join(workDir, conf["ope"]["template"])
+        elif os.path.exists(conf["ope"]["template"]):
+            self.template = conf["ope"]["template"]
+        else:
+            raise FileNotFoundError(
+                f"OPE file template {conf['ope']['template']} not found in {workDir} or current directory."
+            )
         self.outfilePath = os.path.join(workDir, conf["ope"]["outfilePath"])
-        self.runName = conf["ope"]["runName"]
+        # self.runName = conf["ope"]["runName"]  # not used in the current implementation
         self.designPath = os.path.join(workDir, conf["ope"]["designPath"])
         # self.exptime_ppp = conf["ppp"]["TEXP_NOMINAL"]
         # self.loadTemplate(self.template)
