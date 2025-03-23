@@ -237,7 +237,10 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
         stop_override = None
         
         for item in start_time_list:
+            next_date = (datetime.strptime(date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
             if date in item:
+                start_override = parser.parse(f"{item} HST")
+            elif (next_date in item) and parser.parse(f"{item} HST") < default_stop_time:
                 start_override = parser.parse(f"{item} HST")
 
         for item in stop_time_list:
