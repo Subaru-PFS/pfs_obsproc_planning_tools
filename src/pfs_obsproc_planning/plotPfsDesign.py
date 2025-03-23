@@ -4,6 +4,7 @@ import numpy as np
 
 # from scipy import ndimage
 # from scipy.optimize import curve_fit
+from scipy.spatial import distance_matrix
 
 # import matplotlib
 # matplotlib.use('agg')
@@ -211,36 +212,29 @@ def plot_FoV(
     ax1.set_xlabel(xlname, fontsize=12)
     ax1.set_ylabel(ylname, fontsize=12)
 
-    r = 240
-    circle1 = patches.Circle((0, 0), radius=220 / np.sqrt(2), color="grey", fill=False)
-    line1 = patches.FancyArrow(
-        r * np.cos(-1 * np.pi),
-        r * np.sin(-1 * np.pi),
-        2 * r * np.cos(0.0),
-        2 * r * np.sin(0.0),
-        head_width=0,
-        color="grey",
-    )
-    line2 = patches.FancyArrow(
-        r * np.cos(-2 * np.pi / 3),
-        r * np.sin(-2 * np.pi / 3),
-        2 * r * np.cos(np.pi / 3),
-        2 * r * np.sin(np.pi / 3),
-        head_width=0,
-        color="grey",
-    )
-    line3 = patches.FancyArrow(
-        r * np.cos(2 * np.pi / 3),
-        r * np.sin(2 * np.pi / 3),
-        2 * r * np.cos(-1 * np.pi / 3),
-        2 * r * np.sin(-1 * np.pi / 3),
-        head_width=0,
-        color="grey",
-    )
-    ax1.add_patch(line1)
-    ax1.add_patch(line2)
-    ax1.add_patch(line3)
-    ax1.add_patch(circle1)
+    # Border of sections
+    r = 235
+    rs1 = 50
+    rs2 = 132.5
+    for rs in [rs1, rs2]:
+        circle = patches.Circle((0, 0), radius=rs, 
+                                color='navy', fill=False, lw=0.5)
+        ax1.add_patch(circle)
+    phis = np.radians(np.linspace(0, 360, 6, endpoint=False) + 15 + 90)
+    phis = phis - np.radians(360/60./2.)
+    for phi in phis:
+        xx1, yy1 = rs1*np.cos(phi), rs1*np.sin(phi)
+        xx2, yy2 = rs2*np.cos(phi), rs2*np.sin(phi)
+        line = patches.FancyArrow(xx1, yy1, (xx2-xx1), (yy2-yy1),
+                                  head_width=0, color='navy', lw=0.5)
+        ax1.add_patch(line)
+    phis = np.radians(np.linspace(0, 360, 13, endpoint=False) -20 + 90)
+    phis = phis - np.radians(360/13./2.)
+    for phi in phis:
+        xx1, yy1 = rs2*np.cos(phi), rs2*np.sin(phi)
+        xx2, yy2 = r*np.cos(phi), r*np.sin(phi)
+        line = patches.FancyArrow(xx1, yy1, (xx2-xx1), (yy2-yy1), head_width=0, color='navy', lw=0.5)
+        ax1.add_patch(line)
 
     # show North/East
     de, dn = calc_nedirection(pa)
@@ -361,13 +355,13 @@ def colour_background_warning_std_tot(val):
 
 
 def colour_background_warning_sky_min(val):
-    colour = warning if val < 20 else ""
+    colour = warning if val < 12 else ""
 
     return f"background-color: {colour}"
 
 
 def colour_background_warning_std_min(val):
-    colour = warning if val < 5 else ""
+    colour = warning if val < 3 else ""
 
     return f"background-color: {colour}"
 
@@ -537,6 +531,41 @@ def get_field_sector(df_fib):
         s += 60
 
     return s
+
+
+def get_field_sector2(df_fib):
+    
+    """
+    df_fib: pandas dataframe with
+           'targetType', 'pfi_x', 'pfi_y', 'spec', 'fh', 'pfsFlux', 'pfsFlux'
+    divede sectors to 20 (1 + 6 + 13) regions, proposed by Laszlo 
+    """
+
+
+    points = []
+    # centre points
+    points.append([[0, 0]])
+
+    # inner points
+    phi = np.radians(np.linspace(0, 360, 6, endpoint=False) + 15 + 90)
+    points.append(100 * np.stack([np.cos(phi), np.sin(phi)], axis=-1))
+
+    # outer points
+    phi =  np.radians(np.linspace(0, 360, 13, endpoint=False) - 20 + 90)
+    points.append(175 * np.stack([np.cos(phi), np.sin(phi)], axis=-1))
+
+    xy = np.concatenate(points, axis=0)
+
+    # Cobra centres
+    uv = np.stack([df_fib.pfi_x, df_fib.pfi_y], axis=-1)
+
+    # Find the closest point to each cobra centre
+    d = distance_matrix(xy, uv)
+
+    tag = np.argmin(d, axis=0)
+    #tag.shape
+    
+    return tag
 
 
 def calc_nedirection(pa):

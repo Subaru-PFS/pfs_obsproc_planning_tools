@@ -134,7 +134,7 @@ def validation(parentPath, figpath, save, show, ssp):
         )
         df_fib["proposalId"] = pfsDesign0.proposalId
         df_fib["psfMag"] = df_fib["pfsFlux"].apply(njy_mag)
-        df_fib["sector"] = df_fib.apply(pldes.get_field_sector, axis=1)
+        df_fib["sector"] = pldes.get_field_sector2(df_fib)
         df_ag = pd.DataFrame(
             data=np.column_stack(
                 (
