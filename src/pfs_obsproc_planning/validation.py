@@ -59,6 +59,9 @@ def calc_inr(df):
             0.0,
             0.0,
         )
+    except ValueError as e:
+        logger.warning(f"Error in calculating InR: {e}")
+        inr = np.nan
     return inr
 
 

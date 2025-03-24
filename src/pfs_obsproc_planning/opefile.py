@@ -118,9 +118,18 @@ class OpeFile(object):
             'FIELD_NAME=OBJECT="FIELD_NAME" RA=FIELD_RA DEC=FIELD_DEC EQUINOX=2000.0'
         )
         repl2 = ""
+        object_names = []
         for i, val in enumerate(info):
-            repl2 += (
-                f'{val[0]}=OBJECT="{val[0]}" RA={val[4]} DEC={val[5]} EQUINOX=2000.0\n'
+            repl2_single_line = (
+                f'{val[0]}=OBJECT="{val[0]}" RA={val[4]} DEC={val[5]} EQUINOX=2000.0'
+            )
+            # register the OBJECT if it is not already in the list
+            if repl2_single_line not in repl2:
+                object_names.append(val[0])
+                repl2 += repl2_single_line + "\n"
+        if len(object_names) != len(set(object_names)):
+            raise ValueError(
+                f"Duplicate PPC codes with different coordinates and/or EQUINOX found ppc_code={object_names}"
             )
         self.contents1_updated = self.contents1_updated.replace(repl1, repl2)
 
