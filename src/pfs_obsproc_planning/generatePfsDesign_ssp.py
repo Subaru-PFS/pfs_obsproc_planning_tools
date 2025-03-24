@@ -936,8 +936,8 @@ class GeneratePfsDesign_ssp(object):
     def makeope(self, tb_ppc):
         ## ope file generation ##
         ope = OpeFile(conf=self.conf, workDir=self.workDir)
-        obsdates = list(set([row[:10] for row in tb_ppc["ppc_obstime"]]))
-        tb_ppc["ppc_obsdate"] = [row[:10] for row in tb_ppc["ppc_obstime"]]
+        obsdates = list(set([row[:10] for row in tb_ppc["ppc_obstime"] if len(row)>10]))
+        tb_ppc["ppc_obsdate"] = [row[:10] if len(row)>10 else np.nan for row in tb_ppc["ppc_obstime"]]
         for obsdate in obsdates:
             logger.info(f"[Make ope] generating ope file for {obsdate}...")
             template_file = (
