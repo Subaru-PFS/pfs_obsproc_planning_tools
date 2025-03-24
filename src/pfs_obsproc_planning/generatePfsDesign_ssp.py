@@ -3,6 +3,7 @@
 
 import argparse
 import os
+import re
 import warnings
 from datetime import datetime, timedelta
 
@@ -934,10 +935,33 @@ class GeneratePfsDesign_ssp(object):
         return tb_ppc
 
     def makeope(self, tb_ppc):
+        def is_valid_date_format(date_string):
+            if date_string is None or not isinstance(date_string, str):
+                return False
+            # YYYY-MM-DD pattern
+            date_pattern = r"^\d{4}-\d{2}-\d{2}"
+            if re.match(date_pattern, date_string):
+                # Check date string
+                try:
+                    # First 10 characters for the format check
+                    date_part = date_string[:10]
+                    datetime.strptime(date_part, "%Y-%m-%d")
+                    return True
+                except ValueError:
+                    return False
+            return False
+
         ## ope file generation ##
         ope = OpeFile(conf=self.conf, workDir=self.workDir)
-        obsdates = list(set([row[:10] for row in tb_ppc["ppc_obstime"] if len(row)>10]))
-        tb_ppc["ppc_obsdate"] = [row[:10] if len(row)>10 else np.nan for row in tb_ppc["ppc_obstime"]]
+        obsdates = list(
+            set(
+                [row[:10] for row in tb_ppc["ppc_obstime"] if is_valid_date_format(row)]
+            )
+        )
+        tb_ppc["ppc_obsdate"] = [
+            row[:10] if is_valid_date_format(row) else np.nan
+            for row in tb_ppc["ppc_obstime"]
+        ]
         for obsdate in obsdates:
             logger.info(f"[Make ope] generating ope file for {obsdate}...")
             template_file = (
