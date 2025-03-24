@@ -122,6 +122,7 @@ class OpeFile(object):
             repl2_single_line = (
                 f'{val[0]}=OBJECT="{val[0]}" RA={val[4]} DEC={val[5]} EQUINOX=2000.0'
             )
+            # register the OBJECT if it is not already in the list
             if repl2_single_line not in repl2:
                 repl2 += repl2_single_line + "\n"
         self.contents1_updated = self.contents1_updated.replace(repl1, repl2)
