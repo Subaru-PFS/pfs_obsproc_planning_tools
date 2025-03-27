@@ -595,6 +595,9 @@ class GeneratePfsDesign_ssp(object):
         # read ppcList.ecsv
         tb_ppc = Table.read(os.path.join(self.workDir, "targets", WG, "ppcList.ecsv"))
 
+        mask = ~np.isnan(tb_ppc["ppc_obstime"])  # True for pointings that are not NaN in obstime
+        tb_ppc = tb_ppc[mask]
+
         # Convert each timestamp from HST to UTC
         ppc_obstime_utc = []
         for hst_string in tb_ppc["ppc_obstime"]:
