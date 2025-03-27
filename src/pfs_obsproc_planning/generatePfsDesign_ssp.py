@@ -17,7 +17,11 @@ import numpy as np
 import pandas as pd
 import toml
 from astropy.table import Table, vstack
-from logzero import logger
+
+try:
+    from loguru import logger
+except ImportError:
+    from logzero import logger
 
 warnings.filterwarnings("ignore")
 
@@ -144,6 +148,23 @@ def check_versions(package, repo_url, repo_path, version_desire):
 
     # Step 4: Checkout the specified branch or tag
     checkout_version(repo, version_desire)
+
+
+def is_valid_date_format(date_string):
+    if date_string is None or not isinstance(date_string, str):
+        return False
+    # YYYY-MM-DD pattern
+    date_pattern = r"^\d{4}-\d{2}-\d{2}"
+    if re.match(date_pattern, date_string):
+        # Check date string
+        try:
+            # First 10 characters for the format check
+            date_part = date_string[:10]
+            datetime.strptime(date_part, "%Y-%m-%d")
+            return True
+        except ValueError:
+            return False
+    return False
 
 
 class GeneratePfsDesign_ssp(object):
@@ -599,7 +620,13 @@ class GeneratePfsDesign_ssp(object):
         ppc_obstime_utc = []
         for hst_string in tb_ppc["ppc_obstime"]:
             try:
-                dt_naive = datetime.strptime(hst_string, "%Y-%m-%d %H:%M:%S")
+                if is_valid_date_format(hst_string):
+                    dt_naive = datetime.strptime(hst_string, "%Y-%m-%d %H:%M:%S")
+                else:
+                    dt_naive = None
+                    logger.warning(
+                        f"Invalid date format is detected in 'ppc_obstime': {hst_string}. Set it as None/NaN and processing will be skipped."
+                    )
             except ValueError:
                 try:
                     dt_naive = datetime.strptime(hst_string, "%Y-%m-%dT%H:%M:%SZ")
@@ -615,9 +642,21 @@ class GeneratePfsDesign_ssp(object):
                             dt_naive = datetime.strptime(
                                 hst_string, "%Y-%m-%d %H:%M:%S.%f"
                             )
-            dt_hst = hawaii_tz.localize(dt_naive)
-            dt_utc = dt_hst.astimezone(pytz.utc)
-            ppc_obstime_utc.append(dt_utc.strftime("%Y-%m-%dT%H:%M:%SZ"))
+            dt_hst = (
+                hawaii_tz.localize(dt_naive)
+                if is_valid_date_format(hst_string)
+                else np.nan
+            )
+            dt_utc = (
+                dt_hst.astimezone(pytz.utc)
+                if is_valid_date_format(hst_string)
+                else np.nan
+            )
+            ppc_obstime_utc.append(
+                dt_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+                if is_valid_date_format(hst_string)
+                else np.nan
+            )
 
         tb_ppc["ppc_obstime_utc"] = ppc_obstime_utc
         tb_ppc["pfsDesignId"] = np.zeros(len(tb_ppc), dtype=np.int64)
@@ -626,6 +665,11 @@ class GeneratePfsDesign_ssp(object):
         validate_success_ppc = self.ssp_ppc_validate(tb_ppc)
 
         for tb_ppc_t in tb_ppc:
+            if not is_valid_date_format(tb_ppc_t["ppc_obstime_utc"]):
+                logger.warning(
+                    f"Invald 'ppc_obstime' is detected for {tb_ppc_t['ppc_code']} as {tb_ppc_t['ppc_obstime_utc']}. Skip generating pfsDesign"
+                )
+                continue
             ppc_code = tb_ppc_t["ppc_code"]
 
             tb_sci, tb_sky, tb_fluxstd = self.read_tgt(ppc_code, WG)
@@ -935,21 +979,6 @@ class GeneratePfsDesign_ssp(object):
         return tb_ppc
 
     def makeope(self, tb_ppc):
-        def is_valid_date_format(date_string):
-            if date_string is None or not isinstance(date_string, str):
-                return False
-            # YYYY-MM-DD pattern
-            date_pattern = r"^\d{4}-\d{2}-\d{2}"
-            if re.match(date_pattern, date_string):
-                # Check date string
-                try:
-                    # First 10 characters for the format check
-                    date_part = date_string[:10]
-                    datetime.strptime(date_part, "%Y-%m-%d")
-                    return True
-                except ValueError:
-                    return False
-            return False
 
         ## ope file generation ##
         ope = OpeFile(conf=self.conf, workDir=self.workDir)

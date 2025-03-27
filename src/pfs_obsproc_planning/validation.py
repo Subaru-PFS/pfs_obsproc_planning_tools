@@ -2,6 +2,7 @@
 # validation.py : Subaru Fiber Allocation software
 
 import os
+import re
 
 # The script to make a figure to check pfsDesign
 import sys
@@ -12,8 +13,12 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from logzero import logger
 from mpl_toolkits.mplot3d import Axes3D
+
+try:
+    from loguru import logger
+except ImportError:
+    from logzero import logger
 
 # from pfs.drp.stella.readLineList import ReadLineListTask,  ReadLineListConfig
 # from pfs.drp.stella import DetectorMap
@@ -83,11 +88,22 @@ def validation(parentPath, figpath, save, show, ssp):
     df_design["inr"] = df_design.apply(calc_inr, axis=1)
 
     # Make pdf files and store the statistical data
-    pfsDesignIds = (
-        df_design["design_filename"]
-        .str.split(r"-|\.", regex=True, expand=True)[1]
-        .map(lambda x: int(x, 16))
-    )
+    def hex2int_design_id(x):
+        logger.debug(f"{x=}")
+        try:
+            hex_design_id = re.split(r"-|\.", x)[1]
+            return int(hex_design_id, 16)
+        except ValueError or TypeError:
+            return None
+
+    pfsDesignIds = [hex2int_design_id(x) for x in df_design["design_filename"]]
+
+    # df_design["design_filename"]
+    # .str.split(r"-|\.", regex=True, expand=True)[1]
+    # .map(lambda x: int(x, 16))
+    # )
+
+    logger.info(f"pfsDesignIds: {pfsDesignIds}")
 
     if not os.path.exists(figpath):
         os.makedirs(figpath)
@@ -95,6 +111,10 @@ def validation(parentPath, figpath, save, show, ssp):
     # This routine just combines a few cells in "trial" section
     df_ch = pldes.init_check_design()
     for designId in pfsDesignIds:
+        logger.info(f"Processing {designId=}")
+        if designId is None:
+            logger.warning("None designId is found. Skip this design for validation")
+            continue
         pfsDesign0 = PfsDesign.read(designId, dirName=pfsDesignDir)
         pfsDesign0.validate()
         print(f"{pfsDesign0.designName}, {pfsDesign0.arms}")

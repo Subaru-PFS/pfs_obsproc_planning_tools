@@ -1,22 +1,25 @@
 # import os,sys,re
 # import math as mt
+# import matplotlib
+# matplotlib.use('agg')
+import matplotlib.pyplot as plt
 import numpy as np
 
 # from scipy import ndimage
 # from scipy.optimize import curve_fit
 from scipy.spatial import distance_matrix
 
-# import matplotlib
-# matplotlib.use('agg')
-import matplotlib.pyplot as plt
-from logzero import logger
+try:
+    from loguru import logger
+except ImportError:
+    from logzero import logger
 
 # event
 # from eventPlot import PointBrowser
-import matplotlib.patches as patches
-
-import pandas as pd
 import itertools as it
+
+import matplotlib.patches as patches
+import pandas as pd
 
 # from scipy import interpolate as ipol
 # from PIL import Image
@@ -217,23 +220,25 @@ def plot_FoV(
     rs1 = 50
     rs2 = 132.5
     for rs in [rs1, rs2]:
-        circle = patches.Circle((0, 0), radius=rs, 
-                                color='navy', fill=False, lw=0.5)
+        circle = patches.Circle((0, 0), radius=rs, color="navy", fill=False, lw=0.5)
         ax1.add_patch(circle)
     phis = np.radians(np.linspace(0, 360, 6, endpoint=False) + 15 + 90)
-    phis = phis - np.radians(360/60./2.)
+    phis = phis - np.radians(360 / 60.0 / 2.0)
     for phi in phis:
-        xx1, yy1 = rs1*np.cos(phi), rs1*np.sin(phi)
-        xx2, yy2 = rs2*np.cos(phi), rs2*np.sin(phi)
-        line = patches.FancyArrow(xx1, yy1, (xx2-xx1), (yy2-yy1),
-                                  head_width=0, color='navy', lw=0.5)
+        xx1, yy1 = rs1 * np.cos(phi), rs1 * np.sin(phi)
+        xx2, yy2 = rs2 * np.cos(phi), rs2 * np.sin(phi)
+        line = patches.FancyArrow(
+            xx1, yy1, (xx2 - xx1), (yy2 - yy1), head_width=0, color="navy", lw=0.5
+        )
         ax1.add_patch(line)
-    phis = np.radians(np.linspace(0, 360, 13, endpoint=False) -20 + 90)
-    phis = phis - np.radians(360/13./2.)
+    phis = np.radians(np.linspace(0, 360, 13, endpoint=False) - 20 + 90)
+    phis = phis - np.radians(360 / 13.0 / 2.0)
     for phi in phis:
-        xx1, yy1 = rs2*np.cos(phi), rs2*np.sin(phi)
-        xx2, yy2 = r*np.cos(phi), r*np.sin(phi)
-        line = patches.FancyArrow(xx1, yy1, (xx2-xx1), (yy2-yy1), head_width=0, color='navy', lw=0.5)
+        xx1, yy1 = rs2 * np.cos(phi), rs2 * np.sin(phi)
+        xx2, yy2 = r * np.cos(phi), r * np.sin(phi)
+        line = patches.FancyArrow(
+            xx1, yy1, (xx2 - xx1), (yy2 - yy1), head_width=0, color="navy", lw=0.5
+        )
         ax1.add_patch(line)
 
     # show North/East
@@ -252,7 +257,7 @@ def plot_FoV(
     ax1.text(
         posne[0] + dl * 2.5 * de[0],
         posne[1] + dl * 2.5 * de[1],
-        f"E",
+        "E",
         ha="center",
         va="center",
         fontsize=10,
@@ -261,7 +266,7 @@ def plot_FoV(
     ax1.text(
         posne[0] + dl * 2.5 * dn[0],
         posne[1] + dl * 2.5 * dn[1],
-        f"N",
+        "N",
         ha="center",
         va="center",
         fontsize=10,
@@ -534,13 +539,11 @@ def get_field_sector(df_fib):
 
 
 def get_field_sector2(df_fib):
-    
     """
     df_fib: pandas dataframe with
            'targetType', 'pfi_x', 'pfi_y', 'spec', 'fh', 'pfsFlux', 'pfsFlux'
-    divede sectors to 20 (1 + 6 + 13) regions, proposed by Laszlo 
+    divede sectors to 20 (1 + 6 + 13) regions, proposed by Laszlo
     """
-
 
     points = []
     # centre points
@@ -551,7 +554,7 @@ def get_field_sector2(df_fib):
     points.append(100 * np.stack([np.cos(phi), np.sin(phi)], axis=-1))
 
     # outer points
-    phi =  np.radians(np.linspace(0, 360, 13, endpoint=False) - 20 + 90)
+    phi = np.radians(np.linspace(0, 360, 13, endpoint=False) - 20 + 90)
     points.append(175 * np.stack([np.cos(phi), np.sin(phi)], axis=-1))
 
     xy = np.concatenate(points, axis=0)
@@ -563,8 +566,8 @@ def get_field_sector2(df_fib):
     d = distance_matrix(xy, uv)
 
     tag = np.argmin(d, axis=0)
-    #tag.shape
-    
+    # tag.shape
+
     return tag
 
 
