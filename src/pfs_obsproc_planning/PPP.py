@@ -356,7 +356,7 @@ def readTarget(mode, para):
             #    continue
             for ex_ob in ex_obs:
                 exps = qq.get_exposures(ex_ob)
-                exptime_exe = sum([exp.effective_exptime for exp in exps])
+                exptime_exe = sum(exp.effective_exptime or 0 for exp in exps)
                 exptime_usr = tb_tgt[
                     (tb_tgt["proposal_id"] == ex_ob.ob_key[0])
                     * (tb_tgt["ob_code"] == ex_ob.ob_key[1])

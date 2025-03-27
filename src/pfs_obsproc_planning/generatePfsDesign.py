@@ -14,7 +14,8 @@ import numpy as np
 import pandas as pd
 import toml
 from astropy.table import Table, vstack
-from logzero import logger
+from loguru import logger
+logger.add("run_2503/S25A-queue/output/run_20250326.log", level="DEBUG", rotation="10 MB", retention="10 days", compression="zip")
 
 warnings.filterwarnings("ignore")
 
@@ -446,12 +447,13 @@ class GeneratePfsDesign(object):
         )
         ## curate csv (FIXME) ##
         df = pd.read_csv(os.path.join(self.outputDirPPP, filename))
-        df['filter_g'] = df['filter_g'].apply(lambda x: "none" if x in ["[]","--"] else x)
-        df['filter_r'] = df['filter_r'].apply(lambda x: "none" if x in ["[]","--"] else x)
-        df['filter_i'] = df['filter_i'].apply(lambda x: "none" if x in ["[]","--"] else x)
-        df['filter_z'] = df['filter_z'].apply(lambda x: "none" if x in ["[]","--"] else x)
-        df['filter_y'] = df['filter_y'].apply(lambda x: "none" if x in ["[]","--"] else x)
+        df['filter_g'] = df['filter_g'].apply(lambda x: "none" if x in [0.0,"0.0", "[]","--"] else x)
+        df['filter_r'] = df['filter_r'].apply(lambda x: "none" if x in [0.0,"0.0","[]","--"] else x)
+        df['filter_i'] = df['filter_i'].apply(lambda x: "none" if x in [0.0,"0.0","[]","--"] else x)
+        df['filter_z'] = df['filter_z'].apply(lambda x: "none" if x in [0.0,"0.0","[]","--"] else x)
+        df['filter_y'] = df['filter_y'].apply(lambda x: "none" if x in [0.0,"0.0","[]","--"] else x)
         #df = df.replace("[]", "")
+        df.replace(9e-05, np.nan, inplace=True)
         df.to_csv(os.path.join(self.outputDirPPP, filename), index=False)
 
         ## run SFA ##

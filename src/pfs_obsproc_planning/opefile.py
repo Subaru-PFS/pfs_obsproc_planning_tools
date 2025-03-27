@@ -153,7 +153,7 @@ class OpeFile(object):
 
             # add pfsDesignId
             repl1 = 'DESIGN_ID="designId"'
-            repl2 = f'DESIGN_ID="{val[3]:#013x}"'
+            repl2 = f'DESIGN_ID="0x{val[3]:016x}"'
             tmpl = tmpl.replace(repl1, repl2)
 
             # add objectname

@@ -138,6 +138,9 @@ def visibility_checker(tb_tgt, obstimes, start_time_list, stop_time_list):
             else:
                 stop_time = default_stop_time
 
+            if i==0:
+                logger.info(f"date: {date}, start={start_time}, stop={stop_time}")
+
             obs_ok, t_start, t_stop = observer.observable(
                 target,
                 start_time,
@@ -287,36 +290,45 @@ def readTarget(mode, para):
     
             df_tgt = removeObjIdDuplication(df_tgt)
     
-            df_tgt["psf_flux_g"][df_tgt["psf_flux_g"].isnull()] = 9e-5
-            df_tgt["psf_flux_r"][df_tgt["psf_flux_r"].isnull()] = 9e-5
-            df_tgt["psf_flux_i"][df_tgt["psf_flux_i"].isnull()] = 9e-5
-            df_tgt["psf_flux_z"][df_tgt["psf_flux_z"].isnull()] = 9e-5
-            df_tgt["psf_flux_y"][df_tgt["psf_flux_y"].isnull()] = 9e-5
+            df_tgt["psf_flux_g"][df_tgt["psf_flux_g"].isnull()] = np.nan
+            df_tgt["psf_flux_r"][df_tgt["psf_flux_r"].isnull()] = np.nan
+            df_tgt["psf_flux_i"][df_tgt["psf_flux_i"].isnull()] = np.nan
+            df_tgt["psf_flux_z"][df_tgt["psf_flux_z"].isnull()] = np.nan
+            df_tgt["psf_flux_y"][df_tgt["psf_flux_y"].isnull()] = np.nan
     
-            df_tgt["psf_flux_error_g"][df_tgt["psf_flux_error_g"].isnull()] = 9e-5
-            df_tgt["psf_flux_error_r"][df_tgt["psf_flux_error_r"].isnull()] = 9e-5
-            df_tgt["psf_flux_error_i"][df_tgt["psf_flux_error_i"].isnull()] = 9e-5
-            df_tgt["psf_flux_error_z"][df_tgt["psf_flux_error_z"].isnull()] = 9e-5
-            df_tgt["psf_flux_error_y"][df_tgt["psf_flux_error_y"].isnull()] = 9e-5
+            df_tgt["psf_flux_error_g"][df_tgt["psf_flux_error_g"].isnull()] = np.nan
+            df_tgt["psf_flux_error_r"][df_tgt["psf_flux_error_r"].isnull()] = np.nan
+            df_tgt["psf_flux_error_i"][df_tgt["psf_flux_error_i"].isnull()] = np.nan
+            df_tgt["psf_flux_error_z"][df_tgt["psf_flux_error_z"].isnull()] = np.nan
+            df_tgt["psf_flux_error_y"][df_tgt["psf_flux_error_y"].isnull()] = np.nan
+
+            cols = ["psf_flux_g", "psf_flux_r", "psf_flux_i", "psf_flux_z", "psf_flux_y",
+                    "psf_flux_error_g", "psf_flux_error_r", "psf_flux_error_i", "psf_flux_error_z", "psf_flux_error_y"]
+            
+            for col in cols:
+                # Convert the column to numeric; non-convertible values (e.g., "N/A") become np.nan.
+                df_tgt[col] = pd.to_numeric(df_tgt[col], errors='coerce')
     
             tb_tgt = Table.from_pandas(df_tgt)
 
             for col in ["filter_g","filter_r", "filter_i", "filter_z", "filter_y"]:
                 tb_tgt[col] = tb_tgt[col].astype("str")
 
+            """
             for col in ["psf_flux_g","psf_flux_r", "psf_flux_i", "psf_flux_z", "psf_flux_y"]:
                 tb_tgt[col] = tb_tgt[col].astype(float)
 
             for col in ["psf_flux_error_g","psf_flux_error_r", "psf_flux_error_i", "psf_flux_error_z", "psf_flux_error_y"]:
                 tb_tgt[col] = tb_tgt[col].astype(float)
-    
+            #"""
+            
             conn.close()
 
             return tb_tgt
 
     # only for S25A march run
-    #proposalid = ['S25A-058QN', 'S25A-020QN', 'S25A-099QN', 'S25A-096QN', 'S25A-042QN', 'S25A-101QN']
-    proposalid = ['S25A-101QN']
+    proposalid = ['S25A-058QN', 'S25A-020QN', 'S25A-099QN', 'S25A-096QN', 'S25A-042QN', 'S25A-101QN']
+    #proposalid = ['S25A-101QN']
 
     tb_tgt_lst = []
     for proposalid_ in proposalid:
@@ -337,8 +349,6 @@ def readTarget(mode, para):
 
     if para["visibility_check"]:
         tb_tgt = visibility_checker(tb_tgt, para["obstimes"], para["starttimes"], para["stoptimes"])
-
-    #tb_tgt.write("/home/wanqqq/examples/run_2503/S25A-queue/output/ppp/obList.ecsv", format="ascii.ecsv", overwrite=True) 
 
     if len(set(tb_tgt["single_exptime"])) > 1:
         logger.error(
@@ -373,11 +383,12 @@ def readTarget(mode, para):
         tt = []
         for psl_id_ in psl_id:
             ex_obs = qq.get_executed_obs_by_proposal(psl_id_)
-            # if len(ex_obs)==0:
-            #    continue
+            if len(ex_obs)==0:
+                continue
             for ex_ob in ex_obs:
                 exps = qq.get_exposures(ex_ob)
-                exptime_exe = sum([exp.effective_exptime for exp in exps])
+                print([exp.effective_exptime for exp in exps])
+                exptime_exe = sum(exp.effective_exptime or 0 for exp in exps)
                 exptime_usr = tb_tgt[
                     (tb_tgt["proposal_id"] == ex_ob.ob_key[0])
                     * (tb_tgt["ob_code"] == ex_ob.ob_key[1])
@@ -385,15 +396,15 @@ def readTarget(mode, para):
                 exptime_exe_fin = min(
                     exptime_usr, exptime_exe
                 )  # ignore over-observation
-                # if exptime_exe>=0:
-                #    nn+=1
-                #    tt.append([nn, psl_id_, ex_ob.ob_key[1], exptime_usr, exptime_exe, len(exps)*900])
+                if exptime_exe>=0:
+                    nn+=1
+                    tt.append([nn, psl_id_, ex_ob.ob_key[1], exptime_usr, exptime_exe, exptime_exe_fin, len(exps)*450])
                 tb_tgt["exptime_done"][
                     (tb_tgt["proposal_id"] == ex_ob.ob_key[0])
                     * (tb_tgt["ob_code"] == ex_ob.ob_key[1])
                 ] = exptime_exe_fin
-        # tt_=Table(np.array(tt),names=["N","psl_id","ob_code","exptime","exptime_done","exptime_done_real"])
-        # tt_.write("/home/wanqqq/examples/tgt_queueDB.csv",overwrite=True)
+        tt_=Table(np.array(tt),names=["N","psl_id","ob_code","exptime","eff_exptime_done_real","eff_exptime_done_rec","exptime_done_real"])
+        tt_.write("/home/wanqqq/examples/run_2503/S25A-queue/output/tgt_queueDB.csv",overwrite=True)
 
         tb_tgt["exptime"] = tb_tgt["exptime_usr"] - tb_tgt["exptime_done"]
         # print(len(tt_),len(tb_tgt[tb_tgt["exptime"]==0]))
@@ -521,6 +532,11 @@ def sciRank_pri(_tb_tgt):
     )
 
     _tb_tgt["rank_fin"] = np.exp(SciUsr_Ranktot)
+
+    weight_max = max(_tb_tgt["rank_fin"])
+    _tb_tgt["rank_fin"][
+        (_tb_tgt["exptime_done"] > 0) | (_tb_tgt["exptime_PPP"] < _tb_tgt["exptime"])
+    ] += weight_max
 
     return _tb_tgt
 
@@ -665,7 +681,7 @@ def objective1(params, _tb_tgt):
     # Define weights: you can adjust these based on your priorities.
     weight_pall = 1.0
     weight_p0 = 0.5
-    weight_p999 = 1.50
+    weight_p999 = 1.10
     
     # We want to maximize the weighted sum; since the optimizer minimizes,
     # we return the negative of the weighted sum.
@@ -684,8 +700,6 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
         return np.array(ppc_lst)
 
     _tb_tgt = sciRank_pri(_tb_tgt)
-
-    #_tb_tgt.write("/home/wanqqq/examples/run_2503/S25A-queue/output/ppp/obList.ecsv", format="ascii.ecsv", overwrite=True) 
 
     single_exptime_ = _tb_tgt.meta["single_exptime"]
 
@@ -720,14 +734,14 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
         )
         print(f"The non-complete proposals: {psl_id_undone}")
 
+        _tb_tgt_ = _tb_tgt_[
+                (_tb_tgt_["exptime_PPP"] > 0)
+                * np.in1d(_tb_tgt_["proposal_id"], psl_id_undone)
+            ]  # targets not finished        
+
         tb_tgt_t_group = target_DBSCAN(_tb_tgt_, 1.38)
 
-        _tb_tgt_t = tb_tgt_t_group[0]
-
-        _tb_tgt_t_ = _tb_tgt_t[
-                (_tb_tgt_t["exptime_PPP"] > 0)
-                & np.in1d(_tb_tgt_t["proposal_id"], psl_id_undone)
-            ]  # targets not finished        
+        _tb_tgt_t_ = tb_tgt_t_group[0]
 
         """
         _df_tgt_t = Table.to_pandas(_tb_tgt_t_)
@@ -890,7 +904,8 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
         )
 
     #ppcList.write("/home/wanqqq/examples/run_2503/S25A-UH006-B/output/ppp/ppcList.ecsv", format="ascii.ecsv", overwrite=True) 
-    ppcList.write(f"/home/wanqqq/examples/run_2503/S25A-queue/output/ppp/ppcList_{resol}.ecsv", format="ascii.ecsv", overwrite=True) 
+    #ppcList.write(f"/home/wanqqq/examples/run_2503/S25A-queue/output/ppp/ppcList_{resol}.ecsv", format="ascii.ecsv", overwrite=True) 
+    ppcList.write(f"/home/wanqqq/examples/run_2503/S25A-queue/output/ppp/ppcList.ecsv", format="ascii.ecsv", overwrite=True) 
     
     logger.info(
         f"[S2] Determine pointing centers done ( nppc = {len(ppc_lst_fin):.0f}; takes {round(time.time()-time_start,3)} sec)"

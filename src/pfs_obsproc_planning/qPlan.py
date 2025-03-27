@@ -64,8 +64,8 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
 
     # These  be used for all PPCs ("BOB"s)
     telcfg = TelescopeConfiguration(focus="P_OPT2")
-    telcfg.min_el_deg = 30.0
-    telcfg.max_el_deg = 85.0
+    telcfg.min_el_deg = 32.0
+    telcfg.max_el_deg = 75.0
     telcfg.min_rot_deg = -174.0
     telcfg.max_rot_deg = 174.0
     # PPCConfiguration -- PFS Pointing Center
