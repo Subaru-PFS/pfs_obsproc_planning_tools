@@ -967,7 +967,7 @@ class GeneratePfsDesign_ssp(object):
             for format_str in formats:
                 try:
                     return datetime.strptime(date_string, format_str)
-                except ValueError:
+                except (ValueError, TypeError):
                     continue
             # If none of the formats worked
             raise ValueError(
