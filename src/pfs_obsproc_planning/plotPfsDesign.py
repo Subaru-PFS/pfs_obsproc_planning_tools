@@ -442,7 +442,7 @@ def check_design(designId, df_fib, df_ag):
             "ag_sum",
         ],
     )
-    df_ch["designId"] = f"{designId:#x}"
+    df_ch["designId"] = f"0x{designId:016x}"
     # df_ch.style.applymap(colour_background_warning_sky_min, subset=['sky_min'])
 
     return df_ch
