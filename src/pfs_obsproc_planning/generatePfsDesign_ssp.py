@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-# generatePfsDesign.py : PPP+qPlan+SFR
+# generatePfsDesign_ssp.py : PPP+qPlan+SFA
 
-import argparse
-import os
-import re
+import os, sys
+# skip print out message
+sys.stdout = open(os.devnull, 'w')
+
 import warnings
 from datetime import datetime, timedelta
 
 import pytz
-import yaml
 
 hawaii_tz = pytz.timezone("Pacific/Honolulu")
 
@@ -615,6 +615,7 @@ class GeneratePfsDesign_ssp(object):
         tb["ppc_obstime_utc"] = ppc_obstime_utc
 
         for tb_ppc_t in tb:
+            code = tb_ppc_t['ppc_code']
             guidestars = sfa.designutils.generate_guidestars_from_gaiadb(
                 tb_ppc_t["ppc_ra"],
                 tb_ppc_t["ppc_dec"],
@@ -630,17 +631,18 @@ class GeneratePfsDesign_ssp(object):
                 guidestar_minsep_deg=self.conf["sfa"]["guidestar_minsep_deg"],
             )
 
-            for cam_id in range(6):
-                count = int((guidestars.agId == cam_id).sum())
-                # Always log the count
-                logger.info(
-                    f"[Validation of ppcList] ({tb_ppc_t['ppc_code']}) AG‑Cam‑{cam_id+1} = {count}"
-                )
-                # Warn if zero
-                if count == 0:
-                    logger.warning(
-                        f"[Validation of ppcList] ({tb_ppc_t['ppc_code']}) AG‑Cam‑{cam_id+1} has zero guide stars"
-                    )
+            # build a list of (cam_id, count)
+            counts = [(cam+1, int((guidestars.agId == cam).sum())) for cam in range(6)]
+
+            # single info line
+            counts_str = ", ".join(f"AG‑Cam‑{cam}={cnt}" for cam, cnt in counts)
+            logger.info(f"[Validation of ppcList] ({code}) {counts_str}")
+
+            # individual warnings for any zero counts
+            for cam, cnt in counts:
+                if cnt == 0:
+                    validate_success = False
+                    logger.warning(f"[Validation of ppcList] ({code}) AG‑Cam‑{cam} has zero guide stars")
 
         return validate_success
 
