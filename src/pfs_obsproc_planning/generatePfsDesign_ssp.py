@@ -531,19 +531,19 @@ class GeneratePfsDesign_ssp(object):
 
         if not os.path.isfile(filepath_sci):
             logger.error(f"[read_tgt] Missing science file for {ppc_code}: {filepath_sci}")
-            tb_sci = Table()
+            return Table(), Table(), Table()
         else:
             tb_sci = Table.read(filepath_sci)
 
         if not os.path.isfile(filepath_sky):
             logger.error(f"[read_tgt] Missing sky file for {ppc_code}: {filepath_sky}")
-            tb_sky = Table()
+            return Table(), Table(), Table()
         else:
             tb_sky = Table.read(filepath_sky)
             
         if not os.path.isfile(filepath_fluxstd):
             logger.error(f"[read_tgt] Missing fluxstd file for {ppc_code}: {filepath_fluxstd}")
-            tb_fluxstd = Table()
+            return Table(), Table(), Table()
         else:
             tb_fluxstd = Table.read(filepath_fluxstd)
 
