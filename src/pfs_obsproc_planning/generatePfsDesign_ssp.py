@@ -595,32 +595,34 @@ class GeneratePfsDesign_ssp(object):
         # read ppcList.ecsv
         tb_ppc = Table.read(os.path.join(self.workDir, "targets", WG, "ppcList.ecsv"))
 
-        mask = np.array([
-            (isinstance(val, str) and val.strip().lower() != "nan") or not (isinstance(val, str))
-            for val in tb_ppc["ppc_obstime"]
-        ])  # True for pointings that are not NaN or "nan" in obstime
+        mask = np.array(
+            [
+                (isinstance(val, str) and val.strip().lower() != "nan")
+                or not (isinstance(val, str))
+                for val in tb_ppc["ppc_obstime"]
+            ]
+        )  # True for pointings that are not NaN or "nan" in obstime
         tb_ppc = tb_ppc[mask]
 
         # Convert each timestamp from HST to UTC
         ppc_obstime_utc = []
+        formats = [
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%dT%H:%M:%S.%f",
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%d %H:%M:%S.%f",
+        ]
         for hst_string in tb_ppc["ppc_obstime"]:
-            try:
-                dt_naive = datetime.strptime(hst_string, "%Y-%m-%d %H:%M:%S")
-            except ValueError:
+            dt_naive = None
+            for format_str in formats:
                 try:
-                    dt_naive = datetime.strptime(hst_string, "%Y-%m-%dT%H:%M:%SZ")
-                except ValueError:
-                    try:
-                        dt_naive = datetime.strptime(hst_string, "%Y-%m-%dT%H:%M:%S.%f")
-                    except ValueError:
-                        try:
-                            dt_naive = datetime.strptime(
-                                hst_string, "%Y-%m-%dT%H:%M:%S"
-                            )
-                        except ValueError:
-                            dt_naive = datetime.strptime(
-                                hst_string, "%Y-%m-%d %H:%M:%S.%f"
-                            )
+                    dt_naive = datetime.strptime(hst_string, format_str)
+                except (ValueError, TypeError):
+                    continue
+
+            if dt_naive is None:
+                raise ValueError(f"Time data '{hst_string}' does not match any known format")
+            
             dt_hst = hawaii_tz.localize(dt_naive)
             dt_utc = dt_hst.astimezone(pytz.utc)
             ppc_obstime_utc.append(dt_utc.strftime("%Y-%m-%dT%H:%M:%SZ"))
@@ -942,76 +944,98 @@ class GeneratePfsDesign_ssp(object):
 
     def makeope(self, tb_ppc):
         def is_valid_date_format(date_string):
-            if date_string is None or not isinstance(date_string, str):
+            """Check if string starts with a valid YYYY-MM-DD date format."""
+            if not isinstance(date_string, str):
                 return False
-            # YYYY-MM-DD pattern
-            date_pattern = r"^\d{4}-\d{2}-\d{2}"
-            if re.match(date_pattern, date_string):
-                # Check date string
-                try:
-                    # First 10 characters for the format check
-                    date_part = date_string[:10]
-                    datetime.strptime(date_part, "%Y-%m-%d")
-                    return True
-                except ValueError:
-                    return False
-            return False
+            try:
+                # Just validate the first 10 chars as a date
+                datetime.strptime(date_string[:10], "%Y-%m-%d")
+                return True
+            except (ValueError, TypeError):
+                return False
 
-        ## ope file generation ##
-        ope = OpeFile(conf=self.conf, workDir=self.workDir)
-        obsdates = list(
-            set(
-                [row[:10] for row in tb_ppc["ppc_obstime"] if is_valid_date_format(row)]
+        def parse_datetime(date_string):
+            formats = [
+                "%Y-%m-%d %H:%M:%S",
+                "%Y-%m-%dT%H:%M:%S.%f",
+                "%Y-%m-%dT%H:%M:%S",
+                "%Y-%m-%d %H:%M:%S.%f",
+            ]
+            # check if the date_string is in one of the possible formats
+            for format_str in formats:
+                try:
+                    return datetime.strptime(date_string, format_str)
+                except (ValueError, TypeError):
+                    continue
+            # If none of the formats worked
+            raise ValueError(
+                f"Time data '{date_string}' does not match any known format"
             )
-        )
+
+        # Define the Hawaii timezone (HST is always UTC-10, no DST)
+        hawaii_tz = pytz.timezone("Pacific/Honolulu")
+
+        def hst_to_utc(hst_string):
+            """Convert HST datetime string to UTC datetime strings (full and date only)."""
+            try:
+                dt_naive = parse_datetime(hst_string)
+                dt_utc = hawaii_tz.localize(dt_naive).astimezone(pytz.utc)
+                return dt_utc.strftime("%Y-%m-%d %H:%M:%S"), dt_utc.strftime("%Y-%m-%d")
+            except ValueError:
+                return np.nan, np.nan
+
+        # Convert ppc_obstime (HST) to UTC
+        _obstime_utc = []
+        _obsdate_utc = []
+        for hst_string in tb_ppc["ppc_obstime"]:
+            full_time, date_only = hst_to_utc(hst_string)
+            _obstime_utc.append(full_time)
+            _obsdate_utc.append(date_only)
+
+        # Update dataframe
         tb_ppc["ppc_obsdate"] = [
             row[:10] if is_valid_date_format(row) else np.nan
             for row in tb_ppc["ppc_obstime"]
         ]
-        for obsdate in obsdates:
-            logger.info(f"[Make ope] generating ope file for {obsdate}...")
+        tb_ppc["ppc_obstime_utc_from_hst"] = _obstime_utc
+        tb_ppc["ppc_obsdate_utc_from_hst"] = _obsdate_utc
+
+        # Get unique dates more concisely
+        def get_unique_dates(date_column):
+            """Extract unique valid dates from a column."""
+            return sorted(
+                {date[:10] for date in date_column if is_valid_date_format(date)}
+            )
+
+        obsdates = get_unique_dates(tb_ppc["ppc_obstime"])
+        obsdates_utc = get_unique_dates(tb_ppc["ppc_obsdate_utc_from_hst"])
+
+        ## ope file generation ##
+        ope = OpeFile(conf=self.conf, workDir=self.workDir)
+
+        for obsdate_utc in obsdates_utc:
+            logger.info(f"[Make ope] generating ope file for {obsdate_utc} (UTC)...")
             template_file = (
                 self.conf["ope"]["template"]
                 if os.path.exists(self.conf["ope"]["template"])
                 else None
             )
             ope.loadTemplate(filename=template_file)  # initialize
-            ope.update_obsdate(obsdate)  # update observation date
+            ope.update_obsdate(obsdate_utc, utc=True)  # update observation date
 
-            tb_ppc_t = tb_ppc[tb_ppc["ppc_obsdate"] == obsdate]
+            tb_ppc_t = tb_ppc[tb_ppc["ppc_obsdate_utc_from_hst"] == obsdate_utc]
 
             tb_ppc_t["obsdate_in_hst"] = tb_ppc_t["ppc_obsdate"]
+            tb_ppc_t["obsdate_in_utc"] = tb_ppc_t["ppc_obsdate_utc_from_hst"]
+            tb_ppc_t["obstime_in_utc"] = tb_ppc_t["ppc_obstime_utc_from_hst"]
 
-            # Define the Hawaii timezone (HST is always UTC-10, no DST)
-            hawaii_tz = pytz.timezone("Pacific/Honolulu")
-
-            # Convert each timestamp from HST to UTC
-            ppc_obstime_utc = []
-            for hst_string in tb_ppc_t["ppc_obstime"]:
-                try:
-                    dt_naive = datetime.strptime(hst_string, "%Y-%m-%d %H:%M:%S")
-                except ValueError:
-                    try:
-                        dt_naive = datetime.strptime(hst_string, "%Y-%m-%dT%H:%M:%SZ")
-                    except ValueError:
-                        try:
-                            dt_naive = datetime.strptime(
-                                hst_string, "%Y-%m-%dT%H:%M:%S.%f"
-                            )
-                        except ValueError:
-                            try:
-                                dt_naive = datetime.strptime(
-                                    hst_string, "%Y-%m-%dT%H:%M:%S"
-                                )
-                            except ValueError:
-                                dt_naive = datetime.strptime(
-                                    hst_string, "%Y-%m-%d %H:%M:%S.%f"
-                                )
-                dt_hst = hawaii_tz.localize(dt_naive)
-                dt_utc = dt_hst.astimezone(pytz.utc)
-                ppc_obstime_utc.append(dt_utc.strftime("%Y-%m-%d %H:%M:%S"))
-
-            tb_ppc_t["obstime_in_utc"] = ppc_obstime_utc
+            if np.unique(tb_ppc_t["obsdate_in_utc"]).size > 1:
+                logger.error(
+                    f"Multiple unique UTC times found for {obsdate_utc} ({tb_ppc_t['obstime_in_utc_from_hst']=}) . This may lead to unexpected behavior."
+                )
+                raise ValueError(
+                    f"Multiple unique UTC times found for the same UTC obsdate ({obsdate_utc}). Please check the input ppc_obstime values."
+                )
 
             tb_ppc_t["pfs_design_id"] = tb_ppc_t["pfsDesignId"]
             tb_ppc_t["obstime_in_hst"] = tb_ppc_t["ppc_obstime"]

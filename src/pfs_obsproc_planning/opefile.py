@@ -60,7 +60,14 @@ class OpeFile(object):
                 elif science_part == 2:
                     self.contents3 += line
 
-    def update_obsdate(self, obsdate):
+    def update_obsdate(self, obsdate, utc=False):
+        obsdate_orig = obsdate
+        if utc:
+            # NOTE: A night in HST is safely assumed to be always the same day in UTC
+            # convert obsdate (YYYY-MM-DD) to UTC and subtract 1 day
+            obstime_hst = Time(obsdate) - TimeDelta(1.0 * u.day)
+            obsdate = obstime_hst.strftime("%Y-%m-%d")
+
         # name of OPE file
         self.outfile = os.path.join(self.outfilePath, f"{obsdate}.ope")
 
