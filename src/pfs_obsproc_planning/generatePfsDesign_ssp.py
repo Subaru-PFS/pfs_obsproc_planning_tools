@@ -634,12 +634,12 @@ class GeneratePfsDesign_ssp(object):
                 count = int((guidestars.agId == cam_id).sum())
                 # Always log the count
                 logger.info(
-                    f"[Validation of ppcList] ({ppc_code}) AG‑Cam‑{cam_id+1} = {count}"
+                    f"[Validation of ppcList] ({tb_ppc_t['ppc_code']}) AG‑Cam‑{cam_id+1} = {count}"
                 )
                 # Warn if zero
                 if count == 0:
                     logger.warning(
-                        f"[Validation of ppcList] ({ppc_code}) AG‑Cam‑{cam_id+1} has zero guide stars"
+                        f"[Validation of ppcList] ({tb_ppc_t['ppc_code']}) AG‑Cam‑{cam_id+1} has zero guide stars"
                     )
 
         return validate_success
