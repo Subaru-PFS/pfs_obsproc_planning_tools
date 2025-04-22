@@ -518,7 +518,7 @@ class GeneratePfsDesign_ssp(object):
         return validate_success
 
     def read_tgt(self, ppc_code, WG):
-        logger.info(f"[For SSP] Reading in target lists for pointing - {ppc_code}")
+        logger.info(f"[{WG}] Reading in target lists for pointing - {ppc_code}")
         filepath_sci = os.path.join(
             self.workDir, "targets", WG, "science", f"{ppc_code}.ecsv"
         )
@@ -529,9 +529,23 @@ class GeneratePfsDesign_ssp(object):
             self.workDir, "targets", WG, "fluxstd", f"{ppc_code}.ecsv"
         )
 
-        tb_sci = Table.read(filepath_sci)
-        tb_sky = Table.read(filepath_sky)
-        tb_fluxstd = Table.read(filepath_fluxstd)
+        if not os.path.isfile(filepath_sci):
+            logger.error(f"[read_tgt] Missing science file for {ppc_code}: {filepath_sci}")
+            tb_sci = Table()
+        else:
+            tb_sci = Table.read(filepath_sci)
+
+        if not os.path.isfile(filepath_sky):
+            logger.error(f"[read_tgt] Missing sky file for {ppc_code}: {filepath_sky}")
+            tb_sky = Table()
+        else:
+            tb_sky = Table.read(filepath_sky)
+            
+        if not os.path.isfile(filepath_fluxstd):
+            logger.error(f"[read_tgt] Missing fluxstd file for {ppc_code}: {filepath_fluxstd}")
+            tb_fluxstd = Table()
+        else:
+            tb_fluxstd = Table.read(filepath_fluxstd)
 
         tb_sci["cidx"] = tb_sci["cobraId"] - 1
         tb_sky["cidx"] = tb_sky["cobraId"] - 1
