@@ -280,7 +280,7 @@ class GeneratePfsDesign_ssp(object):
         if missing_cols:
             validate_success = False
             logger.error(
-                f"[Validation of input] The following required columns are missing ({ppc_code, tgt_type}): {missing_cols}"
+                f"[Validation of tgtLists] The following required columns are missing ({ppc_code, tgt_type}): {missing_cols}"
             )
 
         # check if datatype of column is correct, and default value is set for no input
@@ -338,7 +338,7 @@ class GeneratePfsDesign_ssp(object):
             for dup_val in duplicates:
                 dup_obj_ids = list(tb["obj_id"][tb["cobraId"] == dup_val])
                 logger.error(
-                    f"[Validation of input] Found duplicates in 'cobraId' ({ppc_code, tgt_type}): cobraId={dup_val} assigned to {dup_obj_ids}"
+                    f"[Validation of tgtLists] Found duplicates in 'cobraId' ({ppc_code, tgt_type}): cobraId={dup_val} assigned to {dup_obj_ids}"
                 )
             validate_success = False
 
@@ -390,7 +390,7 @@ class GeneratePfsDesign_ssp(object):
                     f"Row {row_idx} => '{bad_val}'" for row_idx, bad_val in invalid_rows
                 )
                 logger.error(
-                    f"[Validation of input] Invalid values in flux column '{col_name}' ({ppc_code}, {tgt_type})"  #: {invalid_str} "
+                    f"[Validation of tgtLists] Invalid values in flux column '{col_name}' ({ppc_code}, {tgt_type})"  #: {invalid_str} "
                 )
 
         # check flux in at least one band / all bands are there for science / fluxstd
@@ -411,7 +411,7 @@ class GeneratePfsDesign_ssp(object):
             if len(invalid_rows) > 0:
                 validate_success = False
                 logger.error(
-                    f"[Validation of input] Rows lack flux info ({ppc_code}, {tgt_type}): {list(invalid_rows)}"
+                    f"[Validation of tgtLists] Rows lack flux info ({ppc_code}, {tgt_type}): {list(invalid_rows)}"
                 )
 
         elif tgt_type == "fluxstd":
@@ -423,7 +423,7 @@ class GeneratePfsDesign_ssp(object):
             if len(invalid_rows) > 0:
                 validate_success = False
                 logger.error(
-                    f"[Validation of input] Rows lack flux info ({ppc_code}, {tgt_type}): {list(invalid_rows)}"
+                    f"[Validation of tgtLists] Rows lack flux info ({ppc_code}, {tgt_type}): {list(invalid_rows)}"
                 )
 
         # check duplicated obj_id / ob_code
@@ -435,7 +435,7 @@ class GeneratePfsDesign_ssp(object):
                 validate_success = False
                 duplicated_rows = df[duplicates_mask]["ob_code"]
                 logger.error(
-                    f"[Validation of input] Found duplicates in 'ob_code' ({ppc_code}, {tgt_type}):\n{duplicated_rows}"
+                    f"[Validation of tgtLists] Found duplicates in 'ob_code' ({ppc_code}, {tgt_type}):\n{duplicated_rows}"
                 )
 
         duplicates_mask = df.duplicated(subset=["obj_id"], keep=False)
@@ -443,7 +443,7 @@ class GeneratePfsDesign_ssp(object):
             validate_success = False
             duplicated_rows = df[duplicates_mask]["obj_id"]
             logger.error(
-                f"[Validation of input] Found duplicates in 'obj_id' ({ppc_code}, {tgt_type}):\n{duplicated_rows}"
+                f"[Validation of tgtLists] Found duplicates in 'obj_id' ({ppc_code}, {tgt_type}):\n{duplicated_rows}"
             )
 
         # check proposal_id, input_catalog_id & target_type
@@ -457,14 +457,14 @@ class GeneratePfsDesign_ssp(object):
             if proposal_id != proposal_id_req:
                 validate_success = False
                 logger.error(
-                    f"[Validation of input] Proposal_id is incorrect (should be S25A-OT02; {ppc_code}, {tgt_type}): {proposal_id}"
+                    f"[Validation of tgtLists] Proposal_id is incorrect (should be S25A-OT02; {ppc_code}, {tgt_type}): {proposal_id}"
                 )
 
             target_type = set(tb["target_type_id"])
             if target_type != {1}:
                 validate_success = False
                 logger.error(
-                    f"[Validation of input] Target_type for science is incorrect (should be 1; {ppc_code}, {tgt_type}): {target_type}"
+                    f"[Validation of tgtLists] Target_type for science is incorrect (should be 1; {ppc_code}, {tgt_type}): {target_type}"
                 )
 
             catId = set(tb["input_catalog_id"])
@@ -472,7 +472,7 @@ class GeneratePfsDesign_ssp(object):
             if len(unexpected_Id) > 0:
                 validate_success = False
                 logger.error(
-                    f"[Validation of input] Incorrect catId (should be 10091/2/3; {ppc_code}, {tgt_type}): {unexpected_Id}"
+                    f"[Validation of tgtLists] Incorrect catId (should be 10091/2/3; {ppc_code}, {tgt_type}): {unexpected_Id}"
                 )
 
         elif tgt_type == "sky":
@@ -484,7 +484,7 @@ class GeneratePfsDesign_ssp(object):
             if target_type != {2}:
                 validate_success = False
                 logger.error(
-                    f"[Validation of input] Target_type for sky is incorrect (should be 2; {ppc_code}, {tgt_type}): {target_type}"
+                    f"[Validation of tgtLists] Target_type for sky is incorrect (should be 2; {ppc_code}, {tgt_type}): {target_type}"
                 )
 
             catId = set(tb["input_catalog_id"])
@@ -492,7 +492,7 @@ class GeneratePfsDesign_ssp(object):
             if len(unexpected_Id) > 0:
                 validate_success = False
                 logger.error(
-                    f"[Validation of input] Incorrect catId (should be 1006/7 or 10091/2/3; {ppc_code}, {tgt_type}): {unexpected_Id}"
+                    f"[Validation of tgtLists] Incorrect catId (should be 1006/7 or 10091/2/3; {ppc_code}, {tgt_type}): {unexpected_Id}"
                 )
 
         elif tgt_type == "fluxstd":
@@ -504,7 +504,7 @@ class GeneratePfsDesign_ssp(object):
             if target_type != {3}:
                 validate_success = False
                 logger.error(
-                    f"[Validation of input] Target_type for fluxstd is incorrect (should be 3; {ppc_code}, {tgt_type}): {target_type}"
+                    f"[Validation of tgtLists] Target_type for fluxstd is incorrect (should be 3; {ppc_code}, {tgt_type}): {target_type}"
                 )
 
             catId = set(tb["input_catalog_id"])
@@ -512,7 +512,7 @@ class GeneratePfsDesign_ssp(object):
             if len(unexpected_Id) > 0:
                 validate_success = False
                 logger.error(
-                    f"[Validation of input] Incorrect catId (should be 3006 or 10091/2/3; {ppc_code}, {tgt_type}): {unexpected_Id}"
+                    f"[Validation of tgtLists] Incorrect catId (should be 3006 or 10091/2/3; {ppc_code}, {tgt_type}): {unexpected_Id}"
                 )
 
         return validate_success
@@ -545,7 +545,7 @@ class GeneratePfsDesign_ssp(object):
         )
 
         if validate_success_sci and validate_success_sky and validate_success_fluxstd:
-            logger.info(f"[Validation of input] Validation passed ({ppc_code})")
+            logger.info(f"[Validation of tgtLists] Validation passed ({ppc_code})")
 
         return tb_sci, tb_sky, tb_fluxstd
 
@@ -588,6 +588,52 @@ class GeneratePfsDesign_ssp(object):
             logger.error("[Validation of ppcList] ppc_nframes should be more than 1")
 
         # check N_guide star for each pointing
+        ppc_obstime_utc = []
+        formats = [
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%dT%H:%M:%S.%f",
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%d %H:%M:%S.%f",
+        ]
+        for hst_string in tb["ppc_obstime"]:
+            dt_naive = None
+            for format_str in formats:
+                try:
+                    dt_naive = datetime.strptime(hst_string, format_str)
+                except (ValueError, TypeError):
+                    continue
+
+            if dt_naive is None:
+                raise ValueError(f"Time data '{hst_string}' does not match any known format")
+            
+            dt_hst = hawaii_tz.localize(dt_naive)
+            dt_utc = dt_hst.astimezone(pytz.utc)
+            ppc_obstime_utc.append(dt_utc.strftime("%Y-%m-%dT%H:%M:%SZ"))
+
+        tb["ppc_obstime_utc"] = ppc_obstime_utc
+
+        for tb_ppc_t in tb:
+            guidestars = sfa.designutils.generate_guidestars_from_gaiadb(
+                tb_ppc_t["ppc_ra"],
+                tb_ppc_t["ppc_dec"],
+                tb_ppc_t["ppc_pa"],
+                tb_ppc_t["ppc_obstime_utc"],  # obstime should be in UTC
+                telescope_elevation=None,
+                conf=self.conf,
+                guidestar_mag_min=self.conf["sfa"]["guidestar_mag_min"],
+                guidestar_mag_max=self.conf["sfa"]["guidestar_mag_max"],
+                guidestar_neighbor_mag_min=self.conf["sfa"][
+                    "guidestar_neighbor_mag_min"
+                ],
+                guidestar_minsep_deg=self.conf["sfa"]["guidestar_minsep_deg"],
+            )
+
+            for i in range(1, 7):
+                agn = int((guidestars.agId == (i - 1)).sum())
+                logger.info(f"({tb_ppc_t['ppc_code']}) AG-Cam-{i} = {agn}")
+                # warn if zero
+                if agn == 0:
+                    logger.warning(f"[Validation of ppcList] AG-Cam-{i} has zero guide star ({tb_ppc_t['ppc_code']})")
 
         return validate_success
 
@@ -1064,6 +1110,8 @@ class GeneratePfsDesign_ssp(object):
 
     def ssp_input_validation(self):
         for wg_ in self.conf["ssp"]["WG"]:
+            logger.info(f"[Validation of input] {wg_}")
+
             # read ppcList.ecsv
             tb_ppc = Table.read(
                 os.path.join(self.workDir, "targets", wg_, "ppcList.ecsv")
