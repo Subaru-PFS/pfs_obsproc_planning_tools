@@ -604,8 +604,10 @@ class GeneratePfsDesign_ssp(object):
                     continue
 
             if dt_naive is None:
-                raise ValueError(f"Time data '{hst_string}' does not match any known format")
-            
+                raise ValueError(
+                    f"Time data '{hst_string}' does not match any known format"
+                )
+
             dt_hst = hawaii_tz.localize(dt_naive)
             dt_utc = dt_hst.astimezone(pytz.utc)
             ppc_obstime_utc.append(dt_utc.strftime("%Y-%m-%dT%H:%M:%SZ"))
@@ -628,12 +630,17 @@ class GeneratePfsDesign_ssp(object):
                 guidestar_minsep_deg=self.conf["sfa"]["guidestar_minsep_deg"],
             )
 
-            for i in range(1, 7):
-                agn = int((guidestars.agId == (i - 1)).sum())
-                logger.info(f"({tb_ppc_t['ppc_code']}) AG-Cam-{i} = {agn}")
-                # warn if zero
-                if agn == 0:
-                    logger.warning(f"[Validation of ppcList] AG-Cam-{i} has zero guide star ({tb_ppc_t['ppc_code']})")
+            for cam_id in range(6):
+                count = int((guidestars.agId == cam_id).sum())
+                # Always log the count
+                logger.info(
+                    f"[Validation of ppcList] ({ppc_code}) AG‑Cam‑{cam_id+1} = {count}"
+                )
+                # Warn if zero
+                if count == 0:
+                    logger.warning(
+                        f"[Validation of ppcList] ({ppc_code}) AG‑Cam‑{cam_id+1} has zero guide stars"
+                    )
 
         return validate_success
 
@@ -669,8 +676,10 @@ class GeneratePfsDesign_ssp(object):
                     continue
 
             if dt_naive is None:
-                raise ValueError(f"Time data '{hst_string}' does not match any known format")
-            
+                raise ValueError(
+                    f"Time data '{hst_string}' does not match any known format"
+                )
+
             dt_hst = hawaii_tz.localize(dt_naive)
             dt_utc = dt_hst.astimezone(pytz.utc)
             ppc_obstime_utc.append(dt_utc.strftime("%Y-%m-%dT%H:%M:%SZ"))
