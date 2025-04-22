@@ -606,24 +606,23 @@ class GeneratePfsDesign_ssp(object):
 
         # Convert each timestamp from HST to UTC
         ppc_obstime_utc = []
+        formats = [
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%dT%H:%M:%S.%f",
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%d %H:%M:%S.%f",
+        ]
         for hst_string in tb_ppc["ppc_obstime"]:
-            try:
-                dt_naive = datetime.strptime(hst_string, "%Y-%m-%d %H:%M:%S")
-            except ValueError:
+            dt_naive = None
+            for format_str in formats:
                 try:
-                    dt_naive = datetime.strptime(hst_string, "%Y-%m-%dT%H:%M:%SZ")
-                except ValueError:
-                    try:
-                        dt_naive = datetime.strptime(hst_string, "%Y-%m-%dT%H:%M:%S.%f")
-                    except ValueError:
-                        try:
-                            dt_naive = datetime.strptime(
-                                hst_string, "%Y-%m-%dT%H:%M:%S"
-                            )
-                        except ValueError:
-                            dt_naive = datetime.strptime(
-                                hst_string, "%Y-%m-%d %H:%M:%S.%f"
-                            )
+                    dt_naive = datetime.strptime(hst_string, format_str)
+                except (ValueError, TypeError):
+                    continue
+
+            if dt_naive is None:
+                raise ValueError(f"Time data '{hst_string}' does not match any known format")
+            
             dt_hst = hawaii_tz.localize(dt_naive)
             dt_utc = dt_hst.astimezone(pytz.utc)
             ppc_obstime_utc.append(dt_utc.strftime("%Y-%m-%dT%H:%M:%SZ"))
@@ -958,7 +957,6 @@ class GeneratePfsDesign_ssp(object):
         def parse_datetime(date_string):
             formats = [
                 "%Y-%m-%d %H:%M:%S",
-                "%Y-%m-%dT%H:%M:%SZ",
                 "%Y-%m-%dT%H:%M:%S.%f",
                 "%Y-%m-%dT%H:%M:%S",
                 "%Y-%m-%d %H:%M:%S.%f",
