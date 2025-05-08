@@ -1,5 +1,28 @@
 # Tutorial on using the GUI of integrated codes
 
+## Updates for 2025 May run
+
+- the integration codes have been installed under `/work/wanqqq/pfs_obsproc_planning_tools`
+- i will maintain this repository, SAs are not recommended to install it separately
+- how to run it:
+    - (for queue) Please confirm with Russel-san everyday if the queue DB is available; before running the codes, please check the webpage http://g2sim1.subaru.nao.ac.jp:5010/?next=%2Fpfs-report%2FS25A to confirm if the progress on queue DB is reasonable
+    - under `/work/wanqqq/run_2505`, create your work repository like `S25A-queue/` (queue) or `S25A-UH041-A/` (classic)
+    - under the work repository, create a configuration file under `conf/` folder, like `config.toml`
+    - in the configuration file, you should only modify the following parts:
+      ```
+      [qplan]
+        overhead = "5" # minute
+        obs_dates = ["2025-05-23"] #HST
+        start_time = ["2025-05-24 00:25:00"] # HST
+        stop_time = "" # HST
+      ```
+    - then go to home (`/work/wanqqq`), open `run_designmaker_script.py`, and modify the following parts:
+      ```
+        workDir = "/work/wanqqq/run_2505/S25A-UH041-A/" # your work repo created above
+        config = "conf/config_test.toml" # your config file created above
+      ```
+    - please run the script by `python3 run_designmaker_script.py`
+      
 ## Pre-requirements
 
 - Please refer to [README](../README.md) for installation 
