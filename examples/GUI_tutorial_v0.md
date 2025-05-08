@@ -22,6 +22,11 @@
         config = "conf/config_test.toml" # your config file created above
       ```
     - please run the script by `python3 run_designmaker_script.py`
+ 
+- to-dos:
+    - add time window for focusing aroung 21:00
+    - revise to include total_flux instead of psf_flux
+    - add the script to check completion rate into the validation part  
       
 ## Pre-requirements
 
