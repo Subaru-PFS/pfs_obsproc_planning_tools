@@ -77,74 +77,81 @@ def read_conf(conf):
     return config
 
 
-def check_versions(package, repo_url, repo_path, version_desire):
-    """Clone the dependent package from repo_url to repo_path, and checkout to version_desire branch/tag."""
-
-    def clone_repo(repo_url, repo_path="repo"):
-        """Clone a GitHub repository if it’s not already cloned."""
-        if not os.path.exists(repo_path):
-            git.Repo.clone_from(repo_url, repo_path)
-            logger.info(f"({package}) Cloned repository to {repo_path}")
-        else:
-            logger.info(f"({package}) Repository already exists at {repo_path}")
+def check_versions(package, repo_path, version_desire):
+    """Ensure the repository at repo_path is at the desired version."""
 
     def fetch_all_branches_and_tags(repo):
         """Fetch all branches and tags from a repository."""
         repo.remotes.origin.fetch()
         logger.info(f"({package}) Fetched all branches and tags.")
 
-    def get_branches_and_tags(repo):
-        """Get a list of all branches and tags."""
-        branches = [ref.name for ref in repo.remote().refs]
-        tags = [tag.name for tag in repo.tags]
-        return branches, tags
+    def get_commit_time(repo, version):
+        """Get the commit time of a branch or tag."""
+        if version in [ref.name for ref in repo.remote().refs]:  # Check if it's a branch
+            commit_time = repo.commit(version).committed_date
+        elif version in [tag.name for tag in repo.tags]:  # Check if it's a tag
+            commit_time = repo.commit(version).committed_date
+        else:
+            return None  # Invalid version
+        return commit_time
 
-    def get_current_tag_branch(repo):
-        """Get the current tag of the repository if HEAD matches a tag."""
-        # Get the current commit
+    def compare_commit_times(current_commit_time, desired_commit_time):
+        """Compare commit times to determine if current is older than desired."""
+        if current_commit_time is None:
+            return False  # If no current commit time, always update
+        return current_commit_time < desired_commit_time  # Check if the current version's commit is older
+
+    def get_current_version(repo):
+        """Get the current branch or tag version."""
         current_commit = repo.head.commit
-
         # Find if the current commit matches any tag
         for tag in repo.tags:
             if tag.commit == current_commit:
                 logger.info(f"({package}) Current tag = {tag.name}")
+                return tag.name  # Return the tag name if found
 
-        # Find if the current commit matches any branch
+        # If no tag, return the current branch name
         for ref in repo.remote().refs:
             if ref.commit == current_commit:
                 logger.info(f"({package}) Current branch = {ref.name}")
+                return ref.name  # Return the branch name if found
+
+        return None  # If no matching commit found
 
     def checkout_version(repo, version):
         """Checkout a specified branch or tag."""
         version = version.strip()
         if version == "":
             logger.info(f"({package}) Do not change the current branch/tag.")
-            get_current_tag_branch(repo)
-        elif version in [ref.name for ref in repo.remote().refs] or version in [
-            tag.name for tag in repo.tags
-        ]:
-            repo.git.checkout(version)
-            logger.info(f"({package}) Checked out to {version}.")
-            get_current_tag_branch(repo)
+            return  # Do nothing if no version is provided
+
+        current_commit_time = get_commit_time(repo, "HEAD")
+        desired_commit_time = get_commit_time(repo, version)
+
+        if compare_commit_times(current_commit_time, desired_commit_time):
+            if version in [ref.name for ref in repo.remote().refs] or version in [
+                tag.name for tag in repo.tags
+            ] or repo.commit(version):
+                repo.git.checkout(version)
+                logger.info(f"({package}) Checked out to {version}.")
+            else:
+                logger.warning(
+                    f"({package}) Version '{version}' not found in branches or tags."
+                )
         else:
-            logger.warning(
-                f"({package}) Version '{version}' not found in branches or tags."
-            )
-            get_current_tag_branch(repo)
+            logger.info(f"({package}) Current version is up-to-date with {version}.")
 
-    # Step 1: Clone the repository if not done already
-    clone_repo(repo_url, repo_path)
-
-    # Step 2: Load the repository and fetch all branches and tags
+    # Step 1: Load the repository from the given path
     repo = git.Repo(repo_path)
+
+    # Step 2: Fetch all branches and tags
     fetch_all_branches_and_tags(repo)
+    get_current_version(repo)
 
-    # Step 3: Get list of branches and tags
-    get_branches_and_tags(repo)
-
-    # Step 4: Checkout the specified branch or tag
+    # Step 3: Checkout the specified branch or tag
     checkout_version(repo, version_desire)
 
+    return None
 
 class GeneratePfsDesign_ssp(object):
     def __init__(self, config, workDir=".", repoDir=None):
@@ -155,30 +162,21 @@ class GeneratePfsDesign_ssp(object):
         ## configuration file ##
         self.conf = read_conf(os.path.join(self.workDir, self.config))
 
+        # cobracoach dir
         self.cobraCoachDir = os.path.join(self.conf["sfa"]["cobra_coach_dir"])
 
-        # check if pfs_instdata exists; if no, clone from GitHub when not found; if version specified, switch to it
-        repo_url = "https://github.com/Subaru-PFS/pfs_instdata.git"
-        repo_path = self.conf["sfa"]["pfs_instdata_dir"]
-        version_desire = self.conf["sfa"]["pfs_instdata_ver"]
+        # check versions of dependent packages
+        def check_version_pfs(self, package):
+            try:
+                repo_path = self.conf["sfa"][package + "_dir"]
+                version_desire = self.conf["sfa"][package + "_ver"]
+                check_versions(package, repo_path, version_desire)
+            except KeyError:
+                logger.warning(f"Path of {package} not found in {self.config}")
 
-        check_versions("pfs_instdata", repo_url, repo_path, version_desire)
-
-        # check if pfs_utils exists; if no, clone from GitHub when not found; if version specified, switch to it
-        repo_url = "https://github.com/Subaru-PFS/pfs_utils.git"
-        try:
-            import pfs.utils
-
-            repo_path = os.path.join(pfs.utils.__path__[0], "../../../")
-            os.environ["PFS_UTILS_DIR"] = os.path.join(
-                pfs.utils.__path__[0], "../../../"
-            )
-        except:
-            repo_path = self.conf["sfa"]["pfs_utils_dir"]
-        version_desire = self.conf["sfa"]["pfs_utils_ver"]
-
-        check_versions("pfs_utils", repo_url, repo_path, version_desire)
-
+        for package_ in ["pfs_instdata", "ets_pointing", "ets_shuffle", "pfs_datamodel", "ics_cobraCharmer", "ics_cobraOps", "ets_fiberalloc", "pfs_instdata", "ets_target_database", "ics_fpsActor", "spt_operational_database", "qplan"]:
+            check_version_pfs(self, package_)
+            
         return None
 
     def update_config(self):
