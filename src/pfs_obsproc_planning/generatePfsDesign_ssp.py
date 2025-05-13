@@ -2,8 +2,9 @@
 # generatePfsDesign_ssp.py : PPP+qPlan+SFA
 
 import os, sys
+
 # skip print out message
-sys.stdout = open(os.devnull, 'w')
+sys.stdout = open(os.devnull, "w")
 
 import warnings
 from datetime import datetime, timedelta
@@ -87,7 +88,9 @@ def check_versions(package, repo_path, version_desire):
 
     def get_commit_time(repo, version):
         """Get the commit time of a branch or tag."""
-        if version in [ref.name for ref in repo.remote().refs]:  # Check if it's a branch
+        if version in [
+            ref.name for ref in repo.remote().refs
+        ]:  # Check if it's a branch
             commit_time = repo.commit(version).committed_date
         elif version in [tag.name for tag in repo.tags]:  # Check if it's a tag
             commit_time = repo.commit(version).committed_date
@@ -99,7 +102,9 @@ def check_versions(package, repo_path, version_desire):
         """Compare commit times to determine if current is older than desired."""
         if current_commit_time is None:
             return False  # If no current commit time, always update
-        return current_commit_time < desired_commit_time  # Check if the current version's commit is older
+        return (
+            current_commit_time < desired_commit_time
+        )  # Check if the current version's commit is older
 
     def get_current_version(repo):
         """Get the current branch or tag version."""
@@ -129,9 +134,11 @@ def check_versions(package, repo_path, version_desire):
         desired_commit_time = get_commit_time(repo, version)
 
         if compare_commit_times(current_commit_time, desired_commit_time):
-            if version in [ref.name for ref in repo.remote().refs] or version in [
-                tag.name for tag in repo.tags
-            ] or repo.commit(version):
+            if (
+                version in [ref.name for ref in repo.remote().refs]
+                or version in [tag.name for tag in repo.tags]
+                or repo.commit(version)
+            ):
                 repo.git.checkout(version)
                 logger.info(f"({package}) Checked out to {version}.")
             else:
@@ -152,6 +159,7 @@ def check_versions(package, repo_path, version_desire):
     checkout_version(repo, version_desire)
 
     return None
+
 
 class GeneratePfsDesign_ssp(object):
     def __init__(self, config, workDir=".", repoDir=None):
@@ -174,9 +182,27 @@ class GeneratePfsDesign_ssp(object):
             except KeyError:
                 logger.warning(f"Path of {package} not found in {self.config}")
 
-        for package_ in ["pfs_instdata", "ets_pointing", "ets_shuffle", "pfs_datamodel", "ics_cobraCharmer", "ics_cobraOps", "ets_fiberalloc", "pfs_instdata", "ets_target_database", "ics_fpsActor", "spt_operational_database", "qplan"]:
+        for package_ in [
+            "pfs_instdata",
+            "ets_pointing",
+            "ets_shuffle",
+            "pfs_datamodel",
+            "ics_cobraCharmer",
+            "ics_cobraOps",
+            "ets_fiberalloc",
+            "pfs_instdata",
+            "ets_target_database",
+            "ics_fpsActor",
+            "spt_operational_database",
+            "qplan",
+        ]:
             check_version_pfs(self, package_)
-            
+
+        import pfs.utils
+
+        repo_path = os.path.join(pfs.utils.__path__[0], "../../../")
+        os.environ["PFS_UTILS_DIR"] = os.path.join(pfs.utils.__path__[0], "../../../")
+
         return None
 
     def update_config(self):
@@ -528,7 +554,9 @@ class GeneratePfsDesign_ssp(object):
         )
 
         if not os.path.isfile(filepath_sci):
-            logger.error(f"[read_tgt] Missing science file for {ppc_code}: {filepath_sci}")
+            logger.error(
+                f"[read_tgt] Missing science file for {ppc_code}: {filepath_sci}"
+            )
             return Table(), Table(), Table()
         else:
             tb_sci = Table.read(filepath_sci)
@@ -538,9 +566,11 @@ class GeneratePfsDesign_ssp(object):
             return Table(), Table(), Table()
         else:
             tb_sky = Table.read(filepath_sky)
-            
+
         if not os.path.isfile(filepath_fluxstd):
-            logger.error(f"[read_tgt] Missing fluxstd file for {ppc_code}: {filepath_fluxstd}")
+            logger.error(
+                f"[read_tgt] Missing fluxstd file for {ppc_code}: {filepath_fluxstd}"
+            )
             return Table(), Table(), Table()
         else:
             tb_fluxstd = Table.read(filepath_fluxstd)
@@ -627,7 +657,7 @@ class GeneratePfsDesign_ssp(object):
         tb["ppc_obstime_utc"] = ppc_obstime_utc
 
         for tb_ppc_t in tb:
-            code = tb_ppc_t['ppc_code']
+            code = tb_ppc_t["ppc_code"]
             guidestars = sfa.designutils.generate_guidestars_from_gaiadb(
                 tb_ppc_t["ppc_ra"],
                 tb_ppc_t["ppc_dec"],
@@ -644,7 +674,9 @@ class GeneratePfsDesign_ssp(object):
             )
 
             # build a list of (cam_id, count)
-            counts = [(cam+1, int((guidestars.agId == cam).sum())) for cam in range(6)]
+            counts = [
+                (cam + 1, int((guidestars.agId == cam).sum())) for cam in range(6)
+            ]
 
             # single info line
             counts_str = ", ".join(f"AG‑Cam‑{cam}={cnt}" for cam, cnt in counts)
@@ -654,7 +686,9 @@ class GeneratePfsDesign_ssp(object):
             for cam, cnt in counts:
                 if cnt == 0:
                     validate_success = False
-                    logger.warning(f"[Validation of ppcList] ({code}) AG‑Cam‑{cam} has zero guide stars")
+                    logger.warning(
+                        f"[Validation of ppcList] ({code}) AG‑Cam‑{cam} has zero guide stars"
+                    )
 
         return validate_success
 
