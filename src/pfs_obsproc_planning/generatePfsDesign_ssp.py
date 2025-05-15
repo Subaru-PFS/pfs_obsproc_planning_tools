@@ -182,6 +182,7 @@ class GeneratePfsDesign_ssp(object):
             except KeyError:
                 logger.warning(f"Path of {package} not found in {self.config}")
 
+        """
         for package_ in [
             "pfs_instdata",
             "ets_pointing",
@@ -197,7 +198,7 @@ class GeneratePfsDesign_ssp(object):
             "qplan",
         ]:
             check_version_pfs(self, package_)
-
+        """
         import pfs.utils
 
         repo_path = os.path.join(pfs.utils.__path__[0], "../../../")
@@ -414,7 +415,7 @@ class GeneratePfsDesign_ssp(object):
                     f"Row {row_idx} => '{bad_val}'" for row_idx, bad_val in invalid_rows
                 )
                 logger.error(
-                    f"[Validation of tgtLists] Invalid values in flux column '{col_name}' ({ppc_code}, {tgt_type})"  #: {invalid_str} "
+                    f"[Validation of tgtLists] Invalid values in flux column '{col_name}' ({ppc_code}, {tgt_type}): {invalid_str} "
                 )
 
         # check flux in at least one band / all bands are there for science / fluxstd

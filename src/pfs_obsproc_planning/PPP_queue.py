@@ -387,8 +387,23 @@ def readTarget(mode, para):
                 continue
             for ex_ob in ex_obs:
                 exps = qq.get_exposures(ex_ob)
-                print([exp.effective_exptime for exp in exps])
-                exptime_exe = sum(exp.effective_exptime or 0 for exp in exps)
+                ob = qq.get_ob(ex_ob.ob_key)
+                arm = ob.inscfg.qa_reference_arm
+                
+                exptime_exe_b = sum(exp.effective_exptime_b or 0 for exp in exps)
+                exptime_exe_r = sum(exp.effective_exptime_r or 0 for exp in exps)
+                exptime_exe_m = sum(exp.effective_exptime_m or 0 for exp in exps)
+                exptime_exe_n = sum(exp.effective_exptime_n or 0 for exp in exps)
+                
+                if arm == 'r':
+                    exptime_exe = sum(exp.effective_exptime_r or 0 for exp in exps)
+                elif arm == 'b':
+                    exptime_exe = sum(exp.effective_exptime_b or 0 for exp in exps)
+                elif arm == 'n':
+                    exptime_exe = sum(exp.effective_exptime_n or 0 for exp in exps)
+                elif arm == 'm':
+                    exptime_exe = sum(exp.effective_exptime_m or 0 for exp in exps)
+
                 exptime_usr = tb_tgt[
                     (tb_tgt["proposal_id"] == ex_ob.ob_key[0])
                     * (tb_tgt["ob_code"] == ex_ob.ob_key[1])
@@ -398,13 +413,14 @@ def readTarget(mode, para):
                 )  # ignore over-observation
                 if exptime_exe>=0:
                     nn+=1
-                    tt.append([nn, psl_id_, ex_ob.ob_key[1], exptime_usr, exptime_exe, exptime_exe_fin, len(exps)*450])
+                    tt.append([nn, psl_id_, ex_ob.ob_key[1], exptime_usr, arm, exptime_exe, exptime_exe_b, exptime_exe_r, exptime_exe_m, exptime_exe_n, exptime_exe_fin, len(exps)*450])
                 tb_tgt["exptime_done"][
                     (tb_tgt["proposal_id"] == ex_ob.ob_key[0])
                     * (tb_tgt["ob_code"] == ex_ob.ob_key[1])
                 ] = exptime_exe_fin
-        tt_=Table(np.array(tt),names=["N","psl_id","ob_code","exptime","eff_exptime_done_real","eff_exptime_done_rec","exptime_done_real"])
-        tt_.write("/home/wanqqq/examples/run_2503/S25A-queue/output/tgt_queueDB.csv",overwrite=True)
+
+        tt_=Table(np.array(tt),names=["N","psl_id","ob_code","exptime","ref_arm","eff_exptime_done_real", "eff_exptime_done_real_b", "eff_exptime_done_real_r", "eff_exptime_done_real_m", "eff_exptime_done_real_n", "eff_exptime_done_rec","exptime_done_real"])
+        tt_.write("/home/wanqqq/examples/run_2505/S25A-queue/output/tgt_queueDB.csv",overwrite=True)
 
         tb_tgt["exptime"] = tb_tgt["exptime_usr"] - tb_tgt["exptime_done"]
         # print(len(tt_),len(tb_tgt[tb_tgt["exptime"]==0]))
@@ -463,7 +479,7 @@ def readTarget(mode, para):
             np.ceil(tb_tgt["exptime"] / 900) * 900
         )  # exptime needs to be multiples of 900 so netflow can be successfully executed
         n_tgt2 = len(tb_tgt)
-        logger.info(f"There are {n_tgt2:.0f} / {n_tgt1:.0f} targets not completed")
+        logger.info(f"There are {n_tgt2:.0f} (partial-obs: {sum(tb_tgt['exptime_done'] > 0):.0f}) / {n_tgt1:.0f} targets not completed")
 
         # separete the sample by 'resolution' (L/M)
         tb_tgt_l = tb_tgt[tb_tgt["resolution"] == "L"]
@@ -823,10 +839,12 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
                 (_tb_tgt_["exptime_PPP"] < _tb_tgt_["exptime"]) * (_tb_tgt_["proposal_id"] == tt)
             )
 
+        n_uncom1 = sum(_tb_tgt_["exptime_done"]>0)
         _tb_tgt_ = _tb_tgt_[_tb_tgt_["exptime_PPP"] > 0]  # targets not finished
-
+        n_uncom2 = sum(_tb_tgt_["exptime_done"]>0)
+        
         print(
-            f"PPC_{len(ppc_lst):3d}: {len(_tb_tgt)-len(_tb_tgt_):5d}/{len(_tb_tgt):10d} targets are finished (w={weight_tem_tot:.2f})."
+            f"PPC_{len(ppc_lst):3d}: {len(_tb_tgt)-len(_tb_tgt_):5d}/{len(_tb_tgt):10d} targets are finished (w={weight_tem_tot:.2f}). (partial = {n_uncom1}, {n_uncom2})"
         )
         Table.pprint_all(tb_fh)
         
@@ -837,6 +855,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
         ppc_lst_fin = ppc_lst[:]
 
     ppc_lst_fin = np.array(ppc_lst_fin)
+    weight_for_qplan = (1/ppc_lst_fin[:,4])/max(1/ppc_lst_fin[:,4])*1000.0
 
     # write
     nPPC = len(ppc_lst_fin)
@@ -846,8 +865,8 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
     ppc_dec = ppc_lst_fin[:,2]
     ppc_pa = ppc_lst_fin[:,3]
     ppc_equinox = ["J2000"] * nPPC
-    ppc_priority = ppc_lst_fin[:,4]
-    ppc_priority_usr = ppc_lst_fin[:,4]
+    ppc_priority = weight_for_qplan
+    ppc_priority_usr = weight_for_qplan
     ppc_exptime = [900.0] * nPPC
     ppc_totaltime = [1200.0] * nPPC
     ppc_resolution = [resol] * nPPC
@@ -903,9 +922,9 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
             ],
         )
 
-    #ppcList.write("/home/wanqqq/examples/run_2503/S25A-UH006-B/output/ppp/ppcList.ecsv", format="ascii.ecsv", overwrite=True) 
-    #ppcList.write(f"/home/wanqqq/examples/run_2503/S25A-queue/output/ppp/ppcList_{resol}.ecsv", format="ascii.ecsv", overwrite=True) 
-    ppcList.write(f"/home/wanqqq/examples/run_2503/S25A-queue/output/ppp/ppcList.ecsv", format="ascii.ecsv", overwrite=True) 
+    #ppcList.write("/home/wanqqq/examples/run_2505/S25A-UH006-B/output/ppp/ppcList.ecsv", format="ascii.ecsv", overwrite=True) 
+    ppcList.write(f"/home/wanqqq/examples/run_2505/S25A-queue/output/ppp/ppcList_{resol}.ecsv", format="ascii.ecsv", overwrite=True) 
+    #ppcList.write(f"/home/wanqqq/examples/run_2505/S25A-queue/output/ppp/ppcList.ecsv", format="ascii.ecsv", overwrite=True) 
     
     logger.info(
         f"[S2] Determine pointing centers done ( nppc = {len(ppc_lst_fin):.0f}; takes {round(time.time()-time_start,3)} sec)"
