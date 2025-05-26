@@ -36,13 +36,13 @@ def njy_mag(j):
         return np.nan
 
 
-def calc_inr(df):
+def calc_inr(df, obstime):
     try:
         az, el, inr = radec_to_subaru(
             df["ppc_ra"],
             df["ppc_dec"],
             df["ppc_pa"],
-            df["ppc_obstime_utc"],
+            obstime,
             2016.0,
             0.0,
             0.0,
@@ -53,7 +53,7 @@ def calc_inr(df):
             df["ra_center"],
             df["dec_center"],
             df["pa_center"],
-            df["observation_time"],
+            obstime,
             2016.0,
             0.0,
             0.0,
@@ -64,24 +64,28 @@ def calc_inr(df):
         inr = np.nan
     return inr
 
-
 def validation(parentPath, figpath, save, show, ssp):
     if not ssp:
         pfsDesignDir = f"{parentPath}/design"
         df_design = pd.read_csv(
             f"{parentPath}/summary_reconfigure_ppp-ppp+qplan_output.csv"
         )
+        df_design["observation_time"] = pd.to_datetime(df_design["observation_time"], format='%Y-%m-%dT%H:%M:%SZ')
+        df_design["observation_time_stop"] = (df_design["observation_time"] + pd.DateOffset(seconds=1260)).dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     else:
         pfsDesignDir = parentPath
         df_design = pd.read_csv(
             os.path.join(parentPath, "..", f"{parentPath[-2:]}_summary_reconfigure.csv")
         )
-
+        df_design["observation_time"] = pd.to_datetime(df_design["ppc_obstime_utc"], format='%Y-%m-%dT%H:%M:%SZ')
+        df_design["observation_time_stop"] = (df_design["observation_time"] + pd.to_timedelta(df_design["ppc_exptime"], unit="s")).dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    
     # Calcurate InR at observing time
     # df_design['pa']=0.
-    df_design["inr"] = df_design.apply(calc_inr, axis=1)
-
+    df_design["inr1"] = df_design.apply(lambda row: calc_inr(row, obstime=row["observation_time"]), axis=1)
+    df_design["inr2"] = df_design.apply(lambda row: calc_inr(row, obstime=row["observation_time_stop"]), axis=1)
+    
     # Make pdf files and store the statistical data
     pfsDesignIds = (
         df_design["design_filename"]
@@ -111,6 +115,7 @@ def validation(parentPath, figpath, save, show, ssp):
         else:
             logger.info("[Validation of output] No duplicated fiber")
         pfsflux = np.array([a[0] if len(a) > 0 else np.nan for a in pfsDesign0.psfFlux])
+        totalflux = np.array([a[0] if len(a) > 0 else np.nan for a in pfsDesign0.totalFlux])
         # print(len(pfsDesign0[pfsDesign0.fiberStatus==3]))
         df_fib = pd.DataFrame(
             data=np.column_stack(
@@ -121,6 +126,7 @@ def validation(parentPath, figpath, save, show, ssp):
                     pfsDesign0.spectrograph,
                     pfsDesign0.fiberHole,
                     pfsflux,
+                    totalflux,
                     pfsDesign0.catId,
                 )
             ),
@@ -132,11 +138,20 @@ def validation(parentPath, figpath, save, show, ssp):
                 "spec",
                 "fh",
                 "pfsFlux",
+                "totalFlux",
                 "catId",
             ],
         )
         df_fib["proposalId"] = pfsDesign0.proposalId
         df_fib["psfMag"] = df_fib["pfsFlux"].apply(njy_mag)
+        df_fib["totalMag"] = df_fib["totalFlux"].apply(njy_mag)
+
+        # Identify rows where either magnitude is < 13
+        df_too_bright = df_fib[(df_fib["psfMag"] < 13) | (df_fib["totalMag"] < 13)]
+        
+        if not df_too_bright.empty:
+            logger.warning(f"[Validation of output] Too bright sources with psfMag or totalMag < 13 (0x{designId:016x}, {pfsDesign0.designName}): {df_too_bright}")
+    
         df_fib["sector"] = pldes.get_field_sector2(df_fib)
         df_ag = pd.DataFrame(
             data=np.column_stack(
@@ -174,7 +189,8 @@ def validation(parentPath, figpath, save, show, ssp):
             show=show,
             pa=pfsDesign0.posAng,
         )
-    df_ch["inr"] = df_design["inr"]
+    df_ch["inr1"] = df_design["inr1"]
+    df_ch["inr2"] = df_design["inr2"]
 
     # """
     styled_html = (
@@ -189,7 +205,7 @@ def validation(parentPath, figpath, save, show, ssp):
             subset=["ag1", "ag2", "ag3", "ag4", "ag5", "ag6"],
         )
         .applymap(pldes.colour_background_warning_ag_tot, subset=["ag_sum"])
-        .applymap(pldes.colour_background_warning_inr, subset=["inr"])
+        .applymap(pldes.colour_background_warning_inr, subset=["inr1", "inr2"])
         .format(precision=1)
     )
     # """

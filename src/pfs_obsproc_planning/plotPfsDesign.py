@@ -295,14 +295,15 @@ def plot_FoV(
     )
     for i, p in enumerate(proposals):
         mags = df_fib[(df_fib.targetType == 1) & (df_fib.proposalId == p)][
-            "psfMag"
+            "totalMag"
         ].values
         n_mags = len(mags)
+        n_too_bright = sum(mags<13)
         for j in range((df_fib.shape[0] - n_mags)):
             mags = np.append(mags, np.nan)
         # print(mag_per_prog.shape, mags.shape)
         mag_per_prog = np.vstack((mag_per_prog, mags))
-        label_per_prog.append(f"{p} ({n_mags})")
+        label_per_prog.append(f"{p} ({n_mags}; {n_too_bright}<13mag)")
 
     mag_per_prog = mag_per_prog[1:]
     # print(mag_per_prog.shape, mag_per_prog)

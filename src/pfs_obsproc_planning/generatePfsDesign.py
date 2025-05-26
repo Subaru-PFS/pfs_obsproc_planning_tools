@@ -15,7 +15,7 @@ import pandas as pd
 import toml
 from astropy.table import Table, vstack
 from loguru import logger
-logger.add("run_2503/S25A-queue/output/run_20250326.log", level="DEBUG", rotation="10 MB", retention="10 days", compression="zip")
+logger.add("run_2505/S25A-queue/output/run_20250525.log", level="DEBUG", rotation="10 MB", retention="10 days", compression="zip")
 
 warnings.filterwarnings("ignore")
 
@@ -86,13 +86,18 @@ def check_versions(package, repo_path, version_desire):
         desired_commit_time = get_commit_time(repo, version)
 
         if compare_commit_times(current_commit_time, desired_commit_time):
-            if (
-                version in [ref.name for ref in repo.remote().refs]
-                or version in [tag.name for tag in repo.tags]
-                or repo.commit(version)
-            ):
+            if version in [ref.name for ref in repo.remote().refs]:
+                # Checkout the remote branch and track it locally
+                repo.git.checkout(f"-b {version} origin/{version}")
+                logger.info(f"({package}) Checked out and tracking {version}.")
+            elif version in [tag.name for tag in repo.tags]:
+                # Checkout the tag (no tracking needed for tags)
                 repo.git.checkout(version)
-                logger.info(f"({package}) Checked out to {version}.")
+                logger.info(f"({package}) Checked out to tag {version}.")
+            elif repo.commit(version):
+                # If it's a commit hash, check out the commit directly
+                repo.git.checkout(version)
+                logger.info(f"({package}) Checked out to commit {version}.")
             else:
                 logger.warning(
                     f"({package}) Version '{version}' not found in branches or tags."
@@ -170,9 +175,9 @@ class GeneratePfsDesign(object):
             except KeyError:
                 logger.warning(f"Path of {package} not found in {self.config}")
 
-        #"""
+        """
         for package_ in [
-            "pfs_instdata",
+            "pfs_utils",
             "ets_pointing",
             "ets_shuffle",
             "pfs_datamodel",
@@ -235,7 +240,10 @@ class GeneratePfsDesign(object):
     #"""
 
     def runPPP(self, n_pccs_l, n_pccs_m, show_plots=False):
-        from . import PPP_queue as PPP
+        if "queue" in self.workDir:
+            from . import PPP_queue as PPP
+        else:
+            from . import PPP
 
         ## update config before run PPP ##
         self.update_config()
@@ -293,9 +301,19 @@ class GeneratePfsDesign(object):
             show_plots=show_plots,
         )
 
+        #only for queue
+        if "queue" in self.workDir:
+            #tb_ppc_L = Table.read(os.path.join(self.outputDirPPP, "ppcList_L.ecsv"))
+            #tb_ppc_M = Table.read(os.path.join(self.outputDirPPP, "ppcList_M.ecsv"))
+            tb_ppc_L_ = Table.read(os.path.join(self.outputDirPPP, "ppcList_L_backup.ecsv"))
+            tb_ppc_M_ = Table.read(os.path.join(self.outputDirPPP, "ppcList_M_backup.ecsv"))
+            #data_ppc = vstack([tb_ppc_L, tb_ppc_M])
+            data_ppc = vstack([tb_ppc_L_, tb_ppc_M_])
+            data_ppc.write(os.path.join(self.outputDirPPP, "ppcList_backup.ecsv"), overwrite=True)
+
         ## check output ##
         data_ppp = np.load(
-            os.path.join(self.outputDirPPP, "obj_allo_tot.npy"), allow_pickle=True
+            os.path.join(self.outputDirPPP, "obj_allo_tot_backup.npy"), allow_pickle=True
         )
 
         return None
@@ -307,25 +325,39 @@ class GeneratePfsDesign(object):
         ## import qPlanner module ##
         from . import qPlan
 
-        ## read output from PPP ##
-        self.df_qplan, self.sdlr, self.figs_qplan = qPlan.run(
-            self.conf,
-            "ppcList.ecsv",
-            inputDirName=self.outputDirPPP,
-            outputDirName=self.outputDirQplan,
-            plotVisibility=plotVisibility,
-        )
-
-        ## qPlan result ##
-        self.resQPlan = {
-            ppc_code: (obstime, ppc_ra, ppc_dec)
-            for obstime, ppc_code, ppc_ra, ppc_dec in zip(
-                self.df_qplan["obstime"],
-                self.df_qplan["ppc_code"],
-                self.df_qplan["ppc_ra"],
-                self.df_qplan["ppc_dec"],
+        try:
+            self.df_qplan = pd.read_csv(os.path.join(self.outputDirQplan, "result.csv"))
+            obstimes = [pd.to_datetime(obstime_str) for obstime_str in self.df_qplan["obstime"]]
+            self.resQPlan = {
+                ppc_code: (obstime, ppc_ra, ppc_dec)
+                for obstime, ppc_code, ppc_ra, ppc_dec in zip(
+                    obstimes,
+                    self.df_qplan["ppc_code"],
+                    self.df_qplan["ppc_ra"],
+                    self.df_qplan["ppc_dec"],
+                )
+            }
+        except FileNotFoundError:
+            self.df_qplan, self.sdlr, self.figs_qplan = qPlan.run(
+                self.conf,
+                "ppcList_backup.ecsv",
+                inputDirName=self.outputDirPPP,
+                outputDirName=self.outputDirQplan,
+                plotVisibility=plotVisibility,
             )
-        }
+            self.resQPlan = {
+                ppc_code: (obstime, ppc_ra, ppc_dec)
+                for obstime, ppc_code, ppc_ra, ppc_dec in zip(
+                    self.df_qplan["obstime"],
+                    self.df_qplan["ppc_code"],
+                    self.df_qplan["ppc_ra"],
+                    self.df_qplan["ppc_dec"],
+                )
+            }
+
+        # for test design generation at different obstime
+        #self.resQPlan = {"PPC_L_uh006_1": (pd.to_datetime("2025-03-23T11:40:10.422Z", utc=True), 150.08220377, 2.18805709 ),
+        #                "PPC_L_uh006_2": (pd.to_datetime("2025-03-24T11:13:28.779Z", utc=True), 150.08220377, 2.18805709),}
 
         if plotVisibility is True:
             return self.figs_qplan
@@ -339,7 +371,9 @@ class GeneratePfsDesign(object):
         self.update_config()
 
         ## get a list of OBs ##
-        t = Table.read(os.path.join(self.outputDirPPP, "obList.ecsv"))
+        t1 = Table.read(os.path.join(self.outputDirPPP, "obList.ecsv"))
+        t2 = Table.read(os.path.join(self.outputDirPPP, "obList_backup.ecsv"))
+        t = vstack([t1, t2])
         proposal_ids = t["proposal_id"]
         ob_codes = t["ob_code"]
         ob_obj_ids = t["ob_obj_id"]
@@ -367,6 +401,16 @@ class GeneratePfsDesign(object):
         ob_psf_flux_error_is = t["ob_psf_flux_error_i"]
         ob_psf_flux_error_zs = t["ob_psf_flux_error_z"]
         ob_psf_flux_error_ys = t["ob_psf_flux_error_y"]
+        ob_total_flux_gs = t["ob_total_flux_g"]
+        ob_total_flux_rs = t["ob_total_flux_r"]
+        ob_total_flux_is = t["ob_total_flux_i"]
+        ob_total_flux_zs = t["ob_total_flux_z"]
+        ob_total_flux_ys = t["ob_total_flux_y"]
+        ob_total_flux_error_gs = t["ob_total_flux_error_g"]
+        ob_total_flux_error_rs = t["ob_total_flux_error_r"]
+        ob_total_flux_error_is = t["ob_total_flux_error_i"]
+        ob_total_flux_error_zs = t["ob_total_flux_error_z"]
+        ob_total_flux_error_ys = t["ob_total_flux_error_y"]
         obList = {
             f"{proposal_id}_{ob_code}": [
                 proposal_id,
@@ -396,8 +440,18 @@ class GeneratePfsDesign(object):
                 ob_psf_flux_error_i,
                 ob_psf_flux_error_z,
                 ob_psf_flux_error_y,
+                ob_total_flux_g,
+                ob_total_flux_r,
+                ob_total_flux_i,
+                ob_total_flux_z,
+                ob_total_flux_y,
+                ob_total_flux_error_g,
+                ob_total_flux_error_r,
+                ob_total_flux_error_i,
+                ob_total_flux_error_z,
+                ob_total_flux_error_y,
             ]
-            for proposal_id, ob_code, ob_obj_id, ob_cat_id, ob_ra, ob_dec, ob_pmra, ob_pmdec, ob_parallax, ob_equinox, ob_priority, ob_single_exptime, ob_filter_g, ob_filter_r, ob_filter_i, ob_filter_z, ob_filter_y, ob_psf_flux_g, ob_psf_flux_r, ob_psf_flux_i, ob_psf_flux_z, ob_psf_flux_y, ob_psf_flux_error_g, ob_psf_flux_error_r, ob_psf_flux_error_i, ob_psf_flux_error_z, ob_psf_flux_error_y in zip(
+            for proposal_id, ob_code, ob_obj_id, ob_cat_id, ob_ra, ob_dec, ob_pmra, ob_pmdec, ob_parallax, ob_equinox, ob_priority, ob_single_exptime, ob_filter_g, ob_filter_r, ob_filter_i, ob_filter_z, ob_filter_y, ob_psf_flux_g, ob_psf_flux_r, ob_psf_flux_i, ob_psf_flux_z, ob_psf_flux_y, ob_psf_flux_error_g, ob_psf_flux_error_r, ob_psf_flux_error_i, ob_psf_flux_error_z, ob_psf_flux_error_y,ob_total_flux_g, ob_total_flux_r, ob_total_flux_i, ob_total_flux_z, ob_total_flux_y, ob_total_flux_error_g, ob_total_flux_error_r, ob_total_flux_error_i, ob_total_flux_error_z, ob_total_flux_error_y in zip(
                 proposal_ids,
                 ob_codes,
                 ob_obj_ids,
@@ -425,12 +479,24 @@ class GeneratePfsDesign(object):
                 ob_psf_flux_error_is,
                 ob_psf_flux_error_zs,
                 ob_psf_flux_error_ys,
+                ob_total_flux_gs,
+                ob_total_flux_rs,
+                ob_total_flux_is,
+                ob_total_flux_zs,
+                ob_total_flux_ys,
+                ob_total_flux_error_gs,
+                ob_total_flux_error_rs,
+                ob_total_flux_error_is,
+                ob_total_flux_error_zs,
+                ob_total_flux_error_ys,
             )
         }
         logger.info(len(obList))
 
         ## get a list of assigned OBs ## FIXME (maybe we don't need to use this)
-        data_ppp = Table.read(os.path.join(self.outputDirPPP, "ppcList.ecsv"))
+        tb_ppp = Table.read(os.path.join(self.outputDirPPP, "ppcList.ecsv"))
+        tb_ppp_backup = Table.read(os.path.join(self.outputDirPPP, "ppcList_backup.ecsv"))
+        data_ppp = vstack([tb_ppp, tb_ppp_backup])
         # print(len(data_ppp))
         # print(t[:4])
 
@@ -461,7 +527,7 @@ class GeneratePfsDesign(object):
 
         ## write to csv ##
         filename = "ppp+qplan_output.csv"
-        header = "pointing,ra_center,dec_center,pa_center,ob_unique_code,proposal_id,ob_code,obj_id,cat_id,ra_target,dec_target,pmra_target,pmdec_target,parallax_target,equinox_target,target_class,ob_single_exptime,filter_g,filter_r,filter_i,filter_z,filter_y,psf_flux_g,psf_flux_r,psf_flux_i,psf_flux_z,psf_flux_y,psf_flux_error_g,psf_flux_error_r,psf_flux_error_i,psf_flux_error_z,psf_flux_error_y,obstime,obsdate_in_hst"
+        header = "pointing,ra_center,dec_center,pa_center,ob_unique_code,proposal_id,ob_code,obj_id,cat_id,ra_target,dec_target,pmra_target,pmdec_target,parallax_target,equinox_target,target_class,ob_single_exptime,filter_g,filter_r,filter_i,filter_z,filter_y,psf_flux_g,psf_flux_r,psf_flux_i,psf_flux_z,psf_flux_y,psf_flux_error_g,psf_flux_error_r,psf_flux_error_i,psf_flux_error_z,psf_flux_error_y,total_flux_g,total_flux_r,total_flux_i,total_flux_z,total_flux_y,total_flux_error_g,total_flux_error_r,total_flux_error_i,total_flux_error_z,total_flux_error_y,obstime,obsdate_in_hst"
         np.savetxt(
             os.path.join(self.outputDirPPP, filename),
             data,

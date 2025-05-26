@@ -199,7 +199,7 @@ def readTarget(mode, para):
         tgtDB = sa.create_engine(DBads)
 
         def query_target_from_db(proposalId):
-            sql = f"SELECT ob_code,obj_id,c.input_catalog_id,ra,dec,epoch,priority,pmra,pmdec,parallax,effective_exptime,single_exptime,qa_reference_arm,is_medium_resolution,proposal.proposal_id,rank,grade,allocated_time_lr+allocated_time_mr as \"allocated_time\",allocated_time_lr,allocated_time_mr,filter_g,filter_r,filter_i,filter_z,filter_y,psf_flux_g,psf_flux_r,psf_flux_i,psf_flux_z,psf_flux_y,psf_flux_error_g,psf_flux_error_r,psf_flux_error_i,psf_flux_error_z,psf_flux_error_y  FROM target JOIN proposal ON target.proposal_id=proposal.proposal_id JOIN input_catalog AS c ON target.input_catalog_id = c.input_catalog_id WHERE proposal.proposal_id in ('{proposalId}') AND c.active;"
+            sql = f"SELECT ob_code,obj_id,c.input_catalog_id,ra,dec,epoch,priority,pmra,pmdec,parallax,effective_exptime,single_exptime,qa_reference_arm,is_medium_resolution,proposal.proposal_id,rank,grade,allocated_time_lr+allocated_time_mr as \"allocated_time\",allocated_time_lr,allocated_time_mr,filter_g,filter_r,filter_i,filter_z,filter_y,psf_flux_g,psf_flux_r,psf_flux_i,psf_flux_z,psf_flux_y,psf_flux_error_g,psf_flux_error_r,psf_flux_error_i,psf_flux_error_z,psf_flux_error_y,total_flux_g,total_flux_r,total_flux_i,total_flux_z,total_flux_y,total_flux_error_g,total_flux_error_r,total_flux_error_i,total_flux_error_z,total_flux_error_y FROM target JOIN proposal ON target.proposal_id=proposal.proposal_id JOIN input_catalog AS c ON target.input_catalog_id = c.input_catalog_id WHERE proposal.proposal_id in ('{proposalId}') AND c.active;"
     
             conn = tgtDB.connect()
             query = conn.execute(sa.sql.text(sql))
@@ -242,6 +242,16 @@ def readTarget(mode, para):
                     "psf_flux_error_i",
                     "psf_flux_error_z",
                     "psf_flux_error_y",
+                    "total_flux_g",
+                    "total_flux_r",
+                    "total_flux_i",
+                    "total_flux_z",
+                    "total_flux_y",
+                    "total_flux_error_g",
+                    "total_flux_error_r",
+                    "total_flux_error_i",
+                    "total_flux_error_z",
+                    "total_flux_error_y",
                 ],
             )
             # convert column names
@@ -261,35 +271,49 @@ def readTarget(mode, para):
     
             df_tgt = removeObjIdDuplication(df_tgt)
     
-            df_tgt["psf_flux_g"][df_tgt["psf_flux_g"].isnull()] = 9e-5
-            df_tgt["psf_flux_r"][df_tgt["psf_flux_r"].isnull()] = 9e-5
-            df_tgt["psf_flux_i"][df_tgt["psf_flux_i"].isnull()] = 9e-5
-            df_tgt["psf_flux_z"][df_tgt["psf_flux_z"].isnull()] = 9e-5
-            df_tgt["psf_flux_y"][df_tgt["psf_flux_y"].isnull()] = 9e-5
+            df_tgt["psf_flux_g"][df_tgt["psf_flux_g"].isnull()] = np.nan
+            df_tgt["psf_flux_r"][df_tgt["psf_flux_r"].isnull()] = np.nan
+            df_tgt["psf_flux_i"][df_tgt["psf_flux_i"].isnull()] = np.nan
+            df_tgt["psf_flux_z"][df_tgt["psf_flux_z"].isnull()] = np.nan
+            df_tgt["psf_flux_y"][df_tgt["psf_flux_y"].isnull()] = np.nan
     
-            df_tgt["psf_flux_error_g"][df_tgt["psf_flux_error_g"].isnull()] = 9e-5
-            df_tgt["psf_flux_error_r"][df_tgt["psf_flux_error_r"].isnull()] = 9e-5
-            df_tgt["psf_flux_error_i"][df_tgt["psf_flux_error_i"].isnull()] = 9e-5
-            df_tgt["psf_flux_error_z"][df_tgt["psf_flux_error_z"].isnull()] = 9e-5
-            df_tgt["psf_flux_error_y"][df_tgt["psf_flux_error_y"].isnull()] = 9e-5
+            df_tgt["psf_flux_error_g"][df_tgt["psf_flux_error_g"].isnull()] = np.nan
+            df_tgt["psf_flux_error_r"][df_tgt["psf_flux_error_r"].isnull()] = np.nan
+            df_tgt["psf_flux_error_i"][df_tgt["psf_flux_error_i"].isnull()] = np.nan
+            df_tgt["psf_flux_error_z"][df_tgt["psf_flux_error_z"].isnull()] = np.nan
+            df_tgt["psf_flux_error_y"][df_tgt["psf_flux_error_y"].isnull()] = np.nan
+
+            df_tgt["total_flux_g"][df_tgt["total_flux_g"].isnull()] = np.nan
+            df_tgt["total_flux_r"][df_tgt["total_flux_r"].isnull()] = np.nan
+            df_tgt["total_flux_i"][df_tgt["total_flux_i"].isnull()] = np.nan
+            df_tgt["total_flux_z"][df_tgt["total_flux_z"].isnull()] = np.nan
+            df_tgt["total_flux_y"][df_tgt["total_flux_y"].isnull()] = np.nan
+    
+            df_tgt["total_flux_error_g"][df_tgt["total_flux_error_g"].isnull()] = np.nan
+            df_tgt["total_flux_error_r"][df_tgt["total_flux_error_r"].isnull()] = np.nan
+            df_tgt["total_flux_error_i"][df_tgt["total_flux_error_i"].isnull()] = np.nan
+            df_tgt["total_flux_error_z"][df_tgt["total_flux_error_z"].isnull()] = np.nan
+            df_tgt["total_flux_error_y"][df_tgt["total_flux_error_y"].isnull()] = np.nan
+
+            cols = ["psf_flux_g", "psf_flux_r", "psf_flux_i", "psf_flux_z", "psf_flux_y",
+                    "psf_flux_error_g", "psf_flux_error_r", "psf_flux_error_i", "psf_flux_error_z", "psf_flux_error_y",
+                    "total_flux_g", "total_flux_r", "total_flux_i", "total_flux_z", "total_flux_y",
+                    "total_flux_error_g", "total_flux_error_r", "total_flux_error_i", "total_flux_error_z", "total_flux_error_y"]
+            for col in cols:
+                # Convert the column to numeric; non-convertible values (e.g., "N/A") become np.nan.
+                df_tgt[col] = pd.to_numeric(df_tgt[col], errors='coerce')
     
             tb_tgt = Table.from_pandas(df_tgt)
 
             for col in ["filter_g","filter_r", "filter_i", "filter_z", "filter_y"]:
                 tb_tgt[col] = tb_tgt[col].astype("str")
-
-            for col in ["psf_flux_g","psf_flux_r", "psf_flux_i", "psf_flux_z", "psf_flux_y"]:
-                tb_tgt[col] = tb_tgt[col].astype(float)
-
-            for col in ["psf_flux_error_g","psf_flux_error_r", "psf_flux_error_i", "psf_flux_error_z", "psf_flux_error_y"]:
-                tb_tgt[col] = tb_tgt[col].astype(float)
     
             conn.close()
 
             return tb_tgt
 
     # only for S25A march run
-    proposalid = ['S25A-058QN', 'S25A-020QN', 'S25A-099QN', 'S25A-096QN', 'S25A-042QN', 'S25A-101QN']
+    proposalid = ['S25A-UH041-A']
 
     tb_tgt_lst = []
     for proposalid_ in proposalid:
@@ -308,7 +332,7 @@ def readTarget(mode, para):
     tb_tgt["exptime_assign"] = 0.0
     tb_tgt["exptime_done"] = 0.0  # observed exptime
 
-    tb_tgt.write("/home/wanqqq/examples/run_2503/S25A-queue/output/ppp/obList.ecsv", format="ascii.ecsv", overwrite=True) 
+    #tb_tgt.write("/home/wanqqq/workDir_pfs/run_2505/S25A-UH041-A/output/ppp/obList.ecsv", format="ascii.ecsv", overwrite=True) 
 
     if len(set(tb_tgt["single_exptime"])) > 1:
         logger.error(
@@ -666,6 +690,9 @@ def readTarget(mode, para):
             tb_tgt["exptime_PPP"][tb_tgt["i2_mag"]>=24]=1800
 
             logger.info(f"Input target list: {tb_tgt}")
+
+        if list(set(tb_tgt["proposal_id"])) == ["S25A-UH041-A"]:
+            tb_tgt["exptime_PPP"]=900
             
         # separete the sample by 'resolution' (L=false/M=true)
         tb_tgt_l = tb_tgt[tb_tgt["resolution"] == "L"]
@@ -1477,7 +1504,7 @@ def PPC_centers_single(_tb_tgt, nPPC):
         )
 
     #ppcList.write("/home/wanqqq/examples/run_2503/S25A-UH006-B/output/ppp/ppcList.ecsv", format="ascii.ecsv", overwrite=True) 
-    ppcList.write("/home/wanqqq/examples/run_2503/S25A-queue/output/ppp/ppcList.ecsv", format="ascii.ecsv", overwrite=True) 
+    ppcList.write("/home/wanqqq/workDir_pfs/run_2505/S25A-UH041-A/output/ppp/ppcList.ecsv", format="ascii.ecsv", overwrite=True) 
 
     logger.info(
         f"[S2] Determine pointing centers done ( nppc = {len(ppc_lst_fin):.0f}; takes {round(time.time()-time_start,3)} sec)"
@@ -1603,56 +1630,6 @@ def NetflowPreparation(_tb_tgt):
         # Priorities correspond to the magnitudes of bright stars (in most case for the 2022 June Engineering)
         "sci_P999": {
             "nonObservationCost": 200,
-            "partialObservationCost": 200,
-            "calib": False,
-        },
-        "sci_P20": {
-            "nonObservationCost": 190,
-            "partialObservationCost": 200,
-            "calib": False,
-        },
-        "sci_P21": {
-            "nonObservationCost": 180,
-            "partialObservationCost": 200,
-            "calib": False,
-        },
-        "sci_P22": {
-            "nonObservationCost": 170,
-            "partialObservationCost": 200,
-            "calib": False,
-        },
-        "sci_P23": {
-            "nonObservationCost": 160,
-            "partialObservationCost": 200,
-            "calib": False,
-        },
-        "sci_P24": {
-            "nonObservationCost": 150,
-            "partialObservationCost": 200,
-            "calib": False,
-        },
-        "sci_P25": {
-            "nonObservationCost": 140,
-            "partialObservationCost": 200,
-            "calib": False,
-        },
-        "sci_P26": {
-            "nonObservationCost": 130,
-            "partialObservationCost": 200,
-            "calib": False,
-        },
-        "sci_P27": {
-            "nonObservationCost": 120,
-            "partialObservationCost": 200,
-            "calib": False,
-        },
-        "sci_P28": {
-            "nonObservationCost": 110,
-            "partialObservationCost": 200,
-            "calib": False,
-        },
-        "sci_P29": {
-            "nonObservationCost": 105,
             "partialObservationCost": 200,
             "calib": False,
         },
@@ -2711,9 +2688,9 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
         ],
     )
 
-    #ppcList.write(
-    #    os.path.join(dirName, "ppcList.ecsv"), format="ascii.ecsv", overwrite=True
-    #)
+    ppcList.write(
+        os.path.join(dirName, "ppcList.ecsv"), format="ascii.ecsv", overwrite=True
+    )
 
     ob_code = _tb_tgt_tot["ob_code"].data
     ob_obj_id = _tb_tgt_tot["obj_id"].data
@@ -2730,7 +2707,7 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
     ob_resolution = _tb_tgt_tot["resolution"].data
     proposal_id = _tb_tgt_tot["proposal_id"].data
     proposal_rank = _tb_tgt_tot["rank"].data
-    ob_weight_best = _tb_tgt_tot["weight"].data
+    ob_weight_best = _tb_tgt_tot["rank_fin"].data
     ob_allocate_time_netflow = _tb_tgt_tot["exptime_assign"].data
     ob_filter_g = _tb_tgt_tot["filter_g"].data
     ob_filter_r = _tb_tgt_tot["filter_r"].data
@@ -2747,6 +2724,16 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
     ob_psf_flux_error_i = _tb_tgt_tot["psf_flux_error_i"].data
     ob_psf_flux_error_z = _tb_tgt_tot["psf_flux_error_z"].data
     ob_psf_flux_error_y = _tb_tgt_tot["psf_flux_error_y"].data
+    ob_total_flux_g = _tb_tgt_tot["total_flux_g"].data
+    ob_total_flux_r = _tb_tgt_tot["total_flux_r"].data
+    ob_total_flux_i = _tb_tgt_tot["total_flux_i"].data
+    ob_total_flux_z = _tb_tgt_tot["total_flux_z"].data
+    ob_total_flux_y = _tb_tgt_tot["total_flux_y"].data
+    ob_total_flux_error_g = _tb_tgt_tot["total_flux_error_g"].data
+    ob_total_flux_error_r = _tb_tgt_tot["total_flux_error_r"].data
+    ob_total_flux_error_i = _tb_tgt_tot["total_flux_error_i"].data
+    ob_total_flux_error_z = _tb_tgt_tot["total_flux_error_z"].data
+    ob_total_flux_error_y = _tb_tgt_tot["total_flux_error_y"].data
     ob_identify_code = _tb_tgt_tot["identify_code"].data
 
     obList = Table(
@@ -2783,6 +2770,16 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
             ob_psf_flux_error_i,
             ob_psf_flux_error_z,
             ob_psf_flux_error_y,
+            ob_total_flux_g,
+            ob_total_flux_r,
+            ob_total_flux_i,
+            ob_total_flux_z,
+            ob_total_flux_y,
+            ob_total_flux_error_g,
+            ob_total_flux_error_r,
+            ob_total_flux_error_i,
+            ob_total_flux_error_z,
+            ob_total_flux_error_y,
             ob_identify_code,
         ],
         names=[
@@ -2818,6 +2815,16 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
             "ob_psf_flux_error_i",
             "ob_psf_flux_error_z",
             "ob_psf_flux_error_y",
+            "ob_total_flux_g",
+            "ob_total_flux_r",
+            "ob_total_flux_i",
+            "ob_total_flux_z",
+            "ob_total_flux_y",
+            "ob_total_flux_error_g",
+            "ob_total_flux_error_r",
+            "ob_total_flux_error_i",
+            "ob_total_flux_error_z",
+            "ob_total_flux_error_y",
             "ob_identify_code",
         ],
     )
@@ -3002,13 +3009,13 @@ def run(
     # """
 
     # LR--------------------------------------------
-    #ppc_lst_l = PPP_centers(
-    #    tb_sel_l, nppc_l, [para_sci_l, para_exp_l, para_n_l], randomseed, multiProcess
-    #)
-
-    ppc_lst_l = PPC_centers_single(
-        tb_sel_l, nppc_l
+    ppc_lst_l = PPP_centers(
+        tb_sel_l, nppc_l, [para_sci_l, para_exp_l, para_n_l], randomseed, multiProcess
     )
+
+    #ppc_lst_l = PPC_centers_single(
+    #    tb_sel_l, nppc_l
+    #)
     
     tb_tgt_l1 = Table.copy(tb_tgt_l)
     tb_tgt_l1.meta["PPC"] = ppc_lst_l
@@ -3041,12 +3048,12 @@ def run(
     tb_tgt_l_fin = netflowAssign(tb_tgt_l1, tb_ppc_l_fin)
 
     # MR--------------------------------------------
-    #ppc_lst_m = PPP_centers(
-    #    tb_sel_m, nppc_m, [para_sci_m, para_exp_m, para_n_m], randomseed, multiProcess
-    #)
-    ppc_lst_m = PPC_centers_single(
-        tb_sel_m, nppc_m
+    ppc_lst_m = PPP_centers(
+        tb_sel_m, nppc_m, [para_sci_m, para_exp_m, para_n_m], randomseed, multiProcess
     )
+    #ppc_lst_m = PPC_centers_single(
+    #    tb_sel_m, nppc_m
+    #)
 
     tb_tgt_m1 = Table.copy(tb_tgt_m)
     tb_tgt_m1.meta["PPC"] = ppc_lst_m

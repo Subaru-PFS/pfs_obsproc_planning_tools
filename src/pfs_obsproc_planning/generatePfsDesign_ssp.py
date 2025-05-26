@@ -369,11 +369,11 @@ class GeneratePfsDesign_ssp(object):
 
         # check flux columns
         filter_category_sci = {
-            "g": ["g_hsc", "g_ps1", "g_sdss", "bp_gaia"],
-            "r": ["r_old_hsc", "r2_hsc", "r_ps1", "r_sdss", "g_gaia"],
-            "i": ["i_old_hsc", "i2_hsc", "i_ps1", "i_sdss", "rp_gaia"],
-            "z": ["z_hsc", "z_ps1", "z_sdss"],
-            "y": ["y_hsc", "y_ps1"],
+            "g": ["g_hsc", "g_ps1", "g_sdss", "bp_gaia", "None"],
+            "r": ["r_old_hsc", "r2_hsc", "r_ps1", "r_sdss", "g_gaia", "None"],
+            "i": ["i_old_hsc", "i2_hsc", "i_ps1", "i_sdss", "rp_gaia", "None"],
+            "z": ["z_hsc", "z_ps1", "z_sdss", "None"],
+            "y": ["y_hsc", "y_ps1", "None"],
             "j": [],
         }
 
@@ -580,6 +580,17 @@ class GeneratePfsDesign_ssp(object):
         tb_sky["cidx"] = tb_sky["cobraId"] - 1
         tb_fluxstd["cidx"] = tb_fluxstd["cobraId"] - 1
 
+        for band in ['g', 'r', 'i', 'z', 'y']:
+            flux_tot = f"total_flux_{band}"
+            flux_psf = f"psf_flux_{band}"
+            error_tot = f"total_flux_error_{band}"
+            error_psf = f"psf_flux_error_{band}"
+        
+            if flux_tot not in tb_sci.colnames:
+                tb_sci[flux_tot] = tb_sci[flux_psf]
+            if error_tot not in tb_sci.colnames:
+                tb_sci[error_tot] = tb_sci[error_psf]
+
         # validate input lists
         validate_success_sci = self.ssp_tgt_validate(tb_sci, ppc_code, "science")
         validate_success_sky = self.ssp_tgt_validate(tb_sky, ppc_code, "sky")
@@ -621,7 +632,7 @@ class GeneratePfsDesign_ssp(object):
         if duplicates_mask.any():
             validate_success = False
             duplicated_rows = df[duplicates_mask]["ppc_code"]
-            logger.error(
+            logger.warning(
                 f"[Validation of ppcList] Found duplicates in 'ppc_code':\n{duplicated_rows}"
             )
 
@@ -657,6 +668,7 @@ class GeneratePfsDesign_ssp(object):
 
         tb["ppc_obstime_utc"] = ppc_obstime_utc
 
+        ppccode_no_guide = []
         for tb_ppc_t in tb:
             code = tb_ppc_t["ppc_code"]
             guidestars = sfa.designutils.generate_guidestars_from_gaiadb(
@@ -684,14 +696,23 @@ class GeneratePfsDesign_ssp(object):
             logger.info(f"[Validation of ppcList] ({code}) {counts_str}")
 
             # individual warnings for any zero counts
+            cnt_tot = 0
             for cam, cnt in counts:
+                cnt_tot += cnt
                 if cnt == 0:
                     validate_success = False
                     logger.warning(
                         f"[Validation of ppcList] ({code}) AG‑Cam‑{cam} has zero guide stars"
                     )
+            if cnt_tot == 0:
+                ppccode_no_guide.append(code)
 
-        return validate_success
+        if len(ppccode_no_guide) > 0:
+            logger.error(
+                f"[Validation of ppcList] The following ppcs will be ignored due to lack of guide stars: {ppccode_no_guide}"
+            )
+
+        return validate_success, ppccode_no_guide
 
     def makedesign(self, WG):
         logger.info(f"[For SSP] Make design for {WG}")
@@ -737,7 +758,9 @@ class GeneratePfsDesign_ssp(object):
         tb_ppc["pfsDesignId"] = np.zeros(len(tb_ppc), dtype=np.int64)
         tb_ppc["pfsDesignId_hex"] = np.zeros(len(tb_ppc), dtype="U64")
 
-        validate_success_ppc = self.ssp_ppc_validate(tb_ppc)
+        validate_success_ppc,  ppccode_no_guide = self.ssp_ppc_validate(tb_ppc)
+
+        tb_ppc = tb_ppc[~np.in1d(tb_ppc["ppc_code"], ppccode_no_guide)]
 
         for tb_ppc_t in tb_ppc:
             ppc_code = tb_ppc_t["ppc_code"]
@@ -1175,7 +1198,7 @@ class GeneratePfsDesign_ssp(object):
                 os.path.join(self.workDir, "targets", wg_, "ppcList.ecsv")
             )
 
-            validate_success_ppc = self.ssp_ppc_validate(tb_ppc)
+            validate_success_ppc = self.ssp_ppc_validate(tb_ppc)[0]
 
             if validate_success_ppc:
                 logger.info(f"[Validation of ppcList] Validation passed ({wg_})")

@@ -29,8 +29,8 @@ from io import BytesIO
 
 from ginga.misc.Bunch import Bunch
 from ginga.misc.log import get_logger
-from IPython.core.display import display
-from IPython.display import Image
+#from IPython.core.display import display
+#from IPython.display import Image
 from qplan.entity import (
     PPC_OB,
     EnvironmentConfiguration,
@@ -164,7 +164,13 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
         # exp_time = float(exp_time) * 60.0  # assume table is in MINUTES
         exp_time = float(exp_time)  # exptime is in seconds
         pa = float(pa)
-        priority = float(priority)
+        """
+        if "backup" in ob_code:
+            priority = 0.3
+        else:
+            priority = 0 #float(priority)
+        #"""
+        priority = float(priority) 
 
         if resolution == "L":
             resolution = "low"
@@ -238,14 +244,14 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
         
         for item in start_time_list:
             next_date = (datetime.strptime(date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-            if date in item:
+            if (date in item) and parser.parse(f"{item} HST") > default_start_time:
                 start_override = parser.parse(f"{item} HST")
             elif (next_date in item) and parser.parse(f"{item} HST") < default_stop_time:
                 start_override = parser.parse(f"{item} HST")
 
         for item in stop_time_list:
             next_date = (datetime.strptime(date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-            if date in item:
+            if (date in item) and parser.parse(f"{item} HST") > default_start_time:
                 stop_override = parser.parse(f"{item} HST")
             elif (next_date in item) and parser.parse(f"{item} HST") < default_stop_time:
                 stop_override = parser.parse(f"{item} HST")
@@ -258,21 +264,68 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
         if stop_override is not None:
             stop_time = stop_override
         else:
-            stop_time = default_stop_time
+            stop_time = default_stop_time + timedelta(minutes=30)
 
         print(f"{date}: start obs. at {start_time}, stop obs. at {stop_time}")
 
-        rec.append(
-            Bunch(
-                date=date,  # date HST
-                starttime=start_time,  # time HST
-                stoptime=stop_time,  # time HST
-                categories=["open"],
-                skip=False,
-                note="",
-                data=cur_data,
+        if start_time == default_start_time and stop_time == default_stop_time:
+            # Calculate refocus start time as datetime
+            time_refocus_start = default_start_time + timedelta(minutes=(18.0 + float(conf['qplan']['overhead'])) * 2)
+            
+            # Then compute stop time based on start time
+            time_refocus_stop = time_refocus_start + timedelta(minutes=10.0)
+
+            print(time_refocus_start, time_refocus_stop)
+
+            #"""
+            rec.append(
+                Bunch(
+                    date=date,  # date HST
+                    starttime=start_time,  # time HST
+                    stoptime=parser.parse(f"{time_refocus_start.strftime('%Y-%m-%d %H:%M:%S')} HST"),  # time HST
+                    categories=["open"],
+                    skip=False,
+                    note="",
+                    data=cur_data,
+                )
             )
-        )
+            rec.append(
+                Bunch(
+                    date=date,  # date HST
+                    starttime=parser.parse(f"{time_refocus_stop.strftime('%Y-%m-%d %H:%M:%S')} HST"),  # time HST
+                    stoptime=stop_time,  # time HST
+                    categories=["open"],
+                    skip=False,
+                    note="",
+                    data=cur_data,
+                )
+            )
+            #"""
+            """
+            rec.append(
+                Bunch(
+                    date=date,  # date HST
+                    starttime=start_time,  # time HST
+                    stoptime=stop_time,  # time HST
+                    categories=["open"],
+                    skip=False,
+                    note="",
+                    data=cur_data,
+                )
+            )
+            #"""
+        else:
+            rec.append(
+                Bunch(
+                    date=date,  # date HST
+                    starttime=start_time,  # time HST
+                    stoptime=stop_time,  # time HST
+                    categories=["open"],
+                    skip=False,
+                    note="",
+                    data=cur_data,
+                )
+            )
 
     sdlr.set_schedule_info(rec)
     # set OB list to schedule from
