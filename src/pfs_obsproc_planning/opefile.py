@@ -168,7 +168,7 @@ class OpeFile(object):
             total_exptime = val[7]
             nframe = val[8]
             single_exptime = total_exptime/nframe
-            nframe_long = np.ceil(1800.0 / single_exptime)               
+            nframe_long = int(np.ceil(1800.0 / single_exptime))              
 
             # add PPC code
             repl1 = "### SCIENCE:START ###"
