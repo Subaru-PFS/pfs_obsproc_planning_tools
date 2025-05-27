@@ -1170,6 +1170,17 @@ class GeneratePfsDesign_ssp(object):
             tb_ppc_t["obstime_in_hst"] = tb_ppc_t["ppc_obstime"]
             tb_ppc_t["single_exptime"] = tb_ppc_t["ppc_exptime"]
             tb_ppc_t["n_split_frame"] = tb_ppc_t["ppc_nframes"]
+            
+            from astropy.coordinates import Angle
+            import astropy.units as u
+            
+            # Convert RA to HHMMSS.SS
+            ra_angle = Angle(tb_ppc_t["ppc_ra"] * u.deg)
+            tb_ppc_t["ppc_ra_str"] = ra_angle.to_string(unit=u.hourangle, sep='', precision=3, pad=True)
+            
+            # Convert Dec to DDMMSS.S
+            dec_angle = Angle(tb_ppc_t["ppc_dec"] * u.deg)
+            tb_ppc_t["ppc_dec_str"] = dec_angle.to_string(unit=u.deg, sep='', alwayssign=True, precision=2, pad=True)
 
             info = Table.to_pandas(
                 tb_ppc_t[
@@ -1177,8 +1188,8 @@ class GeneratePfsDesign_ssp(object):
                     "obsdate_in_hst",
                     "obstime_in_utc",
                     "pfs_design_id",
-                    "ppc_ra",
-                    "ppc_dec",
+                    "ppc_ra_str",
+                    "ppc_dec_str",
                     "obstime_in_hst",
                     "single_exptime",
                     "n_split_frame",
