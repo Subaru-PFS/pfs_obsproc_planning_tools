@@ -3,7 +3,7 @@
 
 import os
 import warnings
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -233,8 +233,14 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
     start_time_list = conf["qplan"].get("start_time", [])
     stop_time_list = conf["qplan"].get("stop_time", [])
 
-    for date in conf["qplan"]["obs_dates"]:
-        date_t = parser.parse(f"{date} 12:00 HST")
+    today = date.today().strftime("%Y-%m-%d")
+    for date_ in sorted(conf["qplan"]["obs_dates"], key=lambda d: parser.parse(d)):
+        date_t = parser.parse(f"{date_} 12:00 HST")
+        date_today = parser.parse(f"{today} 12:00 HST")
+
+        if date_today > date_t:
+            continue
+            
         observer.set_date(date_t)
         default_start_time = observer.evening_twilight_18()
         default_stop_time = observer.morning_twilight_18()
@@ -243,15 +249,15 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
         stop_override = None
         
         for item in start_time_list:
-            next_date = (datetime.strptime(date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-            if (date in item) and parser.parse(f"{item} HST") > default_start_time:
+            next_date = (datetime.strptime(date_, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+            if (date_ in item) and parser.parse(f"{item} HST") > default_start_time:
                 start_override = parser.parse(f"{item} HST")
             elif (next_date in item) and parser.parse(f"{item} HST") < default_stop_time:
                 start_override = parser.parse(f"{item} HST")
 
         for item in stop_time_list:
-            next_date = (datetime.strptime(date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-            if (date in item) and parser.parse(f"{item} HST") > default_start_time:
+            next_date = (datetime.strptime(date_, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+            if (date_ in item) and parser.parse(f"{item} HST") > default_start_time:
                 stop_override = parser.parse(f"{item} HST")
             elif (next_date in item) and parser.parse(f"{item} HST") < default_stop_time:
                 stop_override = parser.parse(f"{item} HST")
@@ -264,9 +270,9 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
         if stop_override is not None:
             stop_time = stop_override
         else:
-            stop_time = default_stop_time + timedelta(minutes=30)
+            stop_time = default_stop_time + timedelta(minutes=30) #extend TW18 by 30 min for real operation, just in case
 
-        print(f"{date}: start obs. at {start_time}, stop obs. at {stop_time}")
+        print(f"{date_}: start obs. at {start_time}, stop obs. at {stop_time}")
 
         if start_time == default_start_time and stop_time == default_stop_time:
             # Calculate refocus start time as datetime
@@ -280,7 +286,7 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
             #"""
             rec.append(
                 Bunch(
-                    date=date,  # date HST
+                    date=date_,  # date HST
                     starttime=start_time,  # time HST
                     stoptime=parser.parse(f"{time_refocus_start.strftime('%Y-%m-%d %H:%M:%S')} HST"),  # time HST
                     categories=["open"],
@@ -291,7 +297,7 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
             )
             rec.append(
                 Bunch(
-                    date=date,  # date HST
+                    date=date_,  # date HST
                     starttime=parser.parse(f"{time_refocus_stop.strftime('%Y-%m-%d %H:%M:%S')} HST"),  # time HST
                     stoptime=stop_time,  # time HST
                     categories=["open"],
@@ -304,7 +310,7 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
             """
             rec.append(
                 Bunch(
-                    date=date,  # date HST
+                    date=date_,  # date HST
                     starttime=start_time,  # time HST
                     stoptime=stop_time,  # time HST
                     categories=["open"],
@@ -317,7 +323,7 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
         else:
             rec.append(
                 Bunch(
-                    date=date,  # date HST
+                    date=date_,  # date HST
                     starttime=start_time,  # time HST
                     stoptime=stop_time,  # time HST
                     categories=["open"],
@@ -326,6 +332,7 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
                     data=cur_data,
                 )
             )
+        break
 
     sdlr.set_schedule_info(rec)
     # set OB list to schedule from

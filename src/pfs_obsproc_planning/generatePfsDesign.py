@@ -2,10 +2,12 @@
 # generatePfsDesign.py : PPP+qPlan+SFR
 
 import argparse
-import os
+import os, sys
 import warnings
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, date
 import pytz
+from dateutil import parser as ps
+import time
 
 hawaii_tz = pytz.timezone("Pacific/Honolulu")
 
@@ -15,7 +17,6 @@ import pandas as pd
 import toml
 from astropy.table import Table, vstack
 from loguru import logger
-logger.add("run_2505/S25A-queue/output/run_20250525.log", level="DEBUG", rotation="10 MB", retention="10 days", compression="zip")
 
 warnings.filterwarnings("ignore")
 
@@ -29,6 +30,14 @@ def read_conf(conf):
     config = toml.load(conf)
     return config
 
+def clear_folder(folder):
+    import shutil
+    for filename in os.listdir(folder):
+        file_path = os.path.join(folder, filename)
+        if os.path.isfile(file_path) or os.path.islink(file_path):
+            os.remove(file_path)
+        elif os.path.isdir(file_path):
+            shutil.rmtree(file_path)
 
 def check_versions(package, repo_path, version_desire):
     """Ensure the repository at repo_path is at the desired version."""
@@ -133,24 +142,37 @@ class GeneratePfsDesign(object):
             ## set obs_dates
             self.obs_dates = self.conf["qplan"]["obs_dates"]
 
+            self.today = date.today().strftime("%Y%m%d")
+            self.outputDir = os.path.join(self.workDir, f"output_{self.today}")
+            self.outputDirLog = os.path.join(
+                self.outputDir, "log"
+            )
             self.inputDirPPP = os.path.join(self.workDir, self.conf["ppp"]["inputDir"])
             self.outputDirPPP = os.path.join(
-                self.workDir, self.conf["ppp"]["outputDir"]
+                self.outputDir, "ppp"
             )
             self.outputDirQplan = os.path.join(
-                self.workDir, self.conf["qplan"]["outputDir"]
+                self.outputDir, "qplan"
+            )
+            self.outputDirDesign = os.path.join(
+                self.outputDir, "design"
+            )
+            self.outputDirOpe = os.path.join(
+                self.outputDir, "ope"
             )
             self.cobraCoachDir = os.path.join(
                 self.workDir, self.conf["sfa"]["cobra_coach_dir"]
             )
-
             # create input/output directories when not exist
             for d in [
+                self.outputDir,
                 self.inputDirPPP,
                 self.outputDirPPP,
                 self.outputDirQplan,
                 self.cobraCoachDir,
-                os.path.join(self.workDir, self.conf["ope"]["designPath"]),
+                self.outputDirDesign,
+                self.outputDirOpe,
+                self.outputDirLog,
             ]:
                 if not os.path.exists(d):
                     logger.info(f"{d} is not found and created")
@@ -162,9 +184,45 @@ class GeneratePfsDesign(object):
             self.conf["sfa"]["cobra_coach_dir_orig"] = self.conf["sfa"][
                 "cobra_coach_dir"
             ]
-            self.conf["sfa"]["cobra_coach_dir"] = self.cobraCoachDir
-        else:
-            self.cobraCoachDir = os.path.join(self.conf["sfa"]["cobra_coach_dir"])
+            self.conf["sfa"]["cobra_coach_dir"] = self.cobraCoachDir      
+
+            class Tee:
+                def __init__(self, *streams):
+                    self.streams = streams
+            
+                def write(self, message):
+                    for stream in self.streams:
+                        stream.write(message)
+                        stream.flush()
+            
+                def flush(self):
+                    for stream in self.streams:
+                        stream.flush()
+            
+            # Setup
+            log_path = os.path.join(self.outputDirLog, f"log_{self.today}.txt")
+            log_path_v = 1
+            while os.path.exists(log_path):
+                log_path = os.path.join(self.outputDirLog, f"log_{self.today}_v{log_path_v}.txt")
+                log_path_v += 1
+
+            print(log_path)
+            self.log_file = open(log_path, "w")
+            
+            # Redirect stdout and stderr to go to both terminal and file            
+            sys.stdout = Tee(sys.__stdout__, self.log_file)
+            sys.stderr = Tee(sys.__stderr__, self.log_file)
+            
+            # Setup loguru to also go to the same file AND screen
+            logger.remove()
+            logger.add(sys.stderr, level="INFO")     # Console output
+            logger.add(self.log_file, level="DEBUG", format="{time} {level} {message}", catch=True)      # File output
+            #"""
+            
+            try:
+                self.df_runtime = pd.read_csv(self.outputDir + "/runtime.csv")
+            except FileNotFoundError:
+                self.df_runtime = pd.DataFrame(np.array([[0, 0, 0]]), columns=["runtime_ppp", "runtime_qplan", "runtime_sfa"])
 
         # check versions of dependent packages
         def check_version_pfs(self, package):
@@ -197,35 +255,6 @@ class GeneratePfsDesign(object):
         repo_path = os.path.join(pfs.utils.__path__[0], "../../../")
         os.environ["PFS_UTILS_DIR"] = os.path.join(pfs.utils.__path__[0], "../../../")
 
-        """
-        instdata_dir = self.conf["sfa"]["pfs_instdata_dir"]
-        if os.path.exists(instdata_dir):
-            logger.info(f"pfs_instdata found: {instdata_dir}")
-        else:
-            if not os.path.exists(
-                os.path.join(self.workDir, os.path.basename(instdata_dir))
-            ):
-                logger.info(
-                    f"pfs_instdata not found at {instdata_dir}, clone from GitHub as {os.path.join(self.workDir, os.path.basename(instdata_dir))}"
-                )
-                _ = git.Repo.clone_from(
-                    "https://github.com/Subaru-PFS/pfs_instdata.git",
-                    os.path.join(self.workDir, os.path.basename(instdata_dir)),
-                    branch="master",
-                )
-            else:
-                logger.info(
-                    f"pfs_instdata found at {os.path.join(self.workDir, os.path.basename(instdata_dir))}, reuse it"
-                )
-
-            self.conf["sfa"]["pfs_instdata_dir_orig"] = self.conf["sfa"][
-                "pfs_instdata_dir"
-            ]
-            self.conf["sfa"]["pfs_instdata_dir"] = os.path.join(
-                self.workDir, os.path.basename(instdata_dir)
-            )
-        #"""
-
         return None
 
     def update_config(self):
@@ -244,6 +273,8 @@ class GeneratePfsDesign(object):
             from . import PPP_queue as PPP
         else:
             from . import PPP
+
+        time_start = time.time()
 
         ## update config before run PPP ##
         self.update_config()
@@ -265,6 +296,7 @@ class GeneratePfsDesign(object):
                 "sql_query": self.conf["ppp"]["sql_query"],
                 "DBPath_qDB": self.conf["queuedb"]["filepath"],
                 "visibility_check": self.conf["ppp"]["visibility_check"],
+                "proposalIds": self.conf["ppp"]["proposalIds"],
                 "obstimes": self.conf["qplan"]["obs_dates"],
                 "starttimes": self.conf["qplan"]["start_time"],
                 "stoptimes": self.conf["qplan"]["stop_time"],
@@ -302,6 +334,7 @@ class GeneratePfsDesign(object):
         )
 
         #only for queue
+        """
         if "queue" in self.workDir:
             #tb_ppc_L = Table.read(os.path.join(self.outputDirPPP, "ppcList_L.ecsv"))
             #tb_ppc_M = Table.read(os.path.join(self.outputDirPPP, "ppcList_M.ecsv"))
@@ -310,21 +343,28 @@ class GeneratePfsDesign(object):
             #data_ppc = vstack([tb_ppc_L, tb_ppc_M])
             data_ppc = vstack([tb_ppc_L_, tb_ppc_M_])
             data_ppc.write(os.path.join(self.outputDirPPP, "ppcList_backup.ecsv"), overwrite=True)
+        #"""
 
         ## check output ##
         data_ppp = np.load(
-            os.path.join(self.outputDirPPP, "obj_allo_tot_backup.npy"), allow_pickle=True
+            os.path.join(self.outputDirPPP, "obj_allo_tot.npy"), allow_pickle=True
         )
+
+        time_ppp = time.time() - time_start
+        self.df_runtime["runtime_ppp"] = time_ppp
 
         return None
 
     def runQPlan(self, plotVisibility=False):
+        time_start = time.time()
+        
         ## update config before run qPlan ##
         self.update_config()
 
         ## import qPlanner module ##
         from . import qPlan
 
+        """
         try:
             self.df_qplan = pd.read_csv(os.path.join(self.outputDirQplan, "result.csv"))
             obstimes = [pd.to_datetime(obstime_str) for obstime_str in self.df_qplan["obstime"]]
@@ -340,7 +380,7 @@ class GeneratePfsDesign(object):
         except FileNotFoundError:
             self.df_qplan, self.sdlr, self.figs_qplan = qPlan.run(
                 self.conf,
-                "ppcList_backup.ecsv",
+                "ppcList.ecsv",
                 inputDirName=self.outputDirPPP,
                 outputDirName=self.outputDirQplan,
                 plotVisibility=plotVisibility,
@@ -354,17 +394,41 @@ class GeneratePfsDesign(object):
                     self.df_qplan["ppc_dec"],
                 )
             }
+        #"""
 
         # for test design generation at different obstime
         #self.resQPlan = {"PPC_L_uh006_1": (pd.to_datetime("2025-03-23T11:40:10.422Z", utc=True), 150.08220377, 2.18805709 ),
         #                "PPC_L_uh006_2": (pd.to_datetime("2025-03-24T11:13:28.779Z", utc=True), 150.08220377, 2.18805709),}
 
+        self.df_qplan, self.sdlr, self.figs_qplan = qPlan.run(
+            self.conf,
+            "ppcList.ecsv",
+            inputDirName=self.outputDirPPP,
+            outputDirName=self.outputDirQplan,
+            plotVisibility=plotVisibility,
+        )
+        self.resQPlan = {
+            ppc_code: (obstime, ppc_ra, ppc_dec)
+            for obstime, ppc_code, ppc_ra, ppc_dec in zip(
+                self.df_qplan["obstime"],
+                self.df_qplan["ppc_code"],
+                self.df_qplan["ppc_ra"],
+                self.df_qplan["ppc_dec"],
+            )
+        }
+
         if plotVisibility is True:
+            time_qplan = time.time() - time_start
+            self.df_runtime["runtime_qplan"] = time_qplan
             return self.figs_qplan
         else:
+            time_qplan = time.time() - time_start
+            self.df_runtime["runtime_qplan"] = time_qplan
             return None
 
     def runSFA(self, clearOutput=False):
+        time_start = time.time()
+        
         from . import SFA
 
         ## update config before run SFA ##
@@ -372,7 +436,10 @@ class GeneratePfsDesign(object):
 
         ## get a list of OBs ##
         t1 = Table.read(os.path.join(self.outputDirPPP, "obList.ecsv"))
-        t2 = Table.read(os.path.join(self.outputDirPPP, "obList_backup.ecsv"))
+        try:
+            t2 = Table.read(os.path.join(self.outputDirPPP, "obList_backup.ecsv"))
+        except:
+            t2 = Table()
         t = vstack([t1, t2])
         proposal_ids = t["proposal_id"]
         ob_codes = t["ob_code"]
@@ -495,7 +562,10 @@ class GeneratePfsDesign(object):
 
         ## get a list of assigned OBs ## FIXME (maybe we don't need to use this)
         tb_ppp = Table.read(os.path.join(self.outputDirPPP, "ppcList.ecsv"))
-        tb_ppp_backup = Table.read(os.path.join(self.outputDirPPP, "ppcList_backup.ecsv"))
+        try:
+            tb_ppp_backup = Table.read(os.path.join(self.outputDirPPP, "ppcList_backup.ecsv"))
+        except:
+            tb_ppp_backup = Table()
         data_ppp = vstack([tb_ppp, tb_ppp_backup])
         # print(len(data_ppp))
         # print(t[:4])
@@ -551,16 +621,24 @@ class GeneratePfsDesign(object):
         filename = "ppp+qplan_output.csv"
         df = pd.read_csv(os.path.join(self.outputDirPPP, filename))
 
+        clear_folder(self.outputDirDesign)
         listPointings, dictPointings, pfsDesignIds, observation_dates_in_hst = SFA.run(
             self.conf,
-            workDir=self.workDir,
+            workDir=self.outputDir,
             repoDir=self.repoDir,
             clearOutput=clearOutput,
         )
 
         ## ope file generation ##
-        ope = OpeFile(conf=self.conf, workDir=self.workDir)
+        clear_folder(self.outputDirOpe)
+        ope = OpeFile(conf=self.conf, workDir=self.outputDir)
         for obsdate in self.obs_dates:
+            date_t = ps.parse(f"{obsdate} 12:00 HST")
+            date_today = ps.parse(f"{self.today} 12:00 HST")
+    
+            if date_today > date_t:
+                continue
+            
             logger.info(f"generating ope file for {obsdate}...")
             ope.loadTemplate()  # initialize
             ope.update_obsdate(obsdate)  # update observation date
@@ -606,10 +684,15 @@ class GeneratePfsDesign(object):
             info = info.sort_values(by="obstime_in_utc", ascending=True).values.tolist()
             ope.update_design(info)
             ope.write()  # save file
+
+            break
         # for pointing, (k,v) in zip(listPointings, pfsDesignIds.items()):
         #    ope.loadTemplate() # initialize
         #    ope.update(pointing=pointing, dictPointings=dictPointings, designId=v, observationTime=k) # update contents
         #    ope.write() # save file
+
+        time_sfa = time.time() - time_start
+        self.df_runtime["runtime_sfa"] = time_sfa
 
         return None
 
@@ -619,10 +702,13 @@ class GeneratePfsDesign(object):
         ## update config before run SFA ##
         self.update_config()
 
-        parentPath = os.path.join(
-            self.workDir, self.conf["validation"]["parentPath"]
-        )
-        figpath = os.path.join(self.workDir, self.conf["validation"]["figpath"])
+        parentPath = self.outputDir
+        figpath = os.path.join(self.outputDir, "figure_pfsDesign_validation")
+
+        if not os.path.exists(figpath):
+            os.makedirs(figpath)
+
+        clear_folder(figpath)
 
         validation.validation(
             parentPath,
@@ -633,8 +719,15 @@ class GeneratePfsDesign(object):
         )
 
         logger.info(f"validation plots saved under {figpath}")
+        logger.info(f"{self.df_runtime}")
+
+        (self.df_runtime).to_csv((self.outputDir + "/runtime.csv"), index = False)
 
         return None
+
+    def close(self):
+        if hasattr(self, "log_file") and not self.log_file.closed:
+            self.log_file.close()
 
 
 def get_arguments():

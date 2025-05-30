@@ -24,7 +24,7 @@ from sklearn.cluster import DBSCAN, HDBSCAN, AgglomerativeClustering
 from sklearn.neighbors import KernelDensity
 from qplan import q_db, q_query, entity
 from qplan.util.site import site_subaru as observer
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
 from ginga.misc.log import get_logger
 
 logger_qplan = get_logger("qplan_test", null=True)
@@ -356,10 +356,11 @@ def readTarget(mode, para):
 
     # only for S25A march run
     #proposalid = ['S25A-058QN', 'S25A-020QN', 'S25A-099QN', 'S25A-096QN', 'S25A-042QN', 'S25A-101QN']
-    proposalid = ['S25A-139QN', "S25A-036QN", "S25A-102QN", "S25A-028QN", "S25A-137QN", "S25A-074QN", "S25A-107QN", "S25A-080QN", "S25A-094QN", "S25A-113QN", 'S25A-064QN']
+    #proposalid = ['S25A-139QN', "S25A-036QN", "S25A-102QN", "S25A-028QN", "S25A-137QN", "S25A-074QN", "S25A-107QN", "S25A-080QN", "S25A-094QN", "S25A-113QN", 'S25A-064QN']
     #proposalid = ['S25A-064QN']
     #proposalid = ['S25A-058QN', 'S25A-020QN', 'S25A-099QN', 'S25A-096QN', 'S25A-042QN', 'S25A-101QN'，'S25A-139QN', "S25A-036QN", "S25A-102QN", "S25A-028QN", "S25A-137QN", "S25A-074QN", "S25A-107QN", "S25A-080QN", "S25A-094QN", "S25A-113QN"，'S25A-064QN']
-
+    proposalid = para["proposalIds"]
+    
     tb_tgt_lst = []
     for proposalid_ in proposalid:
         tb_tgt_lst.append(query_target_from_db(proposalid_))
@@ -453,8 +454,8 @@ def readTarget(mode, para):
                     * (tb_tgt["ob_code"] == ex_ob.ob_key[1])
                 ] = exptime_exe_fin
 
-        tt_=Table(np.array(tt),names=["N","psl_id","ob_code","exptime","ref_arm","eff_exptime_done_real", "eff_exptime_done_real_b", "eff_exptime_done_real_r", "eff_exptime_done_real_m", "eff_exptime_done_real_n", "eff_exptime_done_rec","exptime_done_real"])
-        tt_.write("/home/wanqqq/workDir_pfs/run_2505/S25A-queue/output/tgt_queueDB_backup.csv",overwrite=True)
+        tb_queuedb=Table(np.array(tt),names=["N","psl_id","ob_code","exptime","ref_arm","eff_exptime_done_real", "eff_exptime_done_real_b", "eff_exptime_done_real_r", "eff_exptime_done_real_m", "eff_exptime_done_real_n", "eff_exptime_done_rec","exptime_done_real"])
+        #tt_.write("/home/wanqqq/workDir_pfs/run_2505/S25A-queue/output/tgt_queueDB_backup.csv",overwrite=True)
         #"""
         
         tb_tgt["exptime"] = tb_tgt["exptime_usr"] - tb_tgt["exptime_done"]
@@ -528,7 +529,7 @@ def readTarget(mode, para):
         logger.info(
             f"[S1] n_tgt_low = {len(tb_tgt_l):.0f}, n_tgt_medium = {len(tb_tgt_m):.0f}"
         )
-        return tb_tgt, tb_tgt_l, tb_tgt_m, tb_tgt_l, tb_tgt_m
+        return tb_tgt, tb_tgt_l, tb_tgt_m, tb_queuedb, tb_queuedb
 
 def count_N(_tb_tgt):
     # calculate local count of targets (bin_width is 1 deg in ra&dec)
@@ -748,7 +749,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
 
     if len(_tb_tgt) == 0:
         logger.warning(f"[S2] no targets")
-        return np.array(ppc_lst)
+        return np.array(ppc_lst), Table()
 
     _tb_tgt = sciRank_pri(_tb_tgt)
 
@@ -895,8 +896,8 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
     # write
     nPPC = len(ppc_lst_fin)
     resol = _tb_tgt["resolution"][0]
-    ppc_code = [f"PPC_{resol}_{datetime.now().strftime('%Y-%m-%d')}_{int(nn + 1)}_backup" for nn in range(nPPC)]
-    #ppc_code = [f"PPC_{resol}_{datetime.now().strftime('%Y-%m-%d')}_{int(nn + 1)}" for nn in range(nPPC)]
+    #ppc_code = [f"PPC_{resol}_{datetime.now().strftime('%Y-%m-%d')}_{int(nn + 1)}_backup" for nn in range(nPPC)]
+    ppc_code = [f"PPC_{resol}_{datetime.now().strftime('%Y-%m-%d')}_{int(nn + 1)}" for nn in range(nPPC)]
     ppc_ra = ppc_lst_fin[:,1]
     ppc_dec = ppc_lst_fin[:,2]
     ppc_pa = ppc_lst_fin[:,3]
@@ -957,16 +958,12 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
                 np.str_,
             ],
         )
-
-    #ppcList.write("/home/wanqqq/examples/run_2505/S25A-UH006-B/output/ppp/ppcList.ecsv", format="ascii.ecsv", overwrite=True) 
-    ppcList.write(f"/home/wanqqq/workDir_pfs/run_2505/S25A-queue/output/ppp/ppcList_{resol}_backup.ecsv", format="ascii.ecsv", overwrite=True) 
-    #ppcList.write(f"/home/wanqqq/workDir_pfs/run_2505/S25A-queue/output/ppp/ppcList_{resol}.ecsv", format="ascii.ecsv", overwrite=True) 
         
     logger.info(
         f"[S2] Determine pointing centers done ( nppc = {len(ppc_lst_fin):.0f}; takes {round(time.time()-time_start,3)} sec)"
     )
 
-    return ppc_lst_fin
+    return ppc_lst_fin, ppcList
 
 def ppc_DBSCAN(_tb_tgt):
     # separate pointings into different group (skip due to FH upper limit -24-02-07; NEED TO FIX)
@@ -1825,25 +1822,25 @@ def fun2opt(para, info):
         para_sci = 1.5
         lst_ppc = PPP_centers(
             _tb_tgt, nppc_, [para_sci, para_exp, para_n], randomseed, True
-        )
+        )[0]
     if n_rank > 1 and n_exptime <= 1:
         para_sci, para_n = para
         para_exp = 0
         lst_ppc = PPP_centers(
             _tb_tgt, nppc_, [para_sci, para_exp, para_n], randomseed, True
-        )
+        )[0]
     if n_rank > 1 and n_exptime > 1:
         para_sci, para_exp, para_n = para
         lst_ppc = PPP_centers(
             _tb_tgt, nppc_, [para_sci, para_exp, para_n], randomseed, True
-        )
+        )[0]
     if n_rank <= 1 and n_exptime <= 1:
         para_n = para[0]
         para_sci = 1.5
         para_exp = 0
         lst_ppc = PPP_centers(
             _tb_tgt, nppc_, [para_sci, para_exp, para_n], randomseed, True
-        )
+        )[0]
         # ppc_id, ppc_ra, ppc_dec, ppc_pa, ppc_weight, ppc_fh, ppc_FE
 
     tem1 = (
@@ -1975,7 +1972,7 @@ def optimize(_tb_tgt, nppc_, crMode, randomSeed, TraCollision):
     return para_sci, para_exp, para_n
 
 
-def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
+def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/", backup=False):
     """write outputs into ecsv files
 
     Parameters
@@ -2175,11 +2172,18 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
         ],
     )
 
-    obList.write(
-        os.path.join(dirName, "obList_backup.ecsv"), format="ascii.ecsv", overwrite=True
-    )
-
-    np.save(os.path.join(dirName, "obj_allo_tot_backup.npy"), _tb_ppc_tot)
+    if not backup:
+        obList.write(
+            os.path.join(dirName, "obList.ecsv"), format="ascii.ecsv", overwrite=True
+        )
+    
+        np.save(os.path.join(dirName, "obj_allo_tot.npy"), _tb_ppc_tot)
+    else:
+        obList.write(
+            os.path.join(dirName, "obList_backup.ecsv"), format="ascii.ecsv", overwrite=True
+        )
+    
+        np.save(os.path.join(dirName, "obj_allo_tot_backup.npy"), _tb_ppc_tot)
 
 
 def plotCR(CR, sub_lst, _tb_ppc_tot, dirName="output/", show_plots=False):
@@ -2280,13 +2284,20 @@ def run(
     numReservedFibers=0,
     fiberNonAllocationCost=0.0,
     show_plots=False,
+    backup=False,
 ):
     global bench
     bench = bench_info
 
-    tb_tgt, tb_sel_l, tb_sel_m, tb_tgt_l, tb_tgt_m = readTarget(
+    tb_tgt, tb_tgt_l, tb_tgt_m, tb_queuedb, tb_queuedb = readTarget(
         readtgt_con["mode_readtgt"], readtgt_con["para_readtgt"]
     )
+
+    today = date.today().strftime("%Y%m%d")
+    if backup:
+        tb_queuedb.write(os.path.join(dirName, f"tgt_queueDB_{today}_backup.csv"), overwrite=True)
+    else:
+        tb_queuedb.write(os.path.join(dirName, f"tgt_queueDB_{today}.csv"), overwrite=True)
 
     randomseed = 2
 
@@ -2296,11 +2307,11 @@ def run(
     #"""
     # LR--------------------------------------------
     #ppc_lst_l = PPP_centers(
-    #    tb_sel_l, nppc_l, [para_sci_l, para_exp_l, para_n_l], randomseed, multiProcess
+    #    tb_tgt_l, nppc_l, [para_sci_l, para_exp_l, para_n_l], randomseed, multiProcess
     #)
 
-    ppc_lst_l = PPP_centers(
-        tb_sel_l, nppc_l
+    ppc_lst_l, tb_ppcList_l = PPP_centers(
+        tb_tgt_l, nppc_l
     )
     
     tb_tgt_l1 = Table.copy(tb_tgt_l)
@@ -2320,10 +2331,10 @@ def run(
 
     # MR--------------------------------------------
     #ppc_lst_m = PPP_centers(
-    #    tb_sel_m, nppc_m, [para_sci_m, para_exp_m, para_n_m], randomseed, multiProcess
+    #    tb_tgt_m, nppc_m, [para_sci_m, para_exp_m, para_n_m], randomseed, multiProcess
     #)
-    ppc_lst_m = PPP_centers(
-        tb_sel_m, nppc_m
+    ppc_lst_m, tb_ppcList_m = PPP_centers(
+        tb_tgt_m, nppc_m
     )
 
     tb_tgt_m1 = Table.copy(tb_tgt_m)
@@ -2343,16 +2354,16 @@ def run(
 
     if nppc_l > 0:
         if nppc_m > 0:
-            tb_ppc_tot = vstack([tb_ppc_l, tb_ppc_m])
+            tb_ppc_tot = vstack([tb_ppcList_l, tb_ppcList_m])
             tb_tgt_tot = vstack([tb_tgt_l_fin, tb_tgt_m_fin])
         else:
-            tb_ppc_tot = tb_ppc_l.copy()
+            tb_ppc_tot = tb_ppcList_l.copy()
             tb_tgt_tot = tb_tgt_l_fin.copy()
             if len(tb_tgt_m) > 0:
                 logger.warning("no allocated time for MR")
     else:
         if nppc_m > 0:
-            tb_ppc_tot = tb_ppc_m.copy()
+            tb_ppc_tot = tb_ppcList_m.copy()
             tb_tgt_tot = tb_tgt_m_fin.copy()
             if len(tb_tgt_l) > 0:
                 logger.warning("no allocated time for LR")
@@ -2360,4 +2371,9 @@ def run(
             logger.error("Please specify n_pcc_l or n_pcc_m")
     #"""
 
-    output(tb_ppc_tot, tb_tgt_tot, dirName=dirName)
+    if not backup:
+        tb_ppc_tot.write(os.path.join(dirName, f"ppcList.ecsv"), format="ascii.ecsv", overwrite=True) 
+    else:
+        tb_ppc_tot.write(os.path.join(dirName, f"ppcList_backup.ecsv"), format="ascii.ecsv", overwrite=True) 
+    
+    output(tb_ppc_tot, tb_tgt_tot, dirName=dirName, backup=backup)

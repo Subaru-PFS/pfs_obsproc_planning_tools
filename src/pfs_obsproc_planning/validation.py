@@ -93,9 +93,6 @@ def validation(parentPath, figpath, save, show, ssp):
         .map(lambda x: int(x, 16))
     )
 
-    if not os.path.exists(figpath):
-        os.makedirs(figpath)
-
     # This routine just combines a few cells in "trial" section
     df_ch = pldes.init_check_design()
     for designId in pfsDesignIds:
