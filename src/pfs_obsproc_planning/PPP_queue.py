@@ -378,8 +378,13 @@ def readTarget(mode, para):
     tb_tgt["exptime_assign"] = 0.0
     tb_tgt["exptime_done"] = 0.0  # observed exptime
 
-    ## only for 020QN, need to confirm with Pyo-san, FIX needed!!
+    ## --only for 020QN, need to confirm with Pyo-san-- updated FH (250530), FIX needed!!
+    #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-058QN'] = 19848.75
     tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-020QN'] = 3237.0
+    #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-099QN'] = 6803.00
+    #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-096QN'] = 2661.00
+    #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-042QN'] = 18758.75
+    #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-101QN'] = 4363.50
 
     if para["visibility_check"]:
         tb_tgt = visibility_checker(tb_tgt, para["obstimes"], para["starttimes"], para["stoptimes"])
@@ -439,6 +444,12 @@ def readTarget(mode, para):
                 elif arm == 'm':
                     exptime_exe = sum(exp.effective_exptime_m or 0 for exp in exps)
 
+                if len(tb_tgt[
+                    (tb_tgt["proposal_id"] == ex_ob.ob_key[0])
+                    * (tb_tgt["ob_code"] == ex_ob.ob_key[1])
+                ])==0:
+                    continue
+                    
                 exptime_usr = tb_tgt[
                     (tb_tgt["proposal_id"] == ex_ob.ob_key[0])
                     * (tb_tgt["ob_code"] == ex_ob.ob_key[1])
@@ -740,7 +751,7 @@ def objective1(params, _tb_tgt):
     score = weight_pall * N_Pall + weight_p0 * N_P0 + weight_p999 * N_P999
     return -score
 
-def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=True):
+def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=True, backup=False):
     # determine pointing centers
     time_start = time.time()
     logger.info(f"[S2] Determine pointing centers started")
@@ -896,8 +907,10 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
     # write
     nPPC = len(ppc_lst_fin)
     resol = _tb_tgt["resolution"][0]
-    #ppc_code = [f"PPC_{resol}_{datetime.now().strftime('%Y-%m-%d')}_{int(nn + 1)}_backup" for nn in range(nPPC)]
-    ppc_code = [f"PPC_{resol}_{datetime.now().strftime('%Y-%m-%d')}_{int(nn + 1)}" for nn in range(nPPC)]
+    if backup:
+        ppc_code = [f"PPC_{resol}_{datetime.now().strftime('%Y-%m-%d')}_{int(nn + 1)}_backup" for nn in range(nPPC)]
+    else:
+        ppc_code = [f"PPC_{resol}_{datetime.now().strftime('%Y-%m-%d')}_{int(nn + 1)}" for nn in range(nPPC)]
     ppc_ra = ppc_lst_fin[:,1]
     ppc_dec = ppc_lst_fin[:,2]
     ppc_pa = ppc_lst_fin[:,3]
@@ -2311,7 +2324,7 @@ def run(
     #)
 
     ppc_lst_l, tb_ppcList_l = PPP_centers(
-        tb_tgt_l, nppc_l
+        tb_tgt_l, nppc_l, backup=backup
     )
     
     tb_tgt_l1 = Table.copy(tb_tgt_l)
@@ -2334,7 +2347,7 @@ def run(
     #    tb_tgt_m, nppc_m, [para_sci_m, para_exp_m, para_n_m], randomseed, multiProcess
     #)
     ppc_lst_m, tb_ppcList_m = PPP_centers(
-        tb_tgt_m, nppc_m
+        tb_tgt_m, nppc_m, backup=backup
     )
 
     tb_tgt_m1 = Table.copy(tb_tgt_m)

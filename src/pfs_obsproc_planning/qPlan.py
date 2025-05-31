@@ -46,7 +46,7 @@ from qplan.util.site import site_subaru as observer
 from dateutil import parser
 
 
-def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False):
+def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False, starttime_backup=[], stoptime_backup=[]):
     # log file will let us debug scheduling, check it for error and debug messages
     # NOTE: any python (stdlib) logging compatible logger will work
     logger = get_logger(
@@ -164,13 +164,13 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
         # exp_time = float(exp_time) * 60.0  # assume table is in MINUTES
         exp_time = float(exp_time)  # exptime is in seconds
         pa = float(pa)
-        """
-        if "backup" in ob_code:
-            priority = 0.3
-        else:
-            priority = 0 #float(priority)
         #"""
-        priority = float(priority) 
+        if "backup" in ob_code:
+            priority = 0
+        else:
+            priority = float(priority)
+        #"""
+        #priority = 0 #float(priority) 
 
         if resolution == "L":
             resolution = "low"
@@ -243,7 +243,7 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
             
         observer.set_date(date_t)
         default_start_time = observer.evening_twilight_18()
-        default_stop_time = observer.morning_twilight_18()
+        default_stop_time = observer.morning_twilight_18() + timedelta(minutes=30) #extend TW18 by 30 min for real operation, just in case
 
         start_override = None
         stop_override = None
@@ -270,7 +270,7 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
         if stop_override is not None:
             stop_time = stop_override
         else:
-            stop_time = default_stop_time + timedelta(minutes=30) #extend TW18 by 30 min for real operation, just in case
+            stop_time = default_stop_time
 
         print(f"{date_}: start obs. at {start_time}, stop obs. at {stop_time}")
 
@@ -284,42 +284,73 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
             print(time_refocus_start, time_refocus_stop)
 
             #"""
-            rec.append(
-                Bunch(
-                    date=date_,  # date HST
-                    starttime=start_time,  # time HST
-                    stoptime=parser.parse(f"{time_refocus_start.strftime('%Y-%m-%d %H:%M:%S')} HST"),  # time HST
-                    categories=["open"],
-                    skip=False,
-                    note="",
-                    data=cur_data,
+            if len(starttime_backup) == 0:
+                rec.append(
+                    Bunch(
+                        date=date_,  # date HST
+                        starttime=start_time,  # time HST
+                        stoptime=parser.parse(f"{time_refocus_start.strftime('%Y-%m-%d %H:%M:%S')} HST"),  # time HST
+                        categories=["open"],
+                        skip=False,
+                        note="",
+                        data=cur_data,
+                    )
                 )
-            )
-            rec.append(
-                Bunch(
-                    date=date_,  # date HST
-                    starttime=parser.parse(f"{time_refocus_stop.strftime('%Y-%m-%d %H:%M:%S')} HST"),  # time HST
-                    stoptime=stop_time,  # time HST
-                    categories=["open"],
-                    skip=False,
-                    note="",
-                    data=cur_data,
+                rec.append(
+                    Bunch(
+                        date=date_,  # date HST
+                        starttime=parser.parse(f"{time_refocus_stop.strftime('%Y-%m-%d %H:%M:%S')} HST"),  # time HST
+                        stoptime=stop_time,  # time HST
+                        categories=["open"],
+                        skip=False,
+                        note="",
+                        data=cur_data,
+                    )
                 )
-            )
+            else:
+                for ii in range(len(starttime_backup)):
+                    if starttime_backup[ii] < default_start_time:
+                        starttime_backup[ii] = default_start_time
+                    if stoptime_backup[ii] > default_stop_time:
+                        stoptime_backup[ii] = default_stop_time
+                        
+                    if time_refocus_start >= starttime_backup[ii] and time_refocus_stop <= stoptime_backup[ii]:
+                        rec.append(
+                            Bunch(
+                                date=date_,  # date HST
+                                starttime=starttime_backup[ii],  # time HST
+                                stoptime=parser.parse(f"{time_refocus_start.strftime('%Y-%m-%d %H:%M:%S')} HST"),  # time HST
+                                categories=["open"],
+                                skip=False,
+                                note="",
+                                data=cur_data,
+                            )
+                        )
+                        rec.append(
+                            Bunch(
+                                date=date_,  # date HST
+                                starttime=parser.parse(f"{time_refocus_stop.strftime('%Y-%m-%d %H:%M:%S')} HST"),  # time HST
+                                stoptime=stoptime_backup[ii],  # time HST
+                                categories=["open"],
+                                skip=False,
+                                note="",
+                                data=cur_data,
+                            )
+                        )
+                    else:
+                        rec.append(
+                            Bunch(
+                                date=date_,  # date HST
+                                starttime=starttime_backup[ii],
+                                stoptime=stoptime_backup[ii],  # time HST
+                                categories=["open"],
+                                skip=False,
+                                note="",
+                                data=cur_data,
+                            )
+                        ) 
             #"""
-            """
-            rec.append(
-                Bunch(
-                    date=date_,  # date HST
-                    starttime=start_time,  # time HST
-                    stoptime=stop_time,  # time HST
-                    categories=["open"],
-                    skip=False,
-                    note="",
-                    data=cur_data,
-                )
-            )
-            #"""
+            
         else:
             rec.append(
                 Bunch(
@@ -421,7 +452,6 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
         return df, targets
 
     df, targets = make_schedule_table(slots)
-    df.to_csv(os.path.join(outputDirName, "result.csv"))
     print(df)
 
     # plot visibility plots for each night
