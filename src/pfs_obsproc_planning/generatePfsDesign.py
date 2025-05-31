@@ -441,7 +441,7 @@ class GeneratePfsDesign(object):
                 print(f"Gap: start at {last_stop}, stop at {TW18_stop}")
 
         if len(starttime_backup) > 0:
-            #self.runPPP(60, 60, show_plots=False, backup=True)
+            self.runPPP(60, 60, show_plots=False, backup=True)
 
             self.df_qplan_, self.sdlr_, self.figs_qplan_ = qPlan.run(
                 self.conf,
