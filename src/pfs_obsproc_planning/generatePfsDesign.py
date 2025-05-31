@@ -144,9 +144,6 @@ class GeneratePfsDesign(object):
 
             self.today = date.today().strftime("%Y%m%d")
             self.outputDir = os.path.join(self.workDir, f"output_{self.today}")
-            self.outputDirLog = os.path.join(
-                self.outputDir, "log"
-            )
             self.inputDirPPP = os.path.join(self.workDir, self.conf["ppp"]["inputDir"])
             self.outputDirPPP = os.path.join(
                 self.outputDir, "ppp"
@@ -172,7 +169,6 @@ class GeneratePfsDesign(object):
                 self.cobraCoachDir,
                 self.outputDirDesign,
                 self.outputDirOpe,
-                self.outputDirLog,
             ]:
                 if not os.path.exists(d):
                     logger.info(f"{d} is not found and created")
@@ -186,39 +182,6 @@ class GeneratePfsDesign(object):
             ]
             self.conf["sfa"]["cobra_coach_dir"] = self.cobraCoachDir      
 
-            class Tee:
-                def __init__(self, *streams):
-                    self.streams = streams
-            
-                def write(self, message):
-                    for stream in self.streams:
-                        stream.write(message)
-                        stream.flush()
-            
-                def flush(self):
-                    for stream in self.streams:
-                        stream.flush()
-            
-            # Setup
-            log_path = os.path.join(self.outputDirLog, f"log_{self.today}.txt")
-            log_path_v = 1
-            while os.path.exists(log_path):
-                log_path = os.path.join(self.outputDirLog, f"log_{self.today}_v{log_path_v}.txt")
-                log_path_v += 1
-
-            print(log_path)
-            self.log_file = open(log_path, "w")
-            
-            # Redirect stdout and stderr to go to both terminal and file            
-            sys.stdout = Tee(sys.__stdout__, self.log_file)
-            sys.stderr = Tee(sys.__stderr__, self.log_file)
-            
-            # Setup loguru to also go to the same file AND screen
-            logger.remove()
-            logger.add(sys.stderr, level="INFO")     # Console output
-            logger.add(self.log_file, level="DEBUG", format="{time} {level} {message}", catch=True)      # File output
-            #"""
-            
             try:
                 self.df_runtime = pd.read_csv(self.outputDir + "/runtime.csv")
             except FileNotFoundError:
@@ -724,11 +687,6 @@ class GeneratePfsDesign(object):
         (self.df_runtime).to_csv((self.outputDir + "/runtime.csv"), index = False)
 
         return None
-
-    def close(self):
-        if hasattr(self, "log_file") and not self.log_file.closed:
-            self.log_file.close()
-
 
 def get_arguments():
     parser = argparse.ArgumentParser()
