@@ -46,7 +46,7 @@ def calc_inr(df, obstime):
             2016.0,
             0.0,
             0.0,
-            0.0,
+            1.0e-7,
         )
     except KeyError:
         az, el, inr = radec_to_subaru(
@@ -57,12 +57,12 @@ def calc_inr(df, obstime):
             2016.0,
             0.0,
             0.0,
-            0.0,
+            1.0e-7,
         )
     except ValueError as e:
         logger.warning(f"Error in calculating InR: {e}")
         inr = np.nan
-    return inr
+    return inr, el 
 
 def validation(parentPath, figpath, save, show, ssp):
     if not ssp:
@@ -83,8 +83,12 @@ def validation(parentPath, figpath, save, show, ssp):
     
     # Calcurate InR at observing time
     # df_design['pa']=0.
-    df_design["inr1"] = df_design.apply(lambda row: calc_inr(row, obstime=row["observation_time"]), axis=1)
-    df_design["inr2"] = df_design.apply(lambda row: calc_inr(row, obstime=row["observation_time_stop"]), axis=1)
+    df_design[["inr1", "el1"]] = df_design.apply(
+        lambda row: pd.Series(calc_inr(row, obstime=row["observation_time"])), axis=1
+    )
+    df_design[["inr2", "el2"]] = df_design.apply(
+        lambda row: pd.Series(calc_inr(row, obstime=row["observation_time_stop"])), axis=1
+    )
     
     # Make pdf files and store the statistical data
     pfsDesignIds = (
@@ -188,6 +192,8 @@ def validation(parentPath, figpath, save, show, ssp):
         )
     df_ch["inr1"] = df_design["inr1"]
     df_ch["inr2"] = df_design["inr2"]
+    df_ch["el1"] = df_design["el1"]
+    df_ch["el2"] = df_design["el2"]
 
     # """
     styled_html = (
@@ -203,6 +209,7 @@ def validation(parentPath, figpath, save, show, ssp):
         )
         .applymap(pldes.colour_background_warning_ag_tot, subset=["ag_sum"])
         .applymap(pldes.colour_background_warning_inr, subset=["inr1", "inr2"])
+        .applymap(pldes.colour_background_warning_el, subset=["el1", "el2"])
         .format(precision=1)
     )
     # """

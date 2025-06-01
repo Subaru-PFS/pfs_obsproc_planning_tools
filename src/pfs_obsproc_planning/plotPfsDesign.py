@@ -384,6 +384,11 @@ def colour_background_warning_inr(val):
 
     return f"background-color: {colour}"
 
+def colour_background_warning_el(val):
+    colour = warning if (val < 32) or (val > 75) else ""
+
+    return f"background-color: {colour}"
+
 
 def set_style(df_ch):
     styles = df_ch.copy()
