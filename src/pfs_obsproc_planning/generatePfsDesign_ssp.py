@@ -198,7 +198,7 @@ class GeneratePfsDesign_ssp(object):
             "qplan",
         ]:
             check_version_pfs(self, package_)
-        """
+        #"""
         import pfs.utils
 
         repo_path = os.path.join(pfs.utils.__path__[0], "../../../")
