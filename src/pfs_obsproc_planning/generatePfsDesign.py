@@ -2,95 +2,129 @@
 # generatePfsDesign.py : PPP+qPlan+SFR
 
 import argparse
-import os
+import os, sys
 import warnings
-from datetime import timedelta
+from datetime import timedelta, datetime, date
+import pytz
+from dateutil import parser as ps
+import time
+
+hawaii_tz = pytz.timezone("Pacific/Honolulu")
 
 import git
 import numpy as np
 import pandas as pd
 import toml
-from astropy.table import Table
-from logzero import logger
+from astropy.table import Table, vstack
+from loguru import logger
 
 warnings.filterwarnings("ignore")
 
 from .opefile import OpeFile
 from pfs_design_tool.pointing_utils import nfutils
+import ets_fiber_assigner.netflow as nf
+from pfs_design_tool import reconfigure_fibers_ppp as sfa
 
 
 def read_conf(conf):
     config = toml.load(conf)
     return config
 
+def clear_folder(folder):
+    import shutil
+    for filename in os.listdir(folder):
+        file_path = os.path.join(folder, filename)
+        if os.path.isfile(file_path) or os.path.islink(file_path):
+            os.remove(file_path)
+        elif os.path.isdir(file_path):
+            shutil.rmtree(file_path)
 
-def check_versions(package, repo_url, repo_path, version_desire):
-    """Clone the dependent package from repo_url to repo_path, and checkout to version_desire branch/tag."""
-
-    def clone_repo(repo_url, repo_path="repo"):
-        """Clone a GitHub repository if it’s not already cloned."""
-        if not os.path.exists(repo_path):
-            git.Repo.clone_from(repo_url, repo_path)
-            logger.info(f"({package}) Cloned repository to {repo_path}")
-        else:
-            logger.info(f"({package}) Repository already exists at {repo_path}")
+def check_versions(package, repo_path, version_desire):
+    """Ensure the repository at repo_path is at the desired version."""
 
     def fetch_all_branches_and_tags(repo):
         """Fetch all branches and tags from a repository."""
         repo.remotes.origin.fetch()
         logger.info(f"({package}) Fetched all branches and tags.")
 
-    def get_branches_and_tags(repo):
-        """Get a list of all branches and tags."""
-        branches = [ref.name for ref in repo.remote().refs]
-        tags = [tag.name for tag in repo.tags]
-        return branches, tags
+    def get_commit_time(repo, version):
+        """Get the commit time of a branch or tag."""
+        if version in [
+            ref.name for ref in repo.remote().refs
+        ]:  # Check if it's a branch
+            commit_time = repo.commit(version).committed_date
+        elif version in [tag.name for tag in repo.tags]:  # Check if it's a tag
+            commit_time = repo.commit(version).committed_date
+        else:
+            return None  # Invalid version
+        return commit_time
 
-    def get_current_tag_branch(repo):
-        """Get the current tag of the repository if HEAD matches a tag."""
-        # Get the current commit
+    def compare_commit_times(current_commit_time, desired_commit_time):
+        """Compare commit times to determine if current is older than desired."""
+        if current_commit_time is None:
+            return False  # If no current commit time, always update
+        return (
+            current_commit_time < desired_commit_time
+        )  # Check if the current version's commit is older
+
+    def get_current_version(repo):
+        """Get the current branch or tag version."""
         current_commit = repo.head.commit
-
         # Find if the current commit matches any tag
         for tag in repo.tags:
             if tag.commit == current_commit:
                 logger.info(f"({package}) Current tag = {tag.name}")
+                return tag.name  # Return the tag name if found
 
-        # Find if the current commit matches any branch
+        # If no tag, return the current branch name
         for ref in repo.remote().refs:
             if ref.commit == current_commit:
                 logger.info(f"({package}) Current branch = {ref.name}")
+                return ref.name  # Return the branch name if found
+
+        return None  # If no matching commit found
 
     def checkout_version(repo, version):
         """Checkout a specified branch or tag."""
         version = version.strip()
         if version == "":
             logger.info(f"({package}) Do not change the current branch/tag.")
-            get_current_tag_branch(repo)
-        elif version in [ref.name for ref in repo.remote().refs] or version in [
-            tag.name for tag in repo.tags
-        ]:
-            repo.git.checkout(version)
-            logger.info(f"({package}) Checked out to {version}.")
-            get_current_tag_branch(repo)
+            return  # Do nothing if no version is provided
+
+        current_commit_time = get_commit_time(repo, "HEAD")
+        desired_commit_time = get_commit_time(repo, version)
+
+        if compare_commit_times(current_commit_time, desired_commit_time):
+            if version in [ref.name for ref in repo.remote().refs]:
+                # Checkout the remote branch and track it locally
+                repo.git.checkout(f"-b {version} origin/{version}")
+                logger.info(f"({package}) Checked out and tracking {version}.")
+            elif version in [tag.name for tag in repo.tags]:
+                # Checkout the tag (no tracking needed for tags)
+                repo.git.checkout(version)
+                logger.info(f"({package}) Checked out to tag {version}.")
+            elif repo.commit(version):
+                # If it's a commit hash, check out the commit directly
+                repo.git.checkout(version)
+                logger.info(f"({package}) Checked out to commit {version}.")
+            else:
+                logger.warning(
+                    f"({package}) Version '{version}' not found in branches or tags."
+                )
         else:
-            logger.warning(
-                f"({package}) Version '{version}' not found in branches or tags."
-            )
-            get_current_tag_branch(repo)
+            logger.info(f"({package}) Current version is up-to-date with {version}.")
 
-    # Step 1: Clone the repository if not done already
-    clone_repo(repo_url, repo_path)
-
-    # Step 2: Load the repository and fetch all branches and tags
+    # Step 1: Load the repository from the given path
     repo = git.Repo(repo_path)
+
+    # Step 2: Fetch all branches and tags
     fetch_all_branches_and_tags(repo)
+    get_current_version(repo)
 
-    # Step 3: Get list of branches and tags
-    get_branches_and_tags(repo)
-
-    # Step 4: Checkout the specified branch or tag
+    # Step 3: Checkout the specified branch or tag
     checkout_version(repo, version_desire)
+
+    return None
 
 
 class GeneratePfsDesign(object):
@@ -103,84 +137,86 @@ class GeneratePfsDesign(object):
         ## configuration file ##
         self.conf = read_conf(os.path.join(self.workDir, self.config))
 
-        ## set obs_dates
-        self.obs_dates = self.conf["qplan"]["obs_dates"]
-
         ## define directory of outputs from each component ##
-        self.inputDirPPP = os.path.join(self.workDir, self.conf["ppp"]["inputDir"])
-        self.outputDirPPP = os.path.join(self.workDir, self.conf["ppp"]["outputDir"])
-        self.outputDirQplan = os.path.join(
-            self.workDir, self.conf["qplan"]["outputDir"]
-        )
-        self.cobraCoachDir = os.path.join(
-            self.workDir, self.conf["sfa"]["cobra_coach_dir"]
-        )
+        if self.conf["ssp"]["ssp"] == False:
+            ## set obs_dates
+            self.obs_dates = self.conf["qplan"]["obs_dates"]
 
-        # create input/output directories when not exist
-        for d in [
-            self.inputDirPPP,
-            self.outputDirPPP,
-            self.outputDirQplan,
-            self.cobraCoachDir,
-            os.path.join(self.workDir, self.conf["ope"]["designPath"]),
-        ]:
-            if not os.path.exists(d):
-                logger.info(f"{d} is not found and created")
-                os.makedirs(d, exist_ok=True)
-            else:
-                logger.info(f"{d} exists")
+            self.today = date.today().strftime("%Y%m%d")
+            self.outputDir = os.path.join(self.workDir, f"output_{self.today}")
+            self.inputDirPPP = os.path.join(self.workDir, self.conf["ppp"]["inputDir"])
+            self.outputDirPPP = os.path.join(
+                self.outputDir, "ppp"
+            )
+            self.outputDirQplan = os.path.join(
+                self.outputDir, "qplan"
+            )
+            self.outputDirDesign = os.path.join(
+                self.outputDir, "design"
+            )
+            self.outputDirOpe = os.path.join(
+                self.outputDir, "ope"
+            )
+            self.cobraCoachDir = os.path.join(
+                self.workDir, self.conf["sfa"]["cobra_coach_dir"]
+            )
+            # create input/output directories when not exist
+            for d in [
+                self.outputDir,
+                self.inputDirPPP,
+                self.outputDirPPP,
+                self.outputDirQplan,
+                self.cobraCoachDir,
+                self.outputDirDesign,
+                self.outputDirOpe,
+            ]:
+                if not os.path.exists(d):
+                    logger.info(f"{d} is not found and created")
+                    os.makedirs(d, exist_ok=True)
+                else:
+                    logger.info(f"{d} exists")
 
-        # looks like cobra_coach_dir must be in a full absolute path
-        self.conf["sfa"]["cobra_coach_dir_orig"] = self.conf["sfa"]["cobra_coach_dir"]
-        self.conf["sfa"]["cobra_coach_dir"] = self.cobraCoachDir
+            # looks like cobra_coach_dir must be in a full absolute path
+            self.conf["sfa"]["cobra_coach_dir_orig"] = self.conf["sfa"][
+                "cobra_coach_dir"
+            ]
+            self.conf["sfa"]["cobra_coach_dir"] = self.cobraCoachDir      
 
-        # check if pfs_instdata exists; if no, clone from GitHub when not found; if version specified, switch to it
-        repo_url = "https://github.com/Subaru-PFS/pfs_instdata.git"
-        repo_path = self.conf["sfa"]["pfs_instdata_dir"]
-        version_desire = self.conf["sfa"]["pfs_instdata_ver"]
+            try:
+                self.df_runtime = pd.read_csv(self.outputDir + "/runtime.csv")
+            except FileNotFoundError:
+                self.df_runtime = pd.DataFrame(np.array([[0, 0, 0]]), columns=["runtime_ppp", "runtime_qplan", "runtime_sfa"])
 
-        check_versions("pfs_instdata", repo_url, repo_path, version_desire)
-
-        # check if pfs_utils exists; if no, clone from GitHub when not found; if version specified, switch to it
-        repo_url = "https://github.com/Subaru-PFS/pfs_utils.git"
-        try:
-            import pfs.utils
-
-            repo_path = os.path.join(pfs.utils.__path__[0], "../../../")
-        except:
-            repo_path = self.conf["sfa"]["pfs_utils_dir"]
-        version_desire = self.conf["sfa"]["pfs_utils_ver"]
-
-        check_versions("pfs_utils", repo_url, repo_path, version_desire)
+        # check versions of dependent packages
+        def check_version_pfs(self, package):
+            try:
+                repo_path = self.conf["sfa"][package + "_dir"]
+                version_desire = self.conf["sfa"][package + "_ver"]
+                check_versions(package, repo_path, version_desire)
+            except KeyError:
+                logger.warning(f"Path of {package} not found in {self.config}")
 
         """
-        instdata_dir = self.conf["sfa"]["pfs_instdata_dir"]
-        if os.path.exists(instdata_dir):
-            logger.info(f"pfs_instdata found: {instdata_dir}")
-        else:
-            if not os.path.exists(
-                os.path.join(self.workDir, os.path.basename(instdata_dir))
-            ):
-                logger.info(
-                    f"pfs_instdata not found at {instdata_dir}, clone from GitHub as {os.path.join(self.workDir, os.path.basename(instdata_dir))}"
-                )
-                _ = git.Repo.clone_from(
-                    "https://github.com/Subaru-PFS/pfs_instdata.git",
-                    os.path.join(self.workDir, os.path.basename(instdata_dir)),
-                    branch="master",
-                )
-            else:
-                logger.info(
-                    f"pfs_instdata found at {os.path.join(self.workDir, os.path.basename(instdata_dir))}, reuse it"
-                )
-
-            self.conf["sfa"]["pfs_instdata_dir_orig"] = self.conf["sfa"][
-                "pfs_instdata_dir"
-            ]
-            self.conf["sfa"]["pfs_instdata_dir"] = os.path.join(
-                self.workDir, os.path.basename(instdata_dir)
-            )
+        for package_ in [
+            "pfs_utils",
+            "ets_pointing",
+            "ets_shuffle",
+            "pfs_datamodel",
+            "ics_cobraCharmer",
+            "ics_cobraOps",
+            "ets_fiberalloc",
+            "pfs_instdata",
+            "ets_target_database",
+            "ics_fpsActor",
+            "spt_operational_database",
+            "qplan",
+        ]:
+            check_version_pfs(self, package_)
         #"""
+        import pfs.utils
+
+        repo_path = os.path.join(pfs.utils.__path__[0], "../../../")
+        os.environ["PFS_UTILS_DIR"] = os.path.join(pfs.utils.__path__[0], "../../../")
 
         return None
 
@@ -195,13 +231,23 @@ class GeneratePfsDesign(object):
             raise ("specify obs_dates as a list")
     #"""
 
-    def runPPP(self, n_pccs_l, n_pccs_m, show_plots=False):
-        from . import PPP
+    def runPPP(self, n_pccs_l, n_pccs_m, backup=False, show_plots=False):
+        if "queue" in self.workDir:
+            from . import PPP_queue as PPP
+        else:
+            from . import PPP
+
+        time_start = time.time()
 
         ## update config before run PPP ##
         self.update_config()
 
         ## read sample##
+        if backup:
+            proposalId_ = self.conf["ppp"]["proposalIds_backup"]
+        elif not backup:
+            proposalId_ = self.conf["ppp"]["proposalIds"]
+            
         readtgt_con = {
             "mode_readtgt": self.conf["ppp"]["mode"],
             "para_readtgt": {
@@ -218,14 +264,10 @@ class GeneratePfsDesign(object):
                 "sql_query": self.conf["ppp"]["sql_query"],
                 "DBPath_qDB": self.conf["queuedb"]["filepath"],
                 "visibility_check": self.conf["ppp"]["visibility_check"],
-                "obstimes": np.array(
-                    [
-                        [
-                            self.conf["qplan"]["start_time"],
-                            self.conf["qplan"]["stop_time"],
-                        ]
-                    ]
-                ),
+                "proposalIds": proposalId_,
+                "obstimes": self.conf["qplan"]["obs_dates"],
+                "starttimes": self.conf["qplan"]["start_time"],
+                "stoptimes": self.conf["qplan"]["stop_time"],
             },
         }
 
@@ -257,23 +299,78 @@ class GeneratePfsDesign(object):
             numReservedFibers=num_reserved_fibers,
             fiberNonAllocationCost=fiber_non_allocation_cost,
             show_plots=show_plots,
+            backup=backup
+            
         )
+
+        #only for queue
+        """
+        if "queue" in self.workDir:
+            #tb_ppc_L = Table.read(os.path.join(self.outputDirPPP, "ppcList_L.ecsv"))
+            #tb_ppc_M = Table.read(os.path.join(self.outputDirPPP, "ppcList_M.ecsv"))
+            tb_ppc_L_ = Table.read(os.path.join(self.outputDirPPP, "ppcList_L_backup.ecsv"))
+            tb_ppc_M_ = Table.read(os.path.join(self.outputDirPPP, "ppcList_M_backup.ecsv"))
+            #data_ppc = vstack([tb_ppc_L, tb_ppc_M])
+            data_ppc = vstack([tb_ppc_L_, tb_ppc_M_])
+            data_ppc.write(os.path.join(self.outputDirPPP, "ppcList_backup.ecsv"), overwrite=True)
+        #"""
 
         ## check output ##
         data_ppp = np.load(
             os.path.join(self.outputDirPPP, "obj_allo_tot.npy"), allow_pickle=True
         )
 
+        time_ppp = time.time() - time_start
+        self.df_runtime["runtime_ppp"] = time_ppp
+
         return None
 
     def runQPlan(self, plotVisibility=False):
+        time_start = time.time()
+        
         ## update config before run qPlan ##
         self.update_config()
 
         ## import qPlanner module ##
         from . import qPlan
 
-        ## read output from PPP ##
+        #"""
+        try:
+            self.df_qplan = pd.read_csv(os.path.join(self.outputDirQplan, "result.csv"))
+            obstimes = [pd.to_datetime(obstime_str) for obstime_str in self.df_qplan["obstime"]]
+            self.resQPlan = {
+                ppc_code: (obstime, ppc_ra, ppc_dec)
+                for obstime, ppc_code, ppc_ra, ppc_dec in zip(
+                    obstimes,
+                    self.df_qplan["ppc_code"],
+                    self.df_qplan["ppc_ra"],
+                    self.df_qplan["ppc_dec"],
+                )
+            }
+            return None
+        except FileNotFoundError:
+            self.df_qplan, self.sdlr, self.figs_qplan = qPlan.run(
+                self.conf,
+                "ppcList.ecsv",
+                inputDirName=self.outputDirPPP,
+                outputDirName=self.outputDirQplan,
+                plotVisibility=plotVisibility,
+            )
+            self.resQPlan = {
+                ppc_code: (obstime, ppc_ra, ppc_dec)
+                for obstime, ppc_code, ppc_ra, ppc_dec in zip(
+                    self.df_qplan["obstime"],
+                    self.df_qplan["ppc_code"],
+                    self.df_qplan["ppc_ra"],
+                    self.df_qplan["ppc_dec"],
+                )
+            }
+        #"""
+
+        # for test design generation at different obstime
+        #self.resQPlan = {"PPC_L_uh006_1": (pd.to_datetime("2025-03-23T11:40:10.422Z", utc=True), 150.08220377, 2.18805709 ),
+        #                "PPC_L_uh006_2": (pd.to_datetime("2025-03-24T11:13:28.779Z", utc=True), 150.08220377, 2.18805709),}
+
         self.df_qplan, self.sdlr, self.figs_qplan = qPlan.run(
             self.conf,
             "ppcList.ecsv",
@@ -281,8 +378,6 @@ class GeneratePfsDesign(object):
             outputDirName=self.outputDirQplan,
             plotVisibility=plotVisibility,
         )
-
-        ## qPlan result ##
         self.resQPlan = {
             ppc_code: (obstime, ppc_ra, ppc_dec)
             for obstime, ppc_code, ppc_ra, ppc_dec in zip(
@@ -293,19 +388,110 @@ class GeneratePfsDesign(object):
             )
         }
 
+        self.df_qplan["obstime_hst"] = self.df_qplan["obstime"].dt.tz_convert("US/Hawaii")
+        self.df_qplan["obstime_stop"] = self.df_qplan["obstime_hst"] + timedelta(minutes=22)
+        
+        hst = pytz.timezone("US/Hawaii")
+
+        # First observation time in HST
+        first_obstime = self.df_qplan["obstime_hst"].iloc[0]
+        
+        # Determine the date to use for TW18
+        if first_obstime.hour < 12:
+            tw18_date = (first_obstime - timedelta(days=1)).date()
+        else:
+            tw18_date = first_obstime.date()
+        
+        # Define TW18 start and stop time
+        TW18_start = hst.localize(datetime.combine(tw18_date, datetime.min.time()) + timedelta(hours=20))  # 20:00
+        TW18_stop = TW18_start + timedelta(hours=9)  # to next day 05:00
+
+        # Filter rows strictly within TW18 window (still needed for safety)
+        df_window = self.df_qplan[
+            (self.df_qplan["obstime_hst"] >= TW18_start) &
+            (self.df_qplan["obstime_hst"] <= TW18_stop)
+        ].copy()
+        
+        df_window.sort_values("obstime_hst", inplace=True)
+        df_window.reset_index(drop=True, inplace=True)
+        
+        starttime_backup = []
+        stoptime_backup = []
+        
+        # First gap: between TW18_start and first obstime_hst
+        if not df_window.empty:
+            first_obstime = df_window["obstime_hst"].iloc[0]
+            if first_obstime - TW18_start > timedelta(minutes=25):
+                starttime_backup.append(TW18_start)
+                stoptime_backup.append(first_obstime)
+                print(f"Gap: start at {TW18_start}, stop at {first_obstime}")
+        
+            # Remaining gaps: between obstime_stop[i] and obstime[i+1]
+            for i in range(len(df_window) - 1):
+                gap = df_window["obstime_hst"].iloc[i + 1] - df_window["obstime_stop"].iloc[i]
+                if gap > timedelta(minutes=25):
+                    starttime_backup.append(df_window["obstime_stop"].iloc[i])
+                    stoptime_backup.append(df_window["obstime_hst"].iloc[i + 1])
+                    print(f"Gap: start at {df_window['obstime_stop'].iloc[i]}, stop at {df_window['obstime_hst'].iloc[i + 1]}")
+        
+            # Optional: check gap between last obstime_stop and TW18_stop
+            last_stop = df_window["obstime_stop"].iloc[-1]
+            if TW18_stop - last_stop > timedelta(minutes=25):
+                starttime_backup.append(last_stop)
+                stoptime_backup.append(TW18_stop)
+                print(f"Gap: start at {last_stop}, stop at {TW18_stop}")
+
+        if len(starttime_backup) > 0:
+            self.runPPP(60, 60, show_plots=False, backup=True)
+
+            self.df_qplan_, self.sdlr_, self.figs_qplan_ = qPlan.run(
+                self.conf,
+                "ppcList_backup.ecsv",
+                inputDirName=self.outputDirPPP,
+                outputDirName=self.outputDirQplan,
+                plotVisibility=plotVisibility,
+                starttime_backup=starttime_backup,
+                stoptime_backup=stoptime_backup,
+            )
+            self.df_qplan = pd.concat([self.df_qplan, self.df_qplan_], ignore_index=True)
+            self.resQPlan_ = {
+                ppc_code: (obstime, ppc_ra, ppc_dec)
+                for obstime, ppc_code, ppc_ra, ppc_dec in zip(
+                    self.df_qplan_["obstime"],
+                    self.df_qplan_["ppc_code"],
+                    self.df_qplan_["ppc_ra"],
+                    self.df_qplan_["ppc_dec"],
+                )
+            }
+            self.resQPlan = {**self.resQPlan, **self.resQPlan_}
+
+        (self.df_qplan).to_csv(os.path.join(self.outputDirQplan, "result.csv"))
+
         if plotVisibility is True:
+            time_qplan = time.time() - time_start
+            self.df_runtime["runtime_qplan"] = time_qplan
             return self.figs_qplan
         else:
+            time_qplan = time.time() - time_start
+            self.df_runtime["runtime_qplan"] = time_qplan
             return None
+        
 
     def runSFA(self, clearOutput=False):
+        time_start = time.time()
+        
         from . import SFA
 
         ## update config before run SFA ##
         self.update_config()
 
         ## get a list of OBs ##
-        t = Table.read(os.path.join(self.outputDirPPP, "obList.ecsv"))
+        t1 = Table.read(os.path.join(self.outputDirPPP, "obList.ecsv"))
+        try:
+            t2 = Table.read(os.path.join(self.outputDirPPP, "obList_backup.ecsv"))
+        except:
+            t2 = Table()
+        t = vstack([t1, t2])
         proposal_ids = t["proposal_id"]
         ob_codes = t["ob_code"]
         ob_obj_ids = t["ob_obj_id"]
@@ -333,6 +519,16 @@ class GeneratePfsDesign(object):
         ob_psf_flux_error_is = t["ob_psf_flux_error_i"]
         ob_psf_flux_error_zs = t["ob_psf_flux_error_z"]
         ob_psf_flux_error_ys = t["ob_psf_flux_error_y"]
+        ob_total_flux_gs = t["ob_total_flux_g"]
+        ob_total_flux_rs = t["ob_total_flux_r"]
+        ob_total_flux_is = t["ob_total_flux_i"]
+        ob_total_flux_zs = t["ob_total_flux_z"]
+        ob_total_flux_ys = t["ob_total_flux_y"]
+        ob_total_flux_error_gs = t["ob_total_flux_error_g"]
+        ob_total_flux_error_rs = t["ob_total_flux_error_r"]
+        ob_total_flux_error_is = t["ob_total_flux_error_i"]
+        ob_total_flux_error_zs = t["ob_total_flux_error_z"]
+        ob_total_flux_error_ys = t["ob_total_flux_error_y"]
         obList = {
             f"{proposal_id}_{ob_code}": [
                 proposal_id,
@@ -362,8 +558,18 @@ class GeneratePfsDesign(object):
                 ob_psf_flux_error_i,
                 ob_psf_flux_error_z,
                 ob_psf_flux_error_y,
+                ob_total_flux_g,
+                ob_total_flux_r,
+                ob_total_flux_i,
+                ob_total_flux_z,
+                ob_total_flux_y,
+                ob_total_flux_error_g,
+                ob_total_flux_error_r,
+                ob_total_flux_error_i,
+                ob_total_flux_error_z,
+                ob_total_flux_error_y,
             ]
-            for proposal_id, ob_code, ob_obj_id, ob_cat_id, ob_ra, ob_dec, ob_pmra, ob_pmdec, ob_parallax, ob_equinox, ob_priority, ob_single_exptime, ob_filter_g, ob_filter_r, ob_filter_i, ob_filter_z, ob_filter_y, ob_psf_flux_g, ob_psf_flux_r, ob_psf_flux_i, ob_psf_flux_z, ob_psf_flux_y, ob_psf_flux_error_g, ob_psf_flux_error_r, ob_psf_flux_error_i, ob_psf_flux_error_z, ob_psf_flux_error_y in zip(
+            for proposal_id, ob_code, ob_obj_id, ob_cat_id, ob_ra, ob_dec, ob_pmra, ob_pmdec, ob_parallax, ob_equinox, ob_priority, ob_single_exptime, ob_filter_g, ob_filter_r, ob_filter_i, ob_filter_z, ob_filter_y, ob_psf_flux_g, ob_psf_flux_r, ob_psf_flux_i, ob_psf_flux_z, ob_psf_flux_y, ob_psf_flux_error_g, ob_psf_flux_error_r, ob_psf_flux_error_i, ob_psf_flux_error_z, ob_psf_flux_error_y,ob_total_flux_g, ob_total_flux_r, ob_total_flux_i, ob_total_flux_z, ob_total_flux_y, ob_total_flux_error_g, ob_total_flux_error_r, ob_total_flux_error_i, ob_total_flux_error_z, ob_total_flux_error_y in zip(
                 proposal_ids,
                 ob_codes,
                 ob_obj_ids,
@@ -391,12 +597,27 @@ class GeneratePfsDesign(object):
                 ob_psf_flux_error_is,
                 ob_psf_flux_error_zs,
                 ob_psf_flux_error_ys,
+                ob_total_flux_gs,
+                ob_total_flux_rs,
+                ob_total_flux_is,
+                ob_total_flux_zs,
+                ob_total_flux_ys,
+                ob_total_flux_error_gs,
+                ob_total_flux_error_rs,
+                ob_total_flux_error_is,
+                ob_total_flux_error_zs,
+                ob_total_flux_error_ys,
             )
         }
         logger.info(len(obList))
 
         ## get a list of assigned OBs ## FIXME (maybe we don't need to use this)
-        data_ppp = Table.read(os.path.join(self.outputDirPPP, "ppcList.ecsv"))
+        tb_ppp = Table.read(os.path.join(self.outputDirPPP, "ppcList.ecsv"))
+        try:
+            tb_ppp_backup = Table.read(os.path.join(self.outputDirPPP, "ppcList_backup.ecsv"))
+        except:
+            tb_ppp_backup = Table()
+        data_ppp = vstack([tb_ppp, tb_ppp_backup])
         # print(len(data_ppp))
         # print(t[:4])
 
@@ -427,7 +648,7 @@ class GeneratePfsDesign(object):
 
         ## write to csv ##
         filename = "ppp+qplan_output.csv"
-        header = "pointing,ra_center,dec_center,pa_center,ob_unique_code,proposal_id,ob_code,obj_id,cat_id,ra_target,dec_target,pmra_target,pmdec_target,parallax_target,equinox_target,target_class,ob_single_exptime,filter_g,filter_r,filter_i,filter_z,filter_y,psf_flux_g,psf_flux_r,psf_flux_i,psf_flux_z,psf_flux_y,psf_flux_error_g,psf_flux_error_r,psf_flux_error_i,psf_flux_error_z,psf_flux_error_y,obstime,obsdate_in_hst"
+        header = "pointing,ra_center,dec_center,pa_center,ob_unique_code,proposal_id,ob_code,obj_id,cat_id,ra_target,dec_target,pmra_target,pmdec_target,parallax_target,equinox_target,target_class,ob_single_exptime,filter_g,filter_r,filter_i,filter_z,filter_y,psf_flux_g,psf_flux_r,psf_flux_i,psf_flux_z,psf_flux_y,psf_flux_error_g,psf_flux_error_r,psf_flux_error_i,psf_flux_error_z,psf_flux_error_y,total_flux_g,total_flux_r,total_flux_i,total_flux_z,total_flux_y,total_flux_error_g,total_flux_error_r,total_flux_error_i,total_flux_error_z,total_flux_error_y,obstime,obsdate_in_hst"
         np.savetxt(
             os.path.join(self.outputDirPPP, filename),
             data,
@@ -438,23 +659,37 @@ class GeneratePfsDesign(object):
         )
         ## curate csv (FIXME) ##
         df = pd.read_csv(os.path.join(self.outputDirPPP, filename))
-        df = df.replace("[]", "")
+        df['filter_g'] = df['filter_g'].apply(lambda x: "none" if x in [0.0,"0.0", "[]","--"] else x)
+        df['filter_r'] = df['filter_r'].apply(lambda x: "none" if x in [0.0,"0.0","[]","--"] else x)
+        df['filter_i'] = df['filter_i'].apply(lambda x: "none" if x in [0.0,"0.0","[]","--"] else x)
+        df['filter_z'] = df['filter_z'].apply(lambda x: "none" if x in [0.0,"0.0","[]","--"] else x)
+        df['filter_y'] = df['filter_y'].apply(lambda x: "none" if x in [0.0,"0.0","[]","--"] else x)
+        #df = df.replace("[]", "")
+        df.replace(9e-05, np.nan, inplace=True)
         df.to_csv(os.path.join(self.outputDirPPP, filename), index=False)
 
         ## run SFA ##
         filename = "ppp+qplan_output.csv"
         df = pd.read_csv(os.path.join(self.outputDirPPP, filename))
 
+        clear_folder(self.outputDirDesign)
         listPointings, dictPointings, pfsDesignIds, observation_dates_in_hst = SFA.run(
             self.conf,
-            workDir=self.workDir,
+            workDir=self.outputDir,
             repoDir=self.repoDir,
             clearOutput=clearOutput,
         )
 
         ## ope file generation ##
-        ope = OpeFile(conf=self.conf, workDir=self.workDir)
+        clear_folder(self.outputDirOpe)
+        ope = OpeFile(conf=self.conf, workDir=self.outputDir)
         for obsdate in self.obs_dates:
+            date_t = ps.parse(f"{obsdate} 12:00 HST")
+            date_today = ps.parse(f"{self.today} 12:00 HST")
+    
+            if date_today > date_t:
+                continue
+            
             logger.info(f"generating ope file for {obsdate}...")
             ope.loadTemplate()  # initialize
             ope.update_obsdate(obsdate)  # update observation date
@@ -474,6 +709,7 @@ class GeneratePfsDesign(object):
                             res[2].replace(":", ""),
                             k,
                             dictPointings[pointing.lower()]["single_exptime"],
+                            self.conf["ope"]["n_split_frame"],
                         ]
                     )
             info = pd.DataFrame(
@@ -487,6 +723,7 @@ class GeneratePfsDesign(object):
                     "ppc_dec",
                     "obstime_in_hst",
                     "single_exptime",
+                    "n_split_frame",
                 ],
             )
             info["obstime_in_hst"] = pd.to_datetime(info["obstime_in_hst"], utc=True)
@@ -496,12 +733,17 @@ class GeneratePfsDesign(object):
                 .dt.strftime("%Y/%m/%d %H:%M:%S")
             )
             info = info.sort_values(by="obstime_in_utc", ascending=True).values.tolist()
-            ope.update_design(info, self.conf["ope"]["n_split_frame"])
+            ope.update_design(info)
             ope.write()  # save file
+
+            break
         # for pointing, (k,v) in zip(listPointings, pfsDesignIds.items()):
         #    ope.loadTemplate() # initialize
         #    ope.update(pointing=pointing, dictPointings=dictPointings, designId=v, observationTime=k) # update contents
         #    ope.write() # save file
+
+        time_sfa = time.time() - time_start
+        self.df_runtime["runtime_sfa"] = time_sfa
 
         return None
 
@@ -511,19 +753,28 @@ class GeneratePfsDesign(object):
         ## update config before run SFA ##
         self.update_config()
 
-        parentPath = os.path.join(self.workDir, self.conf["validation"]["parentPath"])
-        figpath = os.path.join(self.workDir, self.conf["validation"]["figpath"])
+        parentPath = self.outputDir
+        figpath = os.path.join(self.outputDir, "figure_pfsDesign_validation")
+
+        if not os.path.exists(figpath):
+            os.makedirs(figpath)
+
+        clear_folder(figpath)
+
         validation.validation(
             parentPath,
             figpath,
             self.conf["validation"]["savefig"],
             self.conf["validation"]["showfig"],
+            self.conf["ssp"]["ssp"],
         )
 
         logger.info(f"validation plots saved under {figpath}")
+        logger.info(f"{self.df_runtime}")
+
+        (self.df_runtime).to_csv((self.outputDir + "/runtime.csv"), index = False)
 
         return None
-
 
 def get_arguments():
     parser = argparse.ArgumentParser()

@@ -17,10 +17,18 @@ warnings.filterwarnings("ignore")
 
 class OpeFile(object):
     def __init__(self, conf, workDir):
-        self.template = os.path.join(workDir, conf["ope"]["template"])
-        self.outfilePath = os.path.join(workDir, conf["ope"]["outfilePath"])
-        self.runName = conf["ope"]["runName"]
-        self.designPath = os.path.join(workDir, conf["ope"]["designPath"])
+        self.conf = conf
+        if os.path.exists(os.path.join(workDir, self.conf["ope"]["template"])):
+            self.template = os.path.join(workDir, self.conf["ope"]["template"])
+        elif os.path.exists(self.conf["ope"]["template"]):
+            self.template = self.conf["ope"]["template"]
+        else:
+            raise FileNotFoundError(
+                f"OPE file template {self.conf['ope']['template']} not found in {workDir} or current directory."
+            )
+        self.outfilePath = os.path.join(workDir, "ope")
+        # self.runName = conf["ope"]["runName"]  # not used in the current implementation
+        self.designPath = os.path.join(workDir, "design")
         # self.exptime_ppp = conf["ppp"]["TEXP_NOMINAL"]
         # self.loadTemplate(self.template)
 
@@ -38,6 +46,7 @@ class OpeFile(object):
             filename = self.template
         self.contents1 = ""
         self.contents2 = ""
+        self.contents2_main = ""
         self.contents3 = ""
         with open(filename, "r") as file:
             science_part = 0
@@ -52,10 +61,27 @@ class OpeFile(object):
                     self.contents2 += line
                 elif science_part == 2:
                     self.contents3 += line
+                if line.startswith(("# SETUPFIELD WITH", "SETUPFIELD", "# Check Auto Guiding", "## Get spectrum", "GETOBJECT")):
+                    self.contents2_main += line
+                    if line.startswith(("SETUPFIELD", "# Check Auto Guiding")):
+                        self.contents2_main += "\n" 
 
-    def update_obsdate(self, obsdate):
+    def update_obsdate(self, obsdate, utc=False):
+        obsdate_orig = obsdate
+        if utc:
+            # NOTE: A night in HST is safely assumed to be always the same day in UTC
+            # convert obsdate (YYYY-MM-DD) to UTC and subtract 1 day
+            obstime_hst = Time(obsdate) - TimeDelta(1.0 * u.day)
+            obsdate = obstime_hst.strftime("%Y-%m-%d")
+
         # name of OPE file
-        self.outfile = os.path.join(self.outfilePath, f"{obsdate}.ope")
+        if self.conf["ssp"]["ssp"]:
+            if obsdate in self.conf["ope"]["backup_dates"]:
+                self.outfile = os.path.join(self.outfilePath, f"{obsdate}_backup.ope")
+            else:
+                self.outfile = os.path.join(self.outfilePath, f"{obsdate}.ope")
+        else:
+            self.outfile = os.path.join(self.outfilePath, f"{obsdate}.ope")
 
         # update PFSDSGNDIR
         self.contents1_updated = self.contents1.replace(
@@ -81,7 +107,7 @@ class OpeFile(object):
         repl2 = f"OBSERVATION_END_DATE={obsdate2_new}"
         self.contents1_updated = self.contents1_updated.replace(repl1, repl2)
 
-    def update_design(self, info, n_split_frame=1):
+    def update_design(self, info):
         def convRaDec(ra, dec):
             if dec > 0:
                 decsgn = "+"
@@ -111,9 +137,18 @@ class OpeFile(object):
             'FIELD_NAME=OBJECT="FIELD_NAME" RA=FIELD_RA DEC=FIELD_DEC EQUINOX=2000.0'
         )
         repl2 = ""
+        object_names = []
         for i, val in enumerate(info):
-            repl2 += (
-                f'{val[0]}=OBJECT="{val[0]}" RA={val[4]} DEC={val[5]} EQUINOX=2000.0\n'
+            repl2_single_line = (
+                f'{val[0]}=OBJECT="{val[0]}" RA={val[4]} DEC={val[5]} EQUINOX=2000.0'
+            )
+            # register the OBJECT if it is not already in the list
+            if repl2_single_line not in repl2:
+                object_names.append(val[0])
+                repl2 += repl2_single_line + "\n"
+        if len(object_names) != len(set(object_names)):
+            raise ValueError(
+                f"Duplicate PPC codes with different coordinates and/or EQUINOX found ppc_code={object_names}"
             )
         self.contents1_updated = self.contents1_updated.replace(repl1, repl2)
 
@@ -129,41 +164,63 @@ class OpeFile(object):
         self.contents2_updated = ""
         for i, val in enumerate(info):
             tmpl = self.contents2
+            tmpl_longexp = self.contents2_main
+            total_exptime = val[7]
+            nframe = val[8]
+            single_exptime = total_exptime/nframe
+            nframe_long = int(np.ceil(1800.0 / single_exptime))              
 
             # add PPC code
             repl1 = "### SCIENCE:START ###"
             repl2 = f"### {val[0]} ###\n### OBSTIME: {val[6]} ###"
             tmpl = tmpl.replace(repl1, repl2)
+            tmpl_longexp = tmpl_longexp.replace(repl1, repl2)
 
             # add pfsDesignId
             repl1 = 'DESIGN_ID="designId"'
-            repl2 = f'DESIGN_ID="{val[3]:#013x}"'
+            repl2 = f'DESIGN_ID="0x{val[3]:016x}"'
             tmpl = tmpl.replace(repl1, repl2)
+            tmpl_longexp = tmpl_longexp.replace(repl1, repl2)
 
             # add objectname
             repl1 = '"objectname"'
             repl2 = f'"{val[0]}"'
             tmpl = tmpl.replace(repl1, repl2)
+            tmpl_longexp = tmpl_longexp.replace(repl1, repl2)
 
             # add exptime
             repl1 = '"exptime"'
-            repl2 = f"{val[7]}"
-            if n_split_frame > 1:
-                # if split_frame is true, separate each frame into n sub-frames with an exptime of exptime/n
-                repl2 = f"{val[7]/n_split_frame} NFRAME={n_split_frame}"
+            # if split_frame is true, separate each frame into n sub-frames with an exptime of exptime/n
+            if nframe <= nframe_long:
+                repl2 = f"{single_exptime} NFRAME={nframe}"
+            else:
+                repl2 = f"{single_exptime} NFRAME={nframe_long}"
             tmpl = tmpl.replace(repl1, repl2)
 
             # remove unnecessary words
             repl1 = "# SETUPFIELD WITH cobra convergence                     #!!! MODIFICATION NEEDED: designId, objectname !!!#"
             repl2 = "# SETUPFIELD WITH cobra convergence"
             tmpl = tmpl.replace(repl1, repl2)
+            tmpl_longexp = tmpl_longexp.replace(repl1, repl2)
 
             repl1 = "## Get spectrum                                         #!!! MODIFICATION NEEDED: objectname !!!#"
             repl2 = "## Get spectrum"
             tmpl = tmpl.replace(repl1, repl2)
+            tmpl_longexp = tmpl_longexp.replace(repl1, repl2)
 
             self.contents2_updated += tmpl
 
+            if nframe > nframe_long:
+                repl1 = '"exptime"'
+                nframe -= nframe_long
+                while nframe > 0:
+                    repl2 = f"{single_exptime} NFRAME={nframe_long}"
+                    if nframe <= nframe_long:
+                        repl2 = f"{single_exptime} NFRAME={nframe}"
+                    tmpl_longexp = tmpl_longexp.replace(repl1, repl2)
+                    self.contents2_updated += tmpl_longexp + "\n\n"
+                    nframe -= nframe_long
+                
             self.contents3 = self.contents3.replace("### SCIENCE:END  ###", "")
 
     def write(self):
