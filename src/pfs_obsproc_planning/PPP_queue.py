@@ -379,15 +379,12 @@ def readTarget(mode, para):
     tb_tgt["exptime_done"] = 0.0  # observed exptime
 
     ## --only for 020QN, need to confirm with Pyo-san-- updated FH (250530), FIX needed!!
-    #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-058QN'] = 19848.75
+    tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-058QN'] = 19848.75
     tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-020QN'] = 3237.0
-    #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-099QN'] = 6803.00
-    #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-096QN'] = 2661.00
-    #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-042QN'] = 18758.75
-    #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-101QN'] = 4363.50
-
-    if para["visibility_check"]:
-        tb_tgt = visibility_checker(tb_tgt, para["obstimes"], para["starttimes"], para["stoptimes"])
+    tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-099QN'] = 6803.00
+    tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-096QN'] = 2661.00
+    tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-042QN'] = 18758.75*1.5
+    tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-101QN'] = 4363.50*1.2
 
     if len(set(tb_tgt["single_exptime"])) > 1:
         logger.error(
@@ -527,6 +524,9 @@ def readTarget(mode, para):
         )  # exptime needs to be multiples of 900 so netflow can be successfully executed
         n_tgt2 = len(tb_tgt)
         logger.info(f"There are {n_tgt2:.0f} (partial-obs: {sum(tb_tgt['exptime_done'] > 0):.0f}) / {n_tgt1:.0f} targets not completed")
+
+        if para["visibility_check"]:
+            tb_tgt = visibility_checker(tb_tgt, para["obstimes"], para["starttimes"], para["stoptimes"])
 
         # separete the sample by 'resolution' (L/M)
         tb_tgt_l = tb_tgt[tb_tgt["resolution"] == "L"]

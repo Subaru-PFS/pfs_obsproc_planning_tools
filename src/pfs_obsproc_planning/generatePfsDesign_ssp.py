@@ -233,16 +233,16 @@ class GeneratePfsDesign_ssp(object):
             "filter_i"         : {"dtype": str  , "default": None     },
             "filter_z"         : {"dtype": str  , "default": None     },
             "filter_y"         : {"dtype": str  , "default": None     },
-            "psf_flux_g"       : {"dtype": float, "default": None     },
-            "psf_flux_r"       : {"dtype": float, "default": None     },
-            "psf_flux_i"       : {"dtype": float, "default": None     },
-            "psf_flux_z"       : {"dtype": float, "default": None     },
-            "psf_flux_y"       : {"dtype": float, "default": None     },
-            "psf_flux_error_g" : {"dtype": float, "default": None     },
-            "psf_flux_error_r" : {"dtype": float, "default": None     },
-            "psf_flux_error_i" : {"dtype": float, "default": None     },
-            "psf_flux_error_z" : {"dtype": float, "default": None     },
-            "psf_flux_error_y" : {"dtype": float, "default": None     },
+            "total_flux_g"       : {"dtype": float, "default": None     },
+            "total_flux_r"       : {"dtype": float, "default": None     },
+            "total_flux_i"       : {"dtype": float, "default": None     },
+            "total_flux_z"       : {"dtype": float, "default": None     },
+            "total_flux_y"       : {"dtype": float, "default": None     },
+            "total_flux_error_g" : {"dtype": float, "default": None     },
+            "total_flux_error_r" : {"dtype": float, "default": None     },
+            "total_flux_error_i" : {"dtype": float, "default": None     },
+            "total_flux_error_z" : {"dtype": float, "default": None     },
+            "total_flux_error_y" : {"dtype": float, "default": None     },
             "cobraId"          : {"dtype": int  , "default": None     },
             "pfi_X"            : {"dtype": float, "default": None     },
             "pfi_Y"            : {"dtype": float, "default": None     },
@@ -419,16 +419,23 @@ class GeneratePfsDesign_ssp(object):
                 )
 
         # check flux in at least one band / all bands are there for science / fluxstd
-        flux_cols = [
+        flux_cols_psf = [
             "psf_flux_g",
             "psf_flux_r",
             "psf_flux_i",
             "psf_flux_z",
             "psf_flux_y",
         ]
+        flux_cols_tot = [
+            "total_flux_g",
+            "total_flux_r",
+            "total_flux_i",
+            "total_flux_z",
+            "total_flux_y",
+        ]
 
         if tgt_type == "science":
-            flux_data = np.array([tb[col].data.astype(float) for col in flux_cols])
+            flux_data = np.array([tb[col].data.astype(float) for col in flux_cols_tot])
             valid_mask = np.any(
                 flux_data > 0, axis=0
             )  # flux in at least one band should be there
@@ -440,7 +447,7 @@ class GeneratePfsDesign_ssp(object):
                 )
 
         elif tgt_type == "fluxstd":
-            flux_data = np.array([tb[col].data for col in flux_cols])
+            flux_data = np.array([tb[col].data for col in flux_cols_psf])
             valid_mask = np.all(
                 flux_data > 0, axis=0
             )  # flux in all bands should be there
@@ -1205,9 +1212,13 @@ class GeneratePfsDesign_ssp(object):
             logger.info(f"[Validation of input] {wg_}")
 
             # read ppcList.ecsv
-            tb_ppc = Table.read(
-                os.path.join(self.workDir, "targets", wg_, "ppcList.ecsv")
-            )
+            ppc_path = os.path.join(self.workDir, "targets", wg_, "ppcList.ecsv")
+
+            if os.path.exists(ppc_path):
+                tb_ppc = Table.read(ppc_path)
+            else:
+                logger.error(f"[Validation of ppcList] ({wg_}) File not found: {ppc_path}")
+                continue
 
             validate_success_ppc = self.ssp_ppc_validate(tb_ppc)[0]
 

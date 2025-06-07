@@ -334,7 +334,7 @@ class GeneratePfsDesign(object):
         ## import qPlanner module ##
         from . import qPlan
 
-        """
+        #"""
         try:
             self.df_qplan = pd.read_csv(os.path.join(self.outputDirQplan, "result.csv"))
             obstimes = [pd.to_datetime(obstime_str) for obstime_str in self.df_qplan["obstime"]]
@@ -347,6 +347,7 @@ class GeneratePfsDesign(object):
                     self.df_qplan["ppc_dec"],
                 )
             }
+            return None
         except FileNotFoundError:
             self.df_qplan, self.sdlr, self.figs_qplan = qPlan.run(
                 self.conf,
