@@ -182,7 +182,7 @@ class GeneratePfsDesign_ssp(object):
             except KeyError:
                 logger.warning(f"Path of {package} not found in {self.config}")
 
-        """
+        #"""
         for package_ in [
             "pfs_instdata",
             "ets_pointing",
