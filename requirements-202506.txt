@@ -31,7 +31,7 @@ toml>=0.10.2
 wheel>=0.41.2
 
 # Adjust tags and versions of PFS-related packages accordingly for SSP observations.
--e git+https://github.com/Subaru-PFS/datamodel.git2#egg=pfs-datamodel
+-e git+https://github.com/Subaru-PFS/datamodel.git#egg=pfs-datamodel
 -e git+https://github.com/Subaru-PFS/pfs_utils.git#egg=pfs-utils
 -e git+https://github.com/Subaru-PFS/ics_cobraCharmer.git@1.4.17#egg=ics-cobraCharmer
 -e git+https://github.com/Subaru-PFS/ics_cobraOps.git@5c1f1c16ca0ce7d1a8113ea4b14381ad312212cc#egg=ics-cobraOps
