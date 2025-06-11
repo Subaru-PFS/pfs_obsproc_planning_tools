@@ -62,7 +62,7 @@ def check_versions(package, repo_path, version_desire):
     def compare_commit_times(current_commit_time, desired_commit_time):
         """Compare commit times to determine if current is older than desired."""
         if current_commit_time is None:
-            return False  # If no current commit time, always update
+            return True  # If no current commit time, always update
         return (
             current_commit_time < desired_commit_time
         )  # Check if the current version's commit is older
@@ -275,7 +275,7 @@ class GeneratePfsDesign(object):
         }
 
         cobra_coach, bench_info = nfutils.getBench(
-            self.conf["sfa"]["pfs_instdata_dir"],
+            self.conf["packages"]["pfs_instdata_dir"],
             self.conf["sfa"]["cobra_coach_dir"],
             None,
             self.conf["sfa"]["sm"],
