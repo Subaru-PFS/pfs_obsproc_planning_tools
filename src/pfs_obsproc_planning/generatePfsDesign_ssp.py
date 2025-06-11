@@ -175,15 +175,19 @@ class GeneratePfsDesign_ssp(object):
 
         # check versions of dependent packages
         def check_version_pfs(self, package):
-            try:
-                repo_path = self.conf["sfa"][package + "_dir"]
-                version_desire = self.conf["sfa"][package + "_ver"]
-                check_versions(package, repo_path, version_desire)
-            except KeyError:
-                logger.warning(f"Path of {package} not found in {self.config}")
+            if self.conf["packages"]["check_version"]:
+                try:
+                    repo_path = self.conf["packages"][package + "_dir"]
+                    version_desire = self.conf["packages"][package + "_ver"]
+                    check_versions(package, repo_path, version_desire)
+                except KeyError:
+                    logger.warning(f"Path of {package} not found in {self.config}")
+                return None
+            else:
+                return None
 
-        """
         for package_ in [
+            "pfs_utils",
             "pfs_instdata",
             "ets_pointing",
             "ets_shuffle",
@@ -198,7 +202,7 @@ class GeneratePfsDesign_ssp(object):
             "qplan",
         ]:
             check_version_pfs(self, package_)
-        """
+
         import pfs.utils
 
         repo_path = os.path.join(pfs.utils.__path__[0], "../../../")

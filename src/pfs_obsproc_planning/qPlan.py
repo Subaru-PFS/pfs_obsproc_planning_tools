@@ -164,13 +164,13 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
         # exp_time = float(exp_time) * 60.0  # assume table is in MINUTES
         exp_time = float(exp_time)  # exptime is in seconds
         pa = float(pa)
-        #"""
+        """
         if "backup" in ob_code:
             priority = 0
         else:
             priority = float(priority)
         #"""
-        #priority = 0 #float(priority) 
+        priority = float(priority) 
 
         if resolution == "L":
             resolution = "low"
@@ -363,7 +363,7 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
                     data=cur_data,
                 )
             )
-        break
+        #break
 
     sdlr.set_schedule_info(rec)
     # set OB list to schedule from

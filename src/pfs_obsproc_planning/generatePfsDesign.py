@@ -189,14 +189,17 @@ class GeneratePfsDesign(object):
 
         # check versions of dependent packages
         def check_version_pfs(self, package):
-            try:
-                repo_path = self.conf["sfa"][package + "_dir"]
-                version_desire = self.conf["sfa"][package + "_ver"]
-                check_versions(package, repo_path, version_desire)
-            except KeyError:
-                logger.warning(f"Path of {package} not found in {self.config}")
+            if self.conf["packages"]["check_version"]:
+                try:
+                    repo_path = self.conf["packages"][package + "_dir"]
+                    version_desire = self.conf["packages"][package + "_ver"]
+                    check_versions(package, repo_path, version_desire)
+                except KeyError:
+                    logger.warning(f"Path of {package} not found in {self.config}")
+                return None
+            else:
+                return None
 
-        """
         for package_ in [
             "pfs_utils",
             "ets_pointing",
@@ -212,7 +215,7 @@ class GeneratePfsDesign(object):
             "qplan",
         ]:
             check_version_pfs(self, package_)
-        #"""
+
         import pfs.utils
 
         repo_path = os.path.join(pfs.utils.__path__[0], "../../../")
@@ -299,21 +302,9 @@ class GeneratePfsDesign(object):
             numReservedFibers=num_reserved_fibers,
             fiberNonAllocationCost=fiber_non_allocation_cost,
             show_plots=show_plots,
-            backup=backup
+            #backup=backup
             
         )
-
-        #only for queue
-        """
-        if "queue" in self.workDir:
-            #tb_ppc_L = Table.read(os.path.join(self.outputDirPPP, "ppcList_L.ecsv"))
-            #tb_ppc_M = Table.read(os.path.join(self.outputDirPPP, "ppcList_M.ecsv"))
-            tb_ppc_L_ = Table.read(os.path.join(self.outputDirPPP, "ppcList_L_backup.ecsv"))
-            tb_ppc_M_ = Table.read(os.path.join(self.outputDirPPP, "ppcList_M_backup.ecsv"))
-            #data_ppc = vstack([tb_ppc_L, tb_ppc_M])
-            data_ppc = vstack([tb_ppc_L_, tb_ppc_M_])
-            data_ppc.write(os.path.join(self.outputDirPPP, "ppcList_backup.ecsv"), overwrite=True)
-        #"""
 
         ## check output ##
         data_ppp = np.load(
@@ -365,117 +356,100 @@ class GeneratePfsDesign(object):
                     self.df_qplan["ppc_dec"],
                 )
             }
-        #"""
+
+            """
+            self.df_qplan["obstime_hst"] = self.df_qplan["obstime"].dt.tz_convert("US/Hawaii")
+            self.df_qplan["obstime_stop"] = self.df_qplan["obstime_hst"] + timedelta(minutes=22)
+            
+            hst = pytz.timezone("US/Hawaii")
+    
+            # First observation time in HST
+            first_obstime = self.df_qplan["obstime_hst"].iloc[0]
+            
+            # Determine the date to use for TW18
+            if first_obstime.hour < 12:
+                tw18_date = (first_obstime - timedelta(days=1)).date()
+            else:
+                tw18_date = first_obstime.date()
+            
+            # Define TW18 start and stop time
+            TW18_start = hst.localize(datetime.combine(tw18_date, datetime.min.time()) + timedelta(hours=20))  # 20:00
+            TW18_stop = TW18_start + timedelta(hours=9)  # to next day 05:00
+    
+            # Filter rows strictly within TW18 window (still needed for safety)
+            df_window = self.df_qplan[
+                (self.df_qplan["obstime_hst"] >= TW18_start) &
+                (self.df_qplan["obstime_hst"] <= TW18_stop)
+            ].copy()
+            
+            df_window.sort_values("obstime_hst", inplace=True)
+            df_window.reset_index(drop=True, inplace=True)
+            
+            starttime_backup = []
+            stoptime_backup = []
+            
+            # First gap: between TW18_start and first obstime_hst
+            if not df_window.empty:
+                first_obstime = df_window["obstime_hst"].iloc[0]
+                if first_obstime - TW18_start > timedelta(minutes=25):
+                    starttime_backup.append(TW18_start)
+                    stoptime_backup.append(first_obstime)
+                    print(f"Gap: start at {TW18_start}, stop at {first_obstime}")
+            
+                # Remaining gaps: between obstime_stop[i] and obstime[i+1]
+                for i in range(len(df_window) - 1):
+                    gap = df_window["obstime_hst"].iloc[i + 1] - df_window["obstime_stop"].iloc[i]
+                    if gap > timedelta(minutes=25):
+                        starttime_backup.append(df_window["obstime_stop"].iloc[i])
+                        stoptime_backup.append(df_window["obstime_hst"].iloc[i + 1])
+                        print(f"Gap: start at {df_window['obstime_stop'].iloc[i]}, stop at {df_window['obstime_hst'].iloc[i + 1]}")
+            
+                # Optional: check gap between last obstime_stop and TW18_stop
+                last_stop = df_window["obstime_stop"].iloc[-1]
+                if TW18_stop - last_stop > timedelta(minutes=25):
+                    starttime_backup.append(last_stop)
+                    stoptime_backup.append(TW18_stop)
+                    print(f"Gap: start at {last_stop}, stop at {TW18_stop}")
+    
+            if len(starttime_backup) > 0:
+                self.runPPP(60, 60, show_plots=False, backup=True)
+    
+                self.df_qplan_, self.sdlr_, self.figs_qplan_ = qPlan.run(
+                    self.conf,
+                    "ppcList_backup.ecsv",
+                    inputDirName=self.outputDirPPP,
+                    outputDirName=self.outputDirQplan,
+                    plotVisibility=plotVisibility,
+                    starttime_backup=starttime_backup,
+                    stoptime_backup=stoptime_backup,
+                )
+                self.df_qplan = pd.concat([self.df_qplan, self.df_qplan_], ignore_index=True)
+                self.resQPlan_ = {
+                    ppc_code: (obstime, ppc_ra, ppc_dec)
+                    for obstime, ppc_code, ppc_ra, ppc_dec in zip(
+                        self.df_qplan_["obstime"],
+                        self.df_qplan_["ppc_code"],
+                        self.df_qplan_["ppc_ra"],
+                        self.df_qplan_["ppc_dec"],
+                    )
+                }
+                self.resQPlan = {**self.resQPlan, **self.resQPlan_}
+            #"""
+    
+            (self.df_qplan).to_csv(os.path.join(self.outputDirQplan, "result.csv"))
+    
+            if plotVisibility is True:
+                time_qplan = time.time() - time_start
+                self.df_runtime["runtime_qplan"] = time_qplan
+                return self.figs_qplan
+            else:
+                time_qplan = time.time() - time_start
+                self.df_runtime["runtime_qplan"] = time_qplan
+                return None
 
         # for test design generation at different obstime
         #self.resQPlan = {"PPC_L_uh006_1": (pd.to_datetime("2025-03-23T11:40:10.422Z", utc=True), 150.08220377, 2.18805709 ),
         #                "PPC_L_uh006_2": (pd.to_datetime("2025-03-24T11:13:28.779Z", utc=True), 150.08220377, 2.18805709),}
-
-        self.df_qplan, self.sdlr, self.figs_qplan = qPlan.run(
-            self.conf,
-            "ppcList.ecsv",
-            inputDirName=self.outputDirPPP,
-            outputDirName=self.outputDirQplan,
-            plotVisibility=plotVisibility,
-        )
-        self.resQPlan = {
-            ppc_code: (obstime, ppc_ra, ppc_dec)
-            for obstime, ppc_code, ppc_ra, ppc_dec in zip(
-                self.df_qplan["obstime"],
-                self.df_qplan["ppc_code"],
-                self.df_qplan["ppc_ra"],
-                self.df_qplan["ppc_dec"],
-            )
-        }
-
-        self.df_qplan["obstime_hst"] = self.df_qplan["obstime"].dt.tz_convert("US/Hawaii")
-        self.df_qplan["obstime_stop"] = self.df_qplan["obstime_hst"] + timedelta(minutes=22)
-        
-        hst = pytz.timezone("US/Hawaii")
-
-        # First observation time in HST
-        first_obstime = self.df_qplan["obstime_hst"].iloc[0]
-        
-        # Determine the date to use for TW18
-        if first_obstime.hour < 12:
-            tw18_date = (first_obstime - timedelta(days=1)).date()
-        else:
-            tw18_date = first_obstime.date()
-        
-        # Define TW18 start and stop time
-        TW18_start = hst.localize(datetime.combine(tw18_date, datetime.min.time()) + timedelta(hours=20))  # 20:00
-        TW18_stop = TW18_start + timedelta(hours=9)  # to next day 05:00
-
-        # Filter rows strictly within TW18 window (still needed for safety)
-        df_window = self.df_qplan[
-            (self.df_qplan["obstime_hst"] >= TW18_start) &
-            (self.df_qplan["obstime_hst"] <= TW18_stop)
-        ].copy()
-        
-        df_window.sort_values("obstime_hst", inplace=True)
-        df_window.reset_index(drop=True, inplace=True)
-        
-        starttime_backup = []
-        stoptime_backup = []
-        
-        # First gap: between TW18_start and first obstime_hst
-        if not df_window.empty:
-            first_obstime = df_window["obstime_hst"].iloc[0]
-            if first_obstime - TW18_start > timedelta(minutes=25):
-                starttime_backup.append(TW18_start)
-                stoptime_backup.append(first_obstime)
-                print(f"Gap: start at {TW18_start}, stop at {first_obstime}")
-        
-            # Remaining gaps: between obstime_stop[i] and obstime[i+1]
-            for i in range(len(df_window) - 1):
-                gap = df_window["obstime_hst"].iloc[i + 1] - df_window["obstime_stop"].iloc[i]
-                if gap > timedelta(minutes=25):
-                    starttime_backup.append(df_window["obstime_stop"].iloc[i])
-                    stoptime_backup.append(df_window["obstime_hst"].iloc[i + 1])
-                    print(f"Gap: start at {df_window['obstime_stop'].iloc[i]}, stop at {df_window['obstime_hst'].iloc[i + 1]}")
-        
-            # Optional: check gap between last obstime_stop and TW18_stop
-            last_stop = df_window["obstime_stop"].iloc[-1]
-            if TW18_stop - last_stop > timedelta(minutes=25):
-                starttime_backup.append(last_stop)
-                stoptime_backup.append(TW18_stop)
-                print(f"Gap: start at {last_stop}, stop at {TW18_stop}")
-
-        if len(starttime_backup) > 0:
-            self.runPPP(60, 60, show_plots=False, backup=True)
-
-            self.df_qplan_, self.sdlr_, self.figs_qplan_ = qPlan.run(
-                self.conf,
-                "ppcList_backup.ecsv",
-                inputDirName=self.outputDirPPP,
-                outputDirName=self.outputDirQplan,
-                plotVisibility=plotVisibility,
-                starttime_backup=starttime_backup,
-                stoptime_backup=stoptime_backup,
-            )
-            self.df_qplan = pd.concat([self.df_qplan, self.df_qplan_], ignore_index=True)
-            self.resQPlan_ = {
-                ppc_code: (obstime, ppc_ra, ppc_dec)
-                for obstime, ppc_code, ppc_ra, ppc_dec in zip(
-                    self.df_qplan_["obstime"],
-                    self.df_qplan_["ppc_code"],
-                    self.df_qplan_["ppc_ra"],
-                    self.df_qplan_["ppc_dec"],
-                )
-            }
-            self.resQPlan = {**self.resQPlan, **self.resQPlan_}
-
-        (self.df_qplan).to_csv(os.path.join(self.outputDirQplan, "result.csv"))
-
-        if plotVisibility is True:
-            time_qplan = time.time() - time_start
-            self.df_runtime["runtime_qplan"] = time_qplan
-            return self.figs_qplan
-        else:
-            time_qplan = time.time() - time_start
-            self.df_runtime["runtime_qplan"] = time_qplan
-            return None
-        
 
     def runSFA(self, clearOutput=False):
         time_start = time.time()

@@ -71,7 +71,7 @@ def validation(parentPath, figpath, save, show, ssp):
             f"{parentPath}/summary_reconfigure_ppp-ppp+qplan_output.csv"
         )
         df_design["observation_time"] = pd.to_datetime(df_design["observation_time"], format='%Y-%m-%dT%H:%M:%SZ')
-        df_design["observation_time_stop"] = (df_design["observation_time"] + pd.DateOffset(seconds=1260)).dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        df_design["observation_time_stop"] = (df_design["observation_time"] + pd.DateOffset(seconds=2160)).dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     else:
         pfsDesignDir = parentPath

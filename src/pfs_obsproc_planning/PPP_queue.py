@@ -357,7 +357,6 @@ def readTarget(mode, para):
     # only for S25A march run
     #proposalid = ['S25A-058QN', 'S25A-020QN', 'S25A-099QN', 'S25A-096QN', 'S25A-042QN', 'S25A-101QN']
     #proposalid = ['S25A-139QN', "S25A-036QN", "S25A-102QN", "S25A-028QN", "S25A-137QN", "S25A-074QN", "S25A-107QN", "S25A-080QN", "S25A-094QN", "S25A-113QN", 'S25A-064QN']
-    #proposalid = ['S25A-064QN']
     #proposalid = ['S25A-058QN', 'S25A-020QN', 'S25A-099QN', 'S25A-096QN', 'S25A-042QN', 'S25A-101QN'，'S25A-139QN', "S25A-036QN", "S25A-102QN", "S25A-028QN", "S25A-137QN", "S25A-074QN", "S25A-107QN", "S25A-080QN", "S25A-094QN", "S25A-113QN"，'S25A-064QN']
     proposalid = para["proposalIds"]
     
@@ -379,12 +378,17 @@ def readTarget(mode, para):
     tb_tgt["exptime_done"] = 0.0  # observed exptime
 
     ## --only for 020QN, need to confirm with Pyo-san-- updated FH (250530), FIX needed!!
-    tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-058QN'] = 19848.75
-    tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-020QN'] = 3237.0
-    tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-099QN'] = 6803.00
+    #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-058QN'] = 19848.75
+    tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-020QN'] = 3237.25
+    #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-099QN'] = 6803.00
     tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-096QN'] = 2661.00
-    tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-042QN'] = 18758.75*1.5
-    tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-101QN'] = 4363.50*1.2
+    tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-042QN'] = 18758.75
+    tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-101QN'] = 4363.50
+
+    #for grade c programs, set completion rate as 70% as upper limit
+    proposalid = ['S25A-139QN', "S25A-036QN", "S25A-102QN", "S25A-028QN", "S25A-137QN", "S25A-074QN", "S25A-107QN", "S25A-080QN", "S25A-094QN", "S25A-113QN", 'S25A-064QN']
+    mask = np.isin(tb_tgt["proposal_id"], proposalid)
+    tb_tgt["allocated_time_tac"][mask] = tb_tgt["allocated_time_tac"][mask] * 0.7
 
     if len(set(tb_tgt["single_exptime"])) > 1:
         logger.error(
