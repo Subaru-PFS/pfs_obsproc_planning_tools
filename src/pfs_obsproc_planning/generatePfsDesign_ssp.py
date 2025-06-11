@@ -184,6 +184,7 @@ class GeneratePfsDesign_ssp(object):
 
         #"""
         for package_ in [
+            "pfs_utils",
             "pfs_instdata",
             "ets_pointing",
             "ets_shuffle",
