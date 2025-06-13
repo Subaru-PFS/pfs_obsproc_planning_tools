@@ -26,9 +26,13 @@ class OpeFile(object):
             raise FileNotFoundError(
                 f"OPE file template {self.conf['ope']['template']} not found in {workDir} or current directory."
             )
-        self.outfilePath = os.path.join(workDir, "ope")
+        if not ssp:
+            self.outfilePath = os.path.join(workDir, "ope")
+            self.designPath = os.path.join(workDir, "design")
+        elif ssp:
+            self.outfilePath = os.path.join(workDir, self.conf["ope"]["outfilePath"])
+            self.designPath = os.path.join(workDir, self.conf["ope"]["designPath"])
         # self.runName = conf["ope"]["runName"]  # not used in the current implementation
-        self.designPath = os.path.join(workDir, "design")
         # self.exptime_ppp = conf["ppp"]["TEXP_NOMINAL"]
         # self.loadTemplate(self.template)
 
