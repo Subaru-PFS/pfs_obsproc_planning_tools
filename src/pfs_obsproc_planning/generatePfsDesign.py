@@ -400,7 +400,7 @@ class GeneratePfsDesign(object):
             
             # First gap: between TW18_start and first obstime_hst
             if not df_window.empty:
-                #"""
+                """
                 first_obstime = df_window["obstime_hst"].iloc[0]
                 if first_obstime - TW18_start > timedelta(minutes=25):
                     starttime_backup.append(TW18_start)
@@ -424,7 +424,7 @@ class GeneratePfsDesign(object):
                     print(f"Gap: start at {last_stop}, stop at {TW18_stop}")
     
             if len(starttime_backup) > 0:
-                #self.runPPP(120, 0, show_plots=False, backup=True)
+                self.runPPP(120, 0, show_plots=False, backup=True)
     
                 self.df_qplan_, self.sdlr_, self.figs_qplan_ = qPlan.run(
                     self.conf,

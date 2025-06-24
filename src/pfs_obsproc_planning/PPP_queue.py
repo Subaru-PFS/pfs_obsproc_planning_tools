@@ -380,11 +380,11 @@ def readTarget(mode, para):
     #"""
     #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-058QN'] = 19848.75
     tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-020QN'] = 3237.25
-    tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-064QN'] = 4000.0
     #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-099QN'] = 6803.00
     #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-096QN'] = 2661.00
     #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-042QN'] = 18758.75
     #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-101QN'] = 4363.50
+    tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-064QN'] = 10000.0
     #"""
 
     #for grade c programs, set completion rate as 70% as upper limit: no need as tgt DB has updated allocated_time_tac
