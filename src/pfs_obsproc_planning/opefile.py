@@ -170,7 +170,7 @@ class OpeFile(object):
             tmpl = self.contents2
             tmpl_longexp = self.contents2_main
             total_exptime = val[7]
-            nframe = val[8]
+            nframe = int(val[8])
             single_exptime = total_exptime/nframe
             nframe_long = int(np.ceil(1800.0 / single_exptime))              
 

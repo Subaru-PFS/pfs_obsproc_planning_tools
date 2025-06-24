@@ -16,6 +16,8 @@ import numpy as np
 import pandas as pd
 import toml
 from astropy.table import Table, vstack
+from astropy.coordinates import Angle
+import astropy.units as u
 from loguru import logger
 
 warnings.filterwarnings("ignore")
@@ -248,8 +250,16 @@ class GeneratePfsDesign(object):
         ## read sample##
         if backup:
             proposalId_ = self.conf["ppp"]["proposalIds_backup"]
+            visibility_check_ = False
+            obstimes_ = ["2025-06-22"]
+            starttimes_ = ["2025-06-23 03:00:00"]
+            stoptimes_ = ["2025-06-23 05:00:00"]
         elif not backup:
             proposalId_ = self.conf["ppp"]["proposalIds"]
+            visibility_check_ = self.conf["ppp"]["visibility_check"]
+            obstimes_ = self.conf["qplan"]["obs_dates"]
+            starttimes_ = self.conf["qplan"]["start_time"]
+            stoptimes_ = self.conf["qplan"]["stop_time"]
             
         readtgt_con = {
             "mode_readtgt": self.conf["ppp"]["mode"],
@@ -266,11 +276,11 @@ class GeneratePfsDesign(object):
                 ],
                 "sql_query": self.conf["ppp"]["sql_query"],
                 "DBPath_qDB": self.conf["queuedb"]["filepath"],
-                "visibility_check": self.conf["ppp"]["visibility_check"],
+                "visibility_check": visibility_check_,
                 "proposalIds": proposalId_,
-                "obstimes": self.conf["qplan"]["obs_dates"],
-                "starttimes": self.conf["qplan"]["start_time"],
-                "stoptimes": self.conf["qplan"]["stop_time"],
+                "obstimes": obstimes_,
+                "starttimes": starttimes_,
+                "stoptimes": stoptimes_,
             },
         }
 
@@ -302,7 +312,7 @@ class GeneratePfsDesign(object):
             numReservedFibers=num_reserved_fibers,
             fiberNonAllocationCost=fiber_non_allocation_cost,
             show_plots=show_plots,
-            #backup=backup
+            backup=backup
             
         )
 
@@ -357,7 +367,7 @@ class GeneratePfsDesign(object):
                 )
             }
 
-            """
+            #"""
             self.df_qplan["obstime_hst"] = self.df_qplan["obstime"].dt.tz_convert("US/Hawaii")
             self.df_qplan["obstime_stop"] = self.df_qplan["obstime_hst"] + timedelta(minutes=22)
             
@@ -373,7 +383,7 @@ class GeneratePfsDesign(object):
                 tw18_date = first_obstime.date()
             
             # Define TW18 start and stop time
-            TW18_start = hst.localize(datetime.combine(tw18_date, datetime.min.time()) + timedelta(hours=20))  # 20:00
+            TW18_start = hst.localize(datetime.combine(tw18_date, datetime.min.time()) + timedelta(hours=20, minutes=30))  # 20:30
             TW18_stop = TW18_start + timedelta(hours=9)  # to next day 05:00
     
             # Filter rows strictly within TW18 window (still needed for safety)
@@ -390,11 +400,13 @@ class GeneratePfsDesign(object):
             
             # First gap: between TW18_start and first obstime_hst
             if not df_window.empty:
+                #"""
                 first_obstime = df_window["obstime_hst"].iloc[0]
                 if first_obstime - TW18_start > timedelta(minutes=25):
                     starttime_backup.append(TW18_start)
                     stoptime_backup.append(first_obstime)
                     print(f"Gap: start at {TW18_start}, stop at {first_obstime}")
+                #"""
             
                 # Remaining gaps: between obstime_stop[i] and obstime[i+1]
                 for i in range(len(df_window) - 1):
@@ -412,7 +424,7 @@ class GeneratePfsDesign(object):
                     print(f"Gap: start at {last_stop}, stop at {TW18_stop}")
     
             if len(starttime_backup) > 0:
-                self.runPPP(60, 60, show_plots=False, backup=True)
+                #self.runPPP(120, 0, show_plots=False, backup=True)
     
                 self.df_qplan_, self.sdlr_, self.figs_qplan_ = qPlan.run(
                     self.conf,
@@ -673,14 +685,24 @@ class GeneratePfsDesign(object):
             ):
                 if observation_date_in_hst == obsdate:
                     res = self.resQPlan[pointing]
+                    ppc_ra_ = res[1]
+                    ppc_dec_ = res[2]
+
+                    if isinstance(ppc_ra_, str) and (':' in ppc_ra_):
+                        ppc_ra_t = ppc_ra_.replace(":", "")
+                        ppc_dec_t = ppc_dec_.replace(":", "")
+                    elif isinstance(ppc_ra_, float):
+                        ppc_ra_t = Angle(ppc_ra_ * u.deg).to_string(unit=u.hourangle, sep='', precision=3, pad=True)
+                        ppc_dec_t = Angle(ppc_dec_ * u.deg).to_string(unit=u.deg, sep='', alwayssign=True, precision=2, pad=True)
+
                     info.append(
                         [
                             pointing,
                             obsdate,
                             k,
                             v,
-                            res[1].replace(":", ""),
-                            res[2].replace(":", ""),
+                            ppc_ra_t,
+                            ppc_dec_t,
                             k,
                             dictPointings[pointing.lower()]["single_exptime"],
                             self.conf["ope"]["n_split_frame"],
