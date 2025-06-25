@@ -937,7 +937,10 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
         ppc_lst_fin = ppc_lst[:]
 
     ppc_lst_fin = np.array(ppc_lst_fin)
-    weight_for_qplan = (1/ppc_lst_fin[:,4])/max(1/ppc_lst_fin[:,4])*1000.0
+    epsilon = 1e-3  # small number to avoid divide-by-zero
+    col = np.where(ppc_lst_fin[:, 4] == 0, epsilon, ppc_lst_fin[:, 4])
+    recip = 1 / col
+    weight_for_qplan = (recip / recip.max()) * 1000.0
 
     # write
     nPPC = len(ppc_lst_fin)
