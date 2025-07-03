@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # qPlan.py : queuePlanner
 
-import os
+import os, sys
 import warnings
 from datetime import datetime, timedelta, timezone, date
 from zoneinfo import ZoneInfo
@@ -382,7 +382,13 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
                             data=cur_data,
                         )
                     ) 
-        break
+                    
+        if conf["ppp"]["daily_plan"]:
+            break
+
+    if len(rec) == 0:
+        print("Error: No time slots available.")
+        sys.exit(1)
 
     sdlr.set_schedule_info(rec)
     # set OB list to schedule from
