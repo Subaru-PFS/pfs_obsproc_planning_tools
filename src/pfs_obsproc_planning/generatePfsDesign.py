@@ -758,6 +758,7 @@ class GeneratePfsDesign(object):
         if not os.path.exists(figpath):
             os.makedirs(figpath)
 
+        """
         clear_folder(figpath)
 
         validation.validation(
@@ -767,8 +768,14 @@ class GeneratePfsDesign(object):
             self.conf["validation"]["showfig"],
             self.conf["ssp"]["ssp"],
         )
-
+        #"""
+        
         logger.info(f"validation plots saved under {figpath}")
+
+        if "queue" in self.workDir:
+            from . import completion_check
+            completion_check.run(self.conf, self.outputDir)
+            
         logger.info(f"{self.df_runtime}")
 
         (self.df_runtime).to_csv((self.outputDir + "/runtime.csv"), index = False)
