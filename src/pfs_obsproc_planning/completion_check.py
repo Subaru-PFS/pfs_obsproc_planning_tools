@@ -22,15 +22,41 @@ from loguru import logger
 warnings.filterwarnings("ignore")
 
 def run(conf, workDir="."):
-    tb_tgt = vstack([Table.read(os.path.join(workDir, "ppp/obList.ecsv")), Table.read(os.path.join(workDir, "ppp/obList_backup.ecsv"))])
-    tb_ppc = vstack([Table.read(os.path.join(workDir, "ppp/ppcList.ecsv")), Table.read(os.path.join(workDir, "ppp/ppcList_backup.ecsv"))])
+    # read obList
+    tb_tgt = Table.read(os.path.join(workDir, "ppp/obList.ecsv"))
+    try:
+        tb_tgt_backup = Table.read(os.path.join(workDir, "ppp/obList_backup.ecsv"))
+    except:
+        tb_tgt_backup = Table()
+    tb_tgt = vstack([tb_tgt, tb_tgt_backup])
+
+    # read ppclist
+    tb_ppc = Table.read(os.path.join(workDir, "ppp/ppcList.ecsv"))
+    try:
+        tb_ppc_backup = Table.read(os.path.join(workDir, "ppp/ppcList_backup.ecsv"))
+    except:
+        tb_ppc_backup = Table()
+    tb_ppc = vstack([tb_ppc, tb_ppc_backup])
+
+    # read target list in qDB
+    today_str = datetime.today().strftime("%Y%m%d")
+    main_csv = os.path.join(workDir, "ppp", f"tgt_queueDB_{today_str}.csv")
+    backup_csv = os.path.join(workDir, "ppp", f"tgt_queueDB_{today_str}_backup.csv")
+    tb_queue = Table.read(main_csv)
+    try:
+        tb_queue_backup = Table.read(backup_csv)
+    except Exception as e:
+        logger.error(f"[EET] Could not read {backup_csv}: {e}")
+        tb_queue_backup = Table()
+    tb_queue = vstack([tb_queue, tb_queue_backup])
+        
     pdf = PdfPages(os.path.join(workDir, 'check-S25A-queue.pdf'))
 
     plot_ppc(conf, tb_tgt, tb_ppc, pdf)
-    plot_assign(workDir, pdf)
+    plot_assign(conf, workDir, pdf)
     plot_schedule(workDir, pdf)
-    plot_EET(workDir, pdf)
-    plot_CR(conf, tb_tgt, workDir, pdf)
+    plot_EET(workDir, tb_queue, pdf)
+    plot_CR(conf, tb_tgt, tb_queue, workDir, pdf)
 
     pdf.close()
 
@@ -77,7 +103,7 @@ def plot_ppc(conf, tb_tgt, tb_ppc, pdf):
     pdf.savefig(bbox_inches='tight', pad_inches=0.1)
     plt.close()
 
-def plot_assign(workDir, pdf):
+def plot_assign(conf, workDir, pdf):
     """
     Plots fiber assignment summary and a stacked bar chart of fiber types per field.
     """
@@ -91,8 +117,8 @@ def plot_assign(workDir, pdf):
         n_guides = len(hdul[3].data) if len(hdul) > 3 else 0
 
         # Fiber counts by type
-        n_sci    = np.sum((data['targettype'] == 1) & ~np.isin(data['proposalID'], ["S25A-000QF"]))
-        n_filler = np.sum((data['targettype'] == 1) &  np.isin(data['proposalID'], ["S25A-000QF"]))
+        n_sci    = np.sum((data['targettype'] == 1) & ~np.isin(data['proposalID'], conf["sfa"]["proposalIds_obsFiller"]))
+        n_filler = np.sum((data['targettype'] == 1) &  np.isin(data['proposalID'], conf["sfa"]["proposalIds_obsFiller"]))
         n_sky    = np.sum(data['targettype'] == 2)
         n_fstar  = np.sum(data['targettype'] == 3)
         n_blank  = np.sum((data['targettype'] == 4) & (data['fiberStatus'] == 1))
@@ -200,8 +226,6 @@ def plot_schedule(workDir, pdf):
             df_window = df_qplan[(df_qplan['obstime'] >= obs_window_start) &
                                     (df_qplan['obstime'] <= obs_window_end)]
     
-            xlim_start, xlim_stop = [obs_window_end - timedelta(hours=11), obs_window_end]
-    
             if df_window.empty:
                 obs_window_start = datetime.combine(obs_date, time(18, 30))
                 obs_window_end = datetime.combine(obs_date, time(5, 30)) + timedelta(days=1)
@@ -209,6 +233,9 @@ def plot_schedule(workDir, pdf):
                 plt.plot([obs_window_start, obs_window_end], [1, 1],
                             ls='-', color="white", alpha=0.8, lw=30, solid_capstyle='butt')
                 plt.title(f"Schedule for the night {obs_date} (HST)", fontsize=10)
+            else:
+                xlim_start, xlim_stop = [obs_window_end - timedelta(hours=11), obs_window_end]
+                obs_date -= timedelta(days=1)
         
         for _, row in df_window.iterrows():
             # Plot vertical red lines at start and end times.
@@ -233,33 +260,21 @@ def plot_schedule(workDir, pdf):
         plt.xlim(xlim_start, xlim_stop)
         plt.ylim(0.95, 1.05)
         plt.yticks([], [])
+        plt.tick_params(axis='x', which='both', labelbottom=True, labeltop=False, bottom=True, top=False)
         pdf.savefig(bbox_inches='tight', pad_inches=0.1)
     plt.close()
 
-def plot_EET(workDir, pdf):
+def plot_EET(workDir, tb_queue, pdf):
     """
     Plot a pairwise correlation matrix (Seaborn pairplot) of effective exposure times
     for each arm, sampled from today's queueDB.
     """
-    # 1. Load today's queue database tables (main and backup)
-    today_str = datetime.today().strftime("%Y%m%d")
-    main_csv = os.path.join(workDir, "ppp", f"tgt_queueDB_{today_str}.csv")
-    backup_csv = os.path.join(workDir, "ppp", f"tgt_queueDB_{today_str}_backup.csv")
-    try:
-        tb_queue = vstack([
-            Table.read(main_csv),
-            Table.read(backup_csv)
-        ])
-    except Exception as e:
-        logger.error(f"[EET] Could not read {main_csv} or {backup_csv}: {e}")
-        return
-
-    # 2. Convert to pandas DataFrame and downsample for visualization clarity
+    # 1. Convert to pandas DataFrame and downsample for visualization clarity
     df = tb_queue.to_pandas()
     if len(df) > 0:
         df = df.sample(frac=0.05, random_state=42).reset_index(drop=True)
 
-    # 3. Select columns for correlation analysis (B, R, M, N arms)
+    # 2. Select columns for correlation analysis (B, R, M, N arms)
     cols = [
         'eff_exptime_done_real_b',
         'eff_exptime_done_real_r',
@@ -271,7 +286,7 @@ def plot_EET(workDir, pdf):
             logger.error(f"[EET] Missing column: {c}")
             return
 
-    # 4. Create Seaborn pairplot and add one-to-one line in each subplot
+    # 3. Create Seaborn pairplot and add one-to-one line in each subplot
     g = sns.pairplot(df[cols], corner=True, diag_kind=None,
                      plot_kws={'marker': '.', 'color': 'orange'})
 
@@ -286,12 +301,12 @@ def plot_EET(workDir, pdf):
                 ax.plot([line_min, line_max], [line_min, line_max],
                         color='k', linestyle='--', lw=2, zorder=10)
 
-    # 5. Save to PDF
+    # 4. Save to PDF
     plt.tight_layout()
     pdf.savefig(bbox_inches='tight', pad_inches=0.1)
     plt.close()
 
-def plot_CR(conf, tb_tgt, workDir, pdf):
+def plot_CR(conf, tb_tgt, tb_queue, workDir, pdf):
     """
     Plot completion rates (bar charts) for each proposal.
     """
@@ -301,7 +316,7 @@ def plot_CR(conf, tb_tgt, workDir, pdf):
     tb_tgt["exptime_done"] = 0.0
 
     # --- Calculate expected exposure time ---
-    pfsdeg_files = glob(os.path.join(workDir, "../design/*.fits"))
+    pfsdeg_files = glob(os.path.join(workDir, "design/*.fits"))
     tb_tgt["exptime_exp"] = 0
     for file in pfsdeg_files:
         hdul = fits.open(file)
@@ -311,19 +326,6 @@ def plot_CR(conf, tb_tgt, workDir, pdf):
 
     # --- Proposal ID lists ---
     all_psl_ids = conf["ppp"]["proposalIds"] + conf["ppp"]["proposalIds_backup"]
-
-    # --- Load queue (today's queueDB) ---
-    today_str = datetime.today().strftime("%Y%m%d")
-    main_csv = os.path.join(workDir, "ppp", f"tgt_queueDB_{today_str}.csv")
-    backup_csv = os.path.join(workDir, "ppp", f"tgt_queueDB_{today_str}_backup.csv")
-    try:
-        tb_queue = vstack([
-            Table.read(main_csv),
-            Table.read(backup_csv)
-        ])
-    except Exception as e:
-        logger.error(f"[EET] Could not read {main_csv} or {backup_csv}: {e}")
-        return
     
     # --- Collect stats per proposal ---
     fh_tot, fh_alloc, fh_com, fh_achieve, fh_exe, fh_exp = [], [], [], [], [], []
@@ -331,9 +333,8 @@ def plot_CR(conf, tb_tgt, workDir, pdf):
         queue_ = tb_queue[tb_queue["psl_id"] == psl_id]
         tgt_ = tb_tgt[tb_tgt["proposal_id"] == psl_id]
 
-        #fh_tot_ = np.sum(tgt_["exptime_usr"]) / 3600.0
-        fh_tot_ = np.sum(tgt_["ob_exptime"]) / 3600.0
-        fh_allo_ = 0 #list(set(tgt_["allocated_time_tac"]))[0] if len(tgt_) > 0 else 0
+        fh_tot_ = np.sum(tgt_["ob_exptime_usr"]) / 3600.0
+        fh_allo_ = list(set(tgt_["allocated_time_tac"]))[0] if len(tgt_) > 0 else 0
         fh_com_ = np.sum(queue_["eff_exptime_done_rec"][queue_["eff_exptime_done_rec"] >= queue_["exptime"]]) / 3600.0
         fh_now_ = np.sum(queue_["eff_exptime_done_rec"]) / 3600.0
         fh_real_ = np.sum(queue_["exptime_done_real"]) / 3600.0
@@ -367,26 +368,30 @@ def plot_CR(conf, tb_tgt, workDir, pdf):
         for i, bar in enumerate(bars_achieve):
             x = bar.get_width()
             y = bar.get_y() + bar.get_height() / 2.0
-            ratio = (fh_achieve[i] / fh_alloc[i]) * 100 if fh_alloc[i] else 0
-            ax.text(x + 0.05 * (fh_alloc[i] or 1), y, f"{ratio:.0f}%", va='center', fontsize=9, color="tomato", fontweight="bold")
+            ratio = (fh_achieve[i] / fh_alloc[i]) * 100 if fh_alloc[i] else fh_achieve[i]
+            text_ = f"{ratio:.0f}%" if fh_alloc[i] else f"{ratio:.1f}"
+            ax.text(x + 0.05 * (fh_alloc[i] or 1), y, text_, va='center', fontsize=9, color="tomato", fontweight="bold")
 
         for i, bar in enumerate(bars_com):
             x = bar.get_width()
             y = bar.get_y() + bar.get_height() / 2.0
-            ratio = (fh_com[i] / fh_alloc[i]) * 100 if fh_alloc[i] else 0
-            ax.text(x + 0.05 * (fh_alloc[i] or 1), y, f"{ratio:.0f}%", va='center', fontsize=8)
+            ratio = (fh_com[i] / fh_alloc[i]) * 100 if fh_alloc[i] else fh_com[i]
+            text_ = f"{ratio:.0f}%" if fh_alloc[i] else f"{ratio:.1f}"
+            ax.text(x + 0.05 * (fh_alloc[i] or 1), y, text_, va='center', fontsize=8)
 
         for i, bar in enumerate(bars_exe):
             x = bar.get_width()
             y = bar.get_y() + bar.get_height() / 2.0
-            ratio = (fh_exe[i] / fh_alloc[i]) * 100 if fh_alloc[i] else 0
-            ax.text(x + 0.05 * (fh_alloc[i] or 1), y, f"{ratio:.0f}%", va='center', fontsize=8)
+            ratio = (fh_exe[i] / fh_alloc[i]) * 100 if fh_alloc[i] else fh_exe[i]
+            text_ = f"{ratio:.0f}%" if fh_alloc[i] else f"{ratio:.1f}"
+            ax.text(x + 0.05 * (fh_alloc[i] or 1), y, text_, va='center', fontsize=8)
 
         for i, bar in enumerate(bars_exp):
             x = bar.get_width()
             y = bar.get_y() + bar.get_height() / 2.0
-            ratio = (fh_exp[i] / fh_alloc[i]) * 100 if fh_alloc[i] else 0
-            ax.text(x + 0.05 * (fh_alloc[i] or 1), y, f"{ratio:.0f}%", va='center', fontsize=8)
+            ratio = (fh_exp[i] / fh_alloc[i]) * 100 if fh_alloc[i] else fh_exp[i]
+            text_ = f"{ratio:.0f}%" if fh_alloc[i] else f"{ratio:.1f}"
+            ax.text(x + 0.05 * (fh_alloc[i] or 1), y, text_, va='center', fontsize=8)
 
         ax.set_yticks(indices + 2*bar_height)
         ax.set_yticklabels(label_ids)

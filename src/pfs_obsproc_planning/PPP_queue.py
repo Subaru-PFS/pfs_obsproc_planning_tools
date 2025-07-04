@@ -2097,10 +2097,12 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/", backup=False):
     ob_parallaxs = _tb_tgt_tot["parallax"].data
     ob_priority = _tb_tgt_tot["priority"].data
     ob_exptime = _tb_tgt_tot["exptime"].data
+    ob_exptime_usr = _tb_tgt_tot["exptime_usr"].data
     ob_single_exptime = _tb_tgt_tot["single_exptime"].data
     ob_resolution = _tb_tgt_tot["resolution"].data
     proposal_id = _tb_tgt_tot["proposal_id"].data
     proposal_rank = _tb_tgt_tot["rank"].data
+    proposal_FH = _tb_tgt_tot["allocated_time_tac"].data
     ob_weight_best = _tb_tgt_tot["rank_fin"].data
     ob_allocate_time_netflow = _tb_tgt_tot["exptime_assign"].data
     ob_filter_g = _tb_tgt_tot["filter_g"].data
@@ -2143,10 +2145,12 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/", backup=False):
             ob_parallaxs,
             ob_priority,
             ob_exptime,
+            ob_exptime_usr,
             ob_single_exptime,
             ob_resolution,
             proposal_id,
             proposal_rank,
+            proposal_FH,
             ob_weight_best,
             ob_allocate_time_netflow,
             ob_filter_g,
@@ -2188,10 +2192,12 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/", backup=False):
             "ob_parallax",
             "ob_priority",
             "ob_exptime",
+            "ob_exptime_usr",
             "ob_single_exptime",
             "ob_resolution",
             "proposal_id",
             "proposal_rank",
+            "allocated_time_tac",
             "ob_weight_best",
             "ob_exptime_assign",
             "ob_filter_g",
