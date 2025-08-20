@@ -164,11 +164,11 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
         # exp_time = float(exp_time) * 60.0  # assume table is in MINUTES
         exp_time = float(exp_time)  # exptime is in seconds
         pa = float(pa)
-        """
+        #"""
         if "backup" in ob_code:
-            priority = 0
+            priority = 100
         else:
-            priority = float(priority)
+            priority = 0
         #"""
         priority = float(priority) 
 
@@ -276,7 +276,7 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
 
         if start_time == default_start_time and stop_time == default_stop_time:
             # Calculate refocus start time as datetime
-            time_refocus_start = default_start_time + timedelta(minutes=(23.0 + float(conf['qplan']['overhead'])) * 1)
+            time_refocus_start = default_start_time + timedelta(minutes=(23.0 + float(conf['qplan']['overhead'])) * 2)
             
             # Then compute stop time based on start time
             time_refocus_stop = time_refocus_start + timedelta(minutes=10.0)

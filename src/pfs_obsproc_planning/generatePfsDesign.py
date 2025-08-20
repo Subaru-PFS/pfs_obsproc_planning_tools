@@ -334,7 +334,7 @@ class GeneratePfsDesign(object):
 
         ## import qPlanner module ##
         from . import qPlan
-
+        
         #"""
         try:
             self.df_qplan = pd.read_csv(os.path.join(self.outputDirQplan, "result.csv"))
@@ -365,7 +365,7 @@ class GeneratePfsDesign(object):
                     self.df_qplan["ppc_ra"],
                     self.df_qplan["ppc_dec"],
                 )
-            }
+            }               
 
             if self.conf["ppp"]["daily_plan"]:
                 logger.info(f"Now running for the daily planning")
@@ -449,7 +449,7 @@ class GeneratePfsDesign(object):
                     self.resQPlan = {**self.resQPlan, **self.resQPlan_}
                 #"""
         
-                (self.df_qplan).to_csv(os.path.join(self.outputDirQplan, "result.csv"))
+            (self.df_qplan).to_csv(os.path.join(self.outputDirQplan, "result.csv"))
     
             if plotVisibility is True:
                 time_qplan = time.time() - time_start
@@ -758,7 +758,6 @@ class GeneratePfsDesign(object):
         if not os.path.exists(figpath):
             os.makedirs(figpath)
 
-        """
         clear_folder(figpath)
 
         validation.validation(
@@ -768,7 +767,6 @@ class GeneratePfsDesign(object):
             self.conf["validation"]["showfig"],
             self.conf["ssp"]["ssp"],
         )
-        #"""
         
         logger.info(f"validation plots saved under {figpath}")
 

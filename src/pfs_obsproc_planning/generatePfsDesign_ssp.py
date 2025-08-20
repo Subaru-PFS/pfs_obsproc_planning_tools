@@ -493,11 +493,11 @@ class GeneratePfsDesign_ssp(object):
             )
 
             proposal_id = set(tb["proposal_id"])
-            proposal_id_req = {"S25A-OT02"}
+            proposal_id_req = {"S25B-OT02"}
             if proposal_id != proposal_id_req:
                 validate_success = False
                 logger.error(
-                    f"[Validation of tgtLists] Proposal_id is incorrect (should be S25A-OT02; {ppc_code}, {tgt_type}): {proposal_id}"
+                    f"[Validation of tgtLists] Proposal_id is incorrect (should be S25B-OT02; {ppc_code}, {tgt_type}): {proposal_id}"
                 )
 
             target_type = set(tb["target_type_id"])
@@ -508,11 +508,11 @@ class GeneratePfsDesign_ssp(object):
                 )
 
             catId = set(tb["input_catalog_id"])
-            unexpected_Id = catId - {10091, 10092, 10093}
+            unexpected_Id = catId - {10091, 10092, 10093, 10251, 10252, 10253}
             if len(unexpected_Id) > 0:
                 validate_success = False
                 logger.error(
-                    f"[Validation of tgtLists] Incorrect catId (should be 10091/2/3; {ppc_code}, {tgt_type}): {unexpected_Id}"
+                    f"[Validation of tgtLists] Incorrect catId (should be 10091/2/3 or 10251/2/3; {ppc_code}, {tgt_type}): {unexpected_Id}"
                 )
 
         elif tgt_type == "sky":
@@ -528,11 +528,11 @@ class GeneratePfsDesign_ssp(object):
                 )
 
             catId = set(tb["input_catalog_id"])
-            unexpected_Id = catId - {1006, 1007, 10091, 10092, 10093}
+            unexpected_Id = catId - {1006, 1007, 10091, 10092, 10093, 10251, 10252, 10253}
             if len(unexpected_Id) > 0:
                 validate_success = False
                 logger.error(
-                    f"[Validation of tgtLists] Incorrect catId (should be 1006/7 or 10091/2/3; {ppc_code}, {tgt_type}): {unexpected_Id}"
+                    f"[Validation of tgtLists] Incorrect catId (should be 1006/7 or 10091/2/3 or 10251/2/3; {ppc_code}, {tgt_type}): {unexpected_Id}"
                 )
 
         elif tgt_type == "fluxstd":
@@ -548,11 +548,11 @@ class GeneratePfsDesign_ssp(object):
                 )
 
             catId = set(tb["input_catalog_id"])
-            unexpected_Id = catId - {3006, 10091, 10092, 10093}
+            unexpected_Id = catId - {3006, 10091, 10092, 10093, 10251, 10252, 10253}
             if len(unexpected_Id) > 0:
                 validate_success = False
                 logger.error(
-                    f"[Validation of tgtLists] Incorrect catId (should be 3006 or 10091/2/3; {ppc_code}, {tgt_type}): {unexpected_Id}"
+                    f"[Validation of tgtLists] Incorrect catId (should be 3006 or 10091/2/3 or 10251/2/3; {ppc_code}, {tgt_type}): {unexpected_Id}"
                 )
 
         return validate_success

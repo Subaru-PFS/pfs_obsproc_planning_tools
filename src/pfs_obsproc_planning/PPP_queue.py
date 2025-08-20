@@ -341,6 +341,9 @@ def readTarget(mode, para):
             for col in ["filter_g","filter_r", "filter_i", "filter_z", "filter_y"]:
                 tb_tgt[col] = tb_tgt[col].astype("str")
 
+            if proposalId == 'S25B-126QN':
+                tb_tgt = tb_tgt[tb_tgt["priority"]<=3]
+
             """
             for col in ["psf_flux_g","psf_flux_r", "psf_flux_i", "psf_flux_z", "psf_flux_y"]:
                 tb_tgt[col] = tb_tgt[col].astype(float)
@@ -353,10 +356,6 @@ def readTarget(mode, para):
 
             return tb_tgt
 
-    # only for S25A march run
-    #proposalid = ['S25A-058QN', 'S25A-020QN', 'S25A-099QN', 'S25A-096QN', 'S25A-042QN', 'S25A-101QN']
-    #proposalid = ['S25A-139QN', "S25A-036QN", "S25A-102QN", "S25A-028QN", "S25A-137QN", "S25A-074QN", "S25A-107QN", "S25A-080QN", "S25A-094QN", "S25A-113QN", 'S25A-064QN']
-    #proposalid = ['S25A-058QN', 'S25A-020QN', 'S25A-099QN', 'S25A-096QN', 'S25A-042QN', 'S25A-101QN'，'S25A-139QN', "S25A-036QN", "S25A-102QN", "S25A-028QN", "S25A-137QN", "S25A-074QN", "S25A-107QN", "S25A-080QN", "S25A-094QN", "S25A-113QN"，'S25A-064QN']
     proposalid = para["proposalIds"]
     
     tb_tgt_lst = []
@@ -389,9 +388,9 @@ def readTarget(mode, para):
 
     #for grade c programs, set completion rate as 70% as upper limit: no need as tgt DB has updated allocated_time_tac
     #"""
-    proposalid = ["S25A-043QF", "S25A-119QF", "S25A-111QF", "S25A-116QF", "S25A-126QF", "S25A-017QF", "S25A-019QF", "S25A-112QF", "S25A-030QF", "S25A-034QF"]
+    proposalid = ["S25B-086QN", "S25B-056QN", "S25B-092QN", "S25B-134QN", "S25B-120QN", "S25B-047QN", "S25B-126QN", "S25B-125QN", "S25B-136QN", "S25B-048QN"]
     mask = np.isin(tb_tgt["proposal_id"], proposalid)
-    tb_tgt["allocated_time_tac"][mask] = 2394.0 * 10.0 #tb_tgt["allocated_time_tac"][mask] * 0.7
+    tb_tgt["allocated_time_tac"][mask] = tb_tgt["allocated_time_tac"][mask] * 0.7
     #"""
 
     if len(set(tb_tgt["single_exptime"])) > 1:
@@ -541,7 +540,7 @@ def readTarget(mode, para):
 
         # only for 064 since too huge list, FIX needed
         """
-        if proposalId == 'S25A-064QN':
+        if proposalId == 'S25B-126QN':
             tb_tgt = tb_tgt[tb_tgt["priority"]<=3]
 
         if proposalId in ["S25A-043QF", "S25A-119QF", "S25A-111QF", "S25A-116QF", "S25A-126QF", "S25A-017QF", "S25A-019QF", "S25A-112QF", "S25A-030QF", "S25A-034QF"]:
@@ -549,7 +548,7 @@ def readTarget(mode, para):
             tb_tgt = tb_tgt[(tb_tgt["ra"]>280) * (tb_tgt["dec"]<70) * (tb_tgt["dec"]>-20)]
             n_tgt2 = len(tb_tgt)
             logger.info(f"Visibility limits: {proposalId} {n_tgt1:.0f} -> {n_tgt2:.0f}")
-        #"""
+    
         msk = (tb_tgt["priority"] > 3) & (tb_tgt["proposal_id"] == 'S25A-064QN')
         tb_tgt = tb_tgt[~msk]
 
@@ -559,7 +558,8 @@ def readTarget(mode, para):
             tb_tgt = tb_tgt[~msk]
             n_tgt2 = len(tb_tgt)
             logger.info(f"Visibility limits: {pslid_} {n_tgt1:.0f} -> {n_tgt2:.0f}")
-
+        #"""
+        
         if para["visibility_check"]:
             tb_tgt = visibility_checker(tb_tgt, para["obstimes"], para["starttimes"], para["stoptimes"])
 
@@ -823,6 +823,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
         and len(_tb_tgt_) > 0
         and len(ppc_lst) < nPPC
     ):
+        
         psl_id_undone = list(
             set(
                 tb_fh["proposal_id"][
