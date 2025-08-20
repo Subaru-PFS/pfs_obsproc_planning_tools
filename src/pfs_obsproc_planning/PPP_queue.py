@@ -24,10 +24,12 @@ from sklearn.cluster import DBSCAN, HDBSCAN, AgglomerativeClustering
 from sklearn.neighbors import KernelDensity
 from qplan import q_db, q_query, entity
 from qplan.util.site import site_subaru as observer
+from qplan.util.eph_cache import EphemerisCache
 from datetime import datetime, timedelta, timezone, date
 from ginga.misc.log import get_logger
 
 logger_qplan = get_logger("qplan_test", null=True)
+eph_cache = EphemerisCache(logger_qplan, precision_minutes=5)
 
 warnings.filterwarnings("ignore")
 
@@ -141,15 +143,16 @@ def visibility_checker(tb_tgt, obstimes, start_time_list, stop_time_list):
             if i==0:
                 logger.info(f"date: {date}, start={start_time}, stop={stop_time}")
 
-            obs_ok, t_start, t_stop = observer.observable(
-                target,
+            key = target
+            obs_ok, t_start, t_stop = eph_cache.observable(
+                key, 
+                target, 
+                observer, 
                 start_time,
                 stop_time,
                 min_el,
                 max_el,
                 total_time,
-                airmass=None,
-                moon_sep=None,
             )
 
             if t_start is None or t_stop is None:
@@ -297,7 +300,7 @@ def readTarget(mode, para):
                 for ii in range(len(df_tgt))
             ]
             df_tgt = df_tgt.drop(columns=["allocated_time_lr", "allocated_time_mr"])
-    
+
             df_tgt = removeObjIdDuplication(df_tgt)
     
             df_tgt["psf_flux_g"][df_tgt["psf_flux_g"].isnull()] = np.nan
@@ -338,10 +341,6 @@ def readTarget(mode, para):
             for col in ["filter_g","filter_r", "filter_i", "filter_z", "filter_y"]:
                 tb_tgt[col] = tb_tgt[col].astype("str")
 
-            # only for 064 since too huge list, FIX needed
-            if proposalId == 'S25A-064QN':
-                tb_tgt = tb_tgt[tb_tgt["priority"]<=3]
-
             """
             for col in ["psf_flux_g","psf_flux_r", "psf_flux_i", "psf_flux_z", "psf_flux_y"]:
                 tb_tgt[col] = tb_tgt[col].astype(float)
@@ -357,7 +356,6 @@ def readTarget(mode, para):
     # only for S25A march run
     #proposalid = ['S25A-058QN', 'S25A-020QN', 'S25A-099QN', 'S25A-096QN', 'S25A-042QN', 'S25A-101QN']
     #proposalid = ['S25A-139QN', "S25A-036QN", "S25A-102QN", "S25A-028QN", "S25A-137QN", "S25A-074QN", "S25A-107QN", "S25A-080QN", "S25A-094QN", "S25A-113QN", 'S25A-064QN']
-    #proposalid = ['S25A-064QN']
     #proposalid = ['S25A-058QN', 'S25A-020QN', 'S25A-099QN', 'S25A-096QN', 'S25A-042QN', 'S25A-101QN'，'S25A-139QN', "S25A-036QN", "S25A-102QN", "S25A-028QN", "S25A-137QN", "S25A-074QN", "S25A-107QN", "S25A-080QN", "S25A-094QN", "S25A-113QN"，'S25A-064QN']
     proposalid = para["proposalIds"]
     
@@ -378,13 +376,23 @@ def readTarget(mode, para):
     tb_tgt["exptime_assign"] = 0.0
     tb_tgt["exptime_done"] = 0.0  # observed exptime
 
-    ## --only for 020QN, need to confirm with Pyo-san-- updated FH (250530), FIX needed!!
-    tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-058QN'] = 19848.75
-    tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-020QN'] = 3237.0
-    tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-099QN'] = 6803.00
-    tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-096QN'] = 2661.00
-    tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-042QN'] = 18758.75*1.5
-    tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-101QN'] = 4363.50*1.2
+    ## --only for 020QN, need to confirm with Pyo-san-- updated FH (250530): no need as tgt DB has updated allocated_time_tac
+    #"""
+    #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-058QN'] = 19848.75
+    tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-020QN'] = 3237.25
+    #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-099QN'] = 6803.00
+    #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-096QN'] = 2661.00
+    #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-042QN'] = 18758.75
+    #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-101QN'] = 4363.50
+    tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-064QN'] = 10000.0
+    #"""
+
+    #for grade c programs, set completion rate as 70% as upper limit: no need as tgt DB has updated allocated_time_tac
+    #"""
+    proposalid = ["S25A-043QF", "S25A-119QF", "S25A-111QF", "S25A-116QF", "S25A-126QF", "S25A-017QF", "S25A-019QF", "S25A-112QF", "S25A-030QF", "S25A-034QF"]
+    mask = np.isin(tb_tgt["proposal_id"], proposalid)
+    tb_tgt["allocated_time_tac"][mask] = 2394.0 * 10.0 #tb_tgt["allocated_time_tac"][mask] * 0.7
+    #"""
 
     if len(set(tb_tgt["single_exptime"])) > 1:
         logger.error(
@@ -416,6 +424,7 @@ def readTarget(mode, para):
         qq = q_query.QueueQuery(qa, use_cache=False)
 
         # determine observed exptime
+        #"""
         nn = 0
         tt = []
         for psl_id_ in psl_id:
@@ -441,33 +450,38 @@ def readTarget(mode, para):
                 elif arm == 'm':
                     exptime_exe = sum(exp.effective_exptime_m or 0 for exp in exps)
 
-                if len(tb_tgt[
-                    (tb_tgt["proposal_id"] == ex_ob.ob_key[0])
-                    * (tb_tgt["ob_code"] == ex_ob.ob_key[1])
-                ])==0:
+                msk = (tb_tgt["proposal_id"] == ex_ob.ob_key[0]) & (tb_tgt["ob_code"] == ex_ob.ob_key[1])
+
+                if len(tb_tgt[msk])==0:
                     continue
                     
-                exptime_usr = tb_tgt[
-                    (tb_tgt["proposal_id"] == ex_ob.ob_key[0])
-                    * (tb_tgt["ob_code"] == ex_ob.ob_key[1])
-                ]["exptime_usr"].data[0]
+                exptime_usr = tb_tgt[msk]["exptime_usr"].data[0]
                 exptime_exe_fin = min(
                     exptime_usr, exptime_exe
                 )  # ignore over-observation
                 if exptime_exe>=0:
                     nn+=1
                     tt.append([nn, psl_id_, ex_ob.ob_key[1], exptime_usr, arm, exptime_exe, exptime_exe_b, exptime_exe_r, exptime_exe_m, exptime_exe_n, exptime_exe_fin, len(exps)*450])
-                tb_tgt["exptime_done"][
-                    (tb_tgt["proposal_id"] == ex_ob.ob_key[0])
-                    * (tb_tgt["ob_code"] == ex_ob.ob_key[1])
-                ] = exptime_exe_fin
-
+                tb_tgt["exptime_done"][msk] = exptime_exe_fin
+            
         tb_queuedb=Table(np.array(tt),names=["N","psl_id","ob_code","exptime","ref_arm","eff_exptime_done_real", "eff_exptime_done_real_b", "eff_exptime_done_real_r", "eff_exptime_done_real_m", "eff_exptime_done_real_n", "eff_exptime_done_rec","exptime_done_real"])
-        #tt_.write("/home/wanqqq/workDir_pfs/run_2505/S25A-queue/output/tgt_queueDB_backup.csv",overwrite=True)
         #"""
-        
+
+        """
+        tb_queuedb = Table.read("/home/wanqqq/workDir_pfs/run_2506/S25A-queue/output_20250622/ppp/tgt_queueDB_20250622_backup.csv")
+
+        for tb_i in tb_queuedb:
+            msk = (tb_tgt["proposal_id"] == tb_i["psl_id"]) & (tb_tgt["ob_code"] == tb_i["ob_code"])
+            if len(tb_tgt[msk])==0:continue
+            exptime_usr = tb_tgt["exptime_usr"][msk].data[0]
+            exptime_exe = tb_i["eff_exptime_done_rec"]
+            exptime_exe_fin = min(
+                exptime_usr, exptime_exe
+            )  # ignore over-observation
+            tb_tgt["exptime_done"][msk] = exptime_exe_fin
+        #"""
+
         tb_tgt["exptime"] = tb_tgt["exptime_usr"] - tb_tgt["exptime_done"]
-        # print(len(tt_),len(tb_tgt[tb_tgt["exptime"]==0]))
 
         # update allocated time
         for psl_id_ in psl_id:
@@ -524,6 +538,27 @@ def readTarget(mode, para):
         )  # exptime needs to be multiples of 900 so netflow can be successfully executed
         n_tgt2 = len(tb_tgt)
         logger.info(f"There are {n_tgt2:.0f} (partial-obs: {sum(tb_tgt['exptime_done'] > 0):.0f}) / {n_tgt1:.0f} targets not completed")
+
+        # only for 064 since too huge list, FIX needed
+        """
+        if proposalId == 'S25A-064QN':
+            tb_tgt = tb_tgt[tb_tgt["priority"]<=3]
+
+        if proposalId in ["S25A-043QF", "S25A-119QF", "S25A-111QF", "S25A-116QF", "S25A-126QF", "S25A-017QF", "S25A-019QF", "S25A-112QF", "S25A-030QF", "S25A-034QF"]:
+            n_tgt1 = len(tb_tgt)
+            tb_tgt = tb_tgt[(tb_tgt["ra"]>280) * (tb_tgt["dec"]<70) * (tb_tgt["dec"]>-20)]
+            n_tgt2 = len(tb_tgt)
+            logger.info(f"Visibility limits: {proposalId} {n_tgt1:.0f} -> {n_tgt2:.0f}")
+        #"""
+        msk = (tb_tgt["priority"] > 3) & (tb_tgt["proposal_id"] == 'S25A-064QN')
+        tb_tgt = tb_tgt[~msk]
+
+        for pslid_ in ["S25A-043QF", "S25A-119QF", "S25A-111QF", "S25A-116QF", "S25A-126QF", "S25A-017QF", "S25A-019QF", "S25A-112QF", "S25A-030QF", "S25A-034QF"]:
+            n_tgt1 = len(tb_tgt)
+            msk = ((tb_tgt["ra"] <= 280) | (tb_tgt["dec"] > 5)) & (tb_tgt["proposal_id"] == pslid_)
+            tb_tgt = tb_tgt[~msk]
+            n_tgt2 = len(tb_tgt)
+            logger.info(f"Visibility limits: {pslid_} {n_tgt1:.0f} -> {n_tgt2:.0f}")
 
         if para["visibility_check"]:
             tb_tgt = visibility_checker(tb_tgt, para["obstimes"], para["starttimes"], para["stoptimes"])
@@ -902,7 +937,10 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
         ppc_lst_fin = ppc_lst[:]
 
     ppc_lst_fin = np.array(ppc_lst_fin)
-    weight_for_qplan = (1/ppc_lst_fin[:,4])/max(1/ppc_lst_fin[:,4])*1000.0
+    epsilon = 1e-3  # small number to avoid divide-by-zero
+    col = np.where(ppc_lst_fin[:, 4] == 0, epsilon, ppc_lst_fin[:, 4])
+    recip = 1 / col
+    weight_for_qplan = (recip / recip.max()) * 1000.0
 
     # write
     nPPC = len(ppc_lst_fin)
@@ -2059,10 +2097,12 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/", backup=False):
     ob_parallaxs = _tb_tgt_tot["parallax"].data
     ob_priority = _tb_tgt_tot["priority"].data
     ob_exptime = _tb_tgt_tot["exptime"].data
+    ob_exptime_usr = _tb_tgt_tot["exptime_usr"].data
     ob_single_exptime = _tb_tgt_tot["single_exptime"].data
     ob_resolution = _tb_tgt_tot["resolution"].data
     proposal_id = _tb_tgt_tot["proposal_id"].data
     proposal_rank = _tb_tgt_tot["rank"].data
+    proposal_FH = _tb_tgt_tot["allocated_time_tac"].data
     ob_weight_best = _tb_tgt_tot["rank_fin"].data
     ob_allocate_time_netflow = _tb_tgt_tot["exptime_assign"].data
     ob_filter_g = _tb_tgt_tot["filter_g"].data
@@ -2105,10 +2145,12 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/", backup=False):
             ob_parallaxs,
             ob_priority,
             ob_exptime,
+            ob_exptime_usr,
             ob_single_exptime,
             ob_resolution,
             proposal_id,
             proposal_rank,
+            proposal_FH,
             ob_weight_best,
             ob_allocate_time_netflow,
             ob_filter_g,
@@ -2150,10 +2192,12 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/", backup=False):
             "ob_parallax",
             "ob_priority",
             "ob_exptime",
+            "ob_exptime_usr",
             "ob_single_exptime",
             "ob_resolution",
             "proposal_id",
             "proposal_rank",
+            "allocated_time_tac",
             "ob_weight_best",
             "ob_exptime_assign",
             "ob_filter_g",

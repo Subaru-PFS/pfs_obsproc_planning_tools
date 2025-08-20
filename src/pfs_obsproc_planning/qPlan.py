@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # qPlan.py : queuePlanner
 
-import os
+import os, sys
 import warnings
 from datetime import datetime, timedelta, timezone, date
 from zoneinfo import ZoneInfo
@@ -164,13 +164,13 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
         # exp_time = float(exp_time) * 60.0  # assume table is in MINUTES
         exp_time = float(exp_time)  # exptime is in seconds
         pa = float(pa)
-        #"""
+        """
         if "backup" in ob_code:
             priority = 0
         else:
             priority = float(priority)
         #"""
-        #priority = 0 #float(priority) 
+        priority = float(priority) 
 
         if resolution == "L":
             resolution = "low"
@@ -276,7 +276,7 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
 
         if start_time == default_start_time and stop_time == default_stop_time:
             # Calculate refocus start time as datetime
-            time_refocus_start = default_start_time + timedelta(minutes=(18.0 + float(conf['qplan']['overhead'])) * 2)
+            time_refocus_start = default_start_time + timedelta(minutes=(23.0 + float(conf['qplan']['overhead'])) * 1)
             
             # Then compute stop time based on start time
             time_refocus_stop = time_refocus_start + timedelta(minutes=10.0)
@@ -352,18 +352,43 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
             #"""
             
         else:
-            rec.append(
-                Bunch(
-                    date=date_,  # date HST
-                    starttime=start_time,  # time HST
-                    stoptime=stop_time,  # time HST
-                    categories=["open"],
-                    skip=False,
-                    note="",
-                    data=cur_data,
+            if len(starttime_backup) == 0:
+                rec.append(
+                    Bunch(
+                        date=date_,  # date HST
+                        starttime=start_time,  # time HST
+                        stoptime=stop_time,  # time HST
+                        categories=["open"],
+                        skip=False,
+                        note="",
+                        data=cur_data,
+                    )
                 )
-            )
-        break
+            else:
+                for ii in range(len(starttime_backup)):
+                    if starttime_backup[ii] < default_start_time:
+                        starttime_backup[ii] = default_start_time
+                    if stoptime_backup[ii] > default_stop_time:
+                        stoptime_backup[ii] = default_stop_time
+
+                    rec.append(
+                        Bunch(
+                            date=date_,  # date HST
+                            starttime=starttime_backup[ii],
+                            stoptime=stoptime_backup[ii],  # time HST
+                            categories=["open"],
+                            skip=False,
+                            note="",
+                            data=cur_data,
+                        )
+                    ) 
+                    
+        if conf["ppp"]["daily_plan"]:
+            break
+
+    if len(rec) == 0:
+        print("Error: No time slots available.")
+        sys.exit(1)
 
     sdlr.set_schedule_info(rec)
     # set OB list to schedule from

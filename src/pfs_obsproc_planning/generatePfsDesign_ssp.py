@@ -34,20 +34,20 @@ def read_conf(conf):
 
     # get some parameters from environmet variables
     # if not in the config file and already set as enviroment variables
-    if ("pfs_utils_dir" not in config["sfa"]) and (
+    if ("pfs_utils_dir" not in config["packages"]) and (
         os.environ.get("PFS_UTILS_DIR") is not None
     ):
-        config["sfa"]["pfs_utils_dir"] = os.environ.get("PFS_UTILS_DIR")
+        config["packages"]["pfs_utils_dir"] = os.environ.get("PFS_UTILS_DIR")
         logger.info(
-            f"Setting config['sfa']['pfs_utils_dir'] from environment as {config['sfa']['pfs_utils_dir']}"
+            f"Setting config['packages']['pfs_utils_dir'] from environment as {config['packages']['pfs_utils_dir']}"
         )
 
-    if ("pfs_instdata_dir" not in config["sfa"]) and (
+    if ("pfs_instdata_dir" not in config["packages"]) and (
         os.environ.get("PFS_INSTDATA_DIR") is not None
     ):
-        config["sfa"]["pfs_instdata_dir"] = os.environ.get("PFS_INSTDATA_DIR")
+        config["packages"]["pfs_instdata_dir"] = os.environ.get("PFS_INSTDATA_DIR")
         logger.info(
-            f"Setting config['sfa']['pfs_instdata_dir'] from environment as {config['sfa']['pfs_instdata_dir']}"
+            f"Setting config['packages']['pfs_instdata_dir'] from environment as {config['packages']['pfs_instdata_dir']}"
         )
 
     if ("cobra_coach_dir" not in config["sfa"]) and (
@@ -101,7 +101,7 @@ def check_versions(package, repo_path, version_desire):
     def compare_commit_times(current_commit_time, desired_commit_time):
         """Compare commit times to determine if current is older than desired."""
         if current_commit_time is None:
-            return False  # If no current commit time, always update
+            return True  # If no current commit time, always update
         return (
             current_commit_time < desired_commit_time
         )  # Check if the current version's commit is older
@@ -134,13 +134,18 @@ def check_versions(package, repo_path, version_desire):
         desired_commit_time = get_commit_time(repo, version)
 
         if compare_commit_times(current_commit_time, desired_commit_time):
-            if (
-                version in [ref.name for ref in repo.remote().refs]
-                or version in [tag.name for tag in repo.tags]
-                or repo.commit(version)
-            ):
+            if version in [ref.name for ref in repo.remote().refs]:
+                # Checkout the remote branch and track it locally
+                repo.git.checkout(f"-b {version} origin/{version}")
+                logger.info(f"({package}) Checked out and tracking {version}.")
+            elif version in [tag.name for tag in repo.tags]:
+                # Checkout the tag (no tracking needed for tags)
                 repo.git.checkout(version)
-                logger.info(f"({package}) Checked out to {version}.")
+                logger.info(f"({package}) Checked out to tag {version}.")
+            elif repo.commit(version):
+                # If it's a commit hash, check out the commit directly
+                repo.git.checkout(version)
+                logger.info(f"({package}) Checked out to commit {version}.")
             else:
                 logger.warning(
                     f"({package}) Version '{version}' not found in branches or tags."
@@ -175,17 +180,19 @@ class GeneratePfsDesign_ssp(object):
 
         # check versions of dependent packages
         def check_version_pfs(self, package):
-            try:
-                repo_path = self.conf["sfa"][package + "_dir"]
-                version_desire = self.conf["sfa"][package + "_ver"]
-                check_versions(package, repo_path, version_desire)
-            except KeyError:
-                logger.warning(f"Path of {package} not found in {self.config}")
+            if self.conf["packages"]["check_version"]:
+                try:
+                    repo_path = self.conf["packages"][package + "_dir"]
+                    version_desire = self.conf["packages"][package + "_ver"]
+                    check_versions(package, repo_path, version_desire)
+                except KeyError:
+                    logger.warning(f"Path of {package} not found in {self.config}")
+                return None
+            else:
+                return None
 
-        #"""
         for package_ in [
             "pfs_utils",
-            "pfs_instdata",
             "ets_pointing",
             "ets_shuffle",
             "pfs_datamodel",
@@ -199,7 +206,7 @@ class GeneratePfsDesign_ssp(object):
             "qplan",
         ]:
             check_version_pfs(self, package_)
-        #"""
+
         import pfs.utils
 
         repo_path = os.path.join(pfs.utils.__path__[0], "../../../")
@@ -941,7 +948,7 @@ class GeneratePfsDesign_ssp(object):
                 "2025-01-24",
                 self.conf["netflow"]["use_gurobi"],
                 dict(self.conf["gurobi"]) if self.conf["netflow"]["use_gurobi"] else None,
-                self.conf["sfa"]["pfs_instdata_dir"],
+                self.conf["packages"]["pfs_instdata_dir"],
                 self.conf["sfa"]["cobra_coach_dir"],
                 None,
                 self.conf["sfa"]["sm"],
@@ -988,7 +995,7 @@ class GeneratePfsDesign_ssp(object):
                 df_filler=None,
                 is_no_target=is_no_target,
                 design_name=ppc_code,
-                pfs_instdata_dir=self.conf["sfa"]["pfs_instdata_dir"],
+                pfs_instdata_dir=self.conf["packages"]["pfs_instdata_dir"],
                 obs_time=tb_ppc_t["ppc_obstime_utc"],
             )
 

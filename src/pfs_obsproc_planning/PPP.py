@@ -200,6 +200,9 @@ def readTarget(mode, para):
 
         def query_target_from_db(proposalId):
             sql = f"SELECT ob_code,obj_id,c.input_catalog_id,ra,dec,epoch,priority,pmra,pmdec,parallax,effective_exptime,single_exptime,qa_reference_arm,is_medium_resolution,proposal.proposal_id,rank,grade,allocated_time_lr+allocated_time_mr as \"allocated_time\",allocated_time_lr,allocated_time_mr,filter_g,filter_r,filter_i,filter_z,filter_y,psf_flux_g,psf_flux_r,psf_flux_i,psf_flux_z,psf_flux_y,psf_flux_error_g,psf_flux_error_r,psf_flux_error_i,psf_flux_error_z,psf_flux_error_y,total_flux_g,total_flux_r,total_flux_i,total_flux_z,total_flux_y,total_flux_error_g,total_flux_error_r,total_flux_error_i,total_flux_error_z,total_flux_error_y FROM target JOIN proposal ON target.proposal_id=proposal.proposal_id JOIN input_catalog AS c ON target.input_catalog_id = c.input_catalog_id WHERE proposal.proposal_id in ('{proposalId}') AND c.active;"
+
+            if proposalId == "S25A-UH022-A":
+                sql = sql[:-1] + " AND c.input_catalog_id = 10154;"
     
             conn = tgtDB.connect()
             query = conn.execute(sa.sql.text(sql))
@@ -313,7 +316,7 @@ def readTarget(mode, para):
             return tb_tgt
 
     # only for S25A march run
-    proposalid = ['S25A-UH041-A']
+    proposalid = ['S25A-UH022-A']
 
     tb_tgt_lst = []
     for proposalid_ in proposalid:
@@ -339,6 +342,10 @@ def readTarget(mode, para):
             "[S1] Multiple single-exptime are given. Not accepted now (240709)."
         )
         return Table(), Table(), Table(), Table(), Table()
+
+    # fix needed
+    tb_tgt["single_exptime"][tb_tgt["proposal_id"] == 'S25A-UH022-A'] = 3000.0
+    tb_tgt["exptime_usr"][(tb_tgt["proposal_id"] == 'S25A-UH022-A') * (tb_tgt["priority"] == 0)] = 12000.0
 
     tb_tgt.meta["single_exptime"] = list(set(tb_tgt["single_exptime"]))[0]
     logger.info(
@@ -1273,10 +1280,11 @@ def PPC_centers_single(_tb_tgt, nPPC):
         Returns:
           Negative of the weighted sum of bright and faint counts (since we minimize).
         """
-        ra, dec, pa = params
-        #lst_tgtID_assign = netflowRun4PPC(_tb_tgt, ra, dec, pa)
-        index_ = PFS_FoV(ra, dec, pa, _tb_tgt)
-        lst_tgtID_assign = _tb_tgt["identify_code"][index_]
+        #ra, dec, pa = params
+        pa = params
+        lst_tgtID_assign = netflowRun4PPC(_tb_tgt, ra, dec, pa)
+        #index_ = PFS_FoV(ra, dec, pa, _tb_tgt)
+        #lst_tgtID_assign = _tb_tgt["identify_code"][index_]
         
         index_assign = np.in1d(_tb_tgt["identify_code"], lst_tgtID_assign)
 
@@ -1634,7 +1642,7 @@ def NetflowPreparation(_tb_tgt):
             "calib": False,
         },
         "sci_P0": {
-            "nonObservationCost": 100,
+            "nonObservationCost": 200,
             "partialObservationCost": 200,
             "calib": False,
         },
