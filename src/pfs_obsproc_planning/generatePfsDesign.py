@@ -145,7 +145,7 @@ class GeneratePfsDesign(object):
             self.obs_dates = self.conf["qplan"]["obs_dates"]
 
             self.today = date.today().strftime("%Y%m%d")
-            self.outputDir = os.path.join(self.workDir, f"output_{self.today}")
+            self.outputDir = os.path.join(self.workDir, "output_full_sem")#f"output_{self.today}")
             self.inputDirPPP = os.path.join(self.workDir, self.conf["ppp"]["inputDir"])
             self.outputDirPPP = os.path.join(
                 self.outputDir, "ppp"
@@ -766,6 +766,7 @@ class GeneratePfsDesign(object):
             self.conf["validation"]["savefig"],
             self.conf["validation"]["showfig"],
             self.conf["ssp"]["ssp"],
+            self.conf,
         )
         
         logger.info(f"validation plots saved under {figpath}")
