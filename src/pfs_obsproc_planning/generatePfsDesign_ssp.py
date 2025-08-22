@@ -722,6 +722,34 @@ class GeneratePfsDesign_ssp(object):
             if cnt_tot == 0:
                 ppccode_no_guide.append(code)
 
+            # warning if too bright guide stars
+            guidestars_toobright = sfa.designutils.generate_guidestars_from_gaiadb(
+                tb_ppc_t["ppc_ra"],
+                tb_ppc_t["ppc_dec"],
+                tb_ppc_t["ppc_pa"],
+                tb_ppc_t["ppc_obstime_utc"],  # obstime should be in UTC
+                telescope_elevation=None,
+                conf=self.conf,
+                guidestar_mag_min=0,
+                guidestar_mag_max=12,
+                guidestar_neighbor_mag_min=self.conf["sfa"][
+                    "guidestar_neighbor_mag_min"
+                ],
+                guidestar_minsep_deg=self.conf["sfa"]["guidestar_minsep_deg"],
+            )
+            df_guidestars_toobright = pd.DataFrame({
+                "objId": guidestars_toobright.objId,
+                "ra": guidestars_toobright.ra,
+                "dec": guidestars_toobright.dec,
+                "magnitude": guidestars_toobright.magnitude,
+                "passband": guidestars_toobright.passband,
+                "Cam": guidestars_toobright.agId,
+            })
+            if not df_guidestars_toobright.empty:
+                logger.warning(
+                    f"[Validation of ppcList] There are too bright guide stars: {df_guidestars_toobright}"
+                )
+
         if len(ppccode_no_guide) > 0:
             logger.error(
                 f"[Validation of ppcList] The following ppcs will be ignored due to lack of guide stars: {ppccode_no_guide}"

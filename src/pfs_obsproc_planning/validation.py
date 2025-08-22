@@ -144,7 +144,6 @@ def validation(parentPath, figpath, save, show, ssp, conf):
             "magnitude": guidestars_toobright.magnitude,
             "passband": guidestars_toobright.passband,
         })
-        print(df_guidestars_toobright)
         if not df_guidestars_toobright.empty:
             logger.warning(
                 f"[Validation of output] There are too bright guide stars: {df_guidestars_toobright}"
