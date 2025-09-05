@@ -548,11 +548,11 @@ class GeneratePfsDesign_ssp(object):
                 )
 
             catId = set(tb["input_catalog_id"])
-            unexpected_Id = catId - {3006, 10091, 10092, 10093, 10251, 10252, 10253}
+            unexpected_Id = catId - {3006, 3011, 10091, 10092, 10093, 10251, 10252, 10253}
             if len(unexpected_Id) > 0:
                 validate_success = False
                 logger.error(
-                    f"[Validation of tgtLists] Incorrect catId (should be 3006 or 10091/2/3 or 10251/2/3; {ppc_code}, {tgt_type}): {unexpected_Id}"
+                    f"[Validation of tgtLists] Incorrect catId (should be 3006 for v3.3 or 3011 for v3.4 or 10091/2/3 or 10251/2/3; {ppc_code}, {tgt_type}): {unexpected_Id}"
                 )
 
         return validate_success
