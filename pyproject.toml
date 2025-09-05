@@ -19,11 +19,11 @@ dependencies = [
     "jupyter>=1.0.0",
     "logzero>=1.7.0",
     "matplotlib>=3.8.0",
-    "numpy<1.24.0",
+    "numpy>=1.24.0",
     "pandas>=2.1.0",
     "psycopg2-binary>=2.9.8",
     "pybind11>=2.11.1",
-    "pyyaml==5.3.1",
+    "pyyaml>=5.3.1",
     "scikit-learn>=1.3.1",
     "scipy>=1.9.3",
     "seaborn>=0.13.0",
@@ -33,8 +33,9 @@ dependencies = [
     "sqlalchemy>=2.0.21",
     "toml>=0.10.2",
     "wheel>=0.41.2",
+    # "pfs-datamodel @ git+https://github.com/Subaru-PFS/datamodel.git",
 ]
-requires-python = ">=3.9,<3.12"
+requires-python = ">=3.11,<3.12"
 readme = "README.md"
 license = { text = "MIT" }
 
@@ -60,8 +61,8 @@ dev = [
     "-e ics_fpsActor @ git+https://github.com/Subaru-PFS/ics_fpsActor.git@u/monodera/tweak_sdss3tools_dep#egg=ics_fpsActor",
     "-e pfs-utils @ git+https://github.com/Subaru-PFS/pfs_utils.git#egg=pfs-utils",
     "-e qplan @ git+https://github.com/naojsoft/qplan.git#egg=qplan",
-    "-e pfs-datamodel @ git+https://github.com/Subaru-PFS/datamodel.git#egg=pfs-datamodel",
-    "-e ets-fiber-assigner @ git+https://github.com/Subaru-PFS/ets_fiberalloc.git#egg=ets-fiber-assigner", # two-step assignment
+    # "-e pfs-datamodel @ git+https://github.com/Subaru-PFS/datamodel.git#egg=pfs-datamodel",
+    "-e ets-fiber-assigner @ git+https://github.com/Subaru-PFS/ets_fiberalloc.git#egg=ets-fiber-assigner",        # two-step assignment
     "-e ics-cobraOps @ git+https://github.com/Subaru-PFS/ics_cobraOps.git#egg=ics-cobraOps",
     "-e opdb @ git+https://github.com/Subaru-PFS/spt_operational_database.git#egg=opdb",
     "-e ets_target_database @ git+https://github.com/Subaru-PFS/ets_target_database.git#egg=ets_target_database",

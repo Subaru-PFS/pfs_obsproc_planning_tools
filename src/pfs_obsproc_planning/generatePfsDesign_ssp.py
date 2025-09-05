@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # generatePfsDesign_ssp.py : PPP+qPlan+SFA
 
-import os, sys
+import os
+import sys
 
 # skip print out message
 sys.stdout = open(os.devnull, "w")
@@ -528,7 +529,16 @@ class GeneratePfsDesign_ssp(object):
                 )
 
             catId = set(tb["input_catalog_id"])
-            unexpected_Id = catId - {1006, 1007, 10091, 10092, 10093, 10251, 10252, 10253}
+            unexpected_Id = catId - {
+                1006,
+                1007,
+                10091,
+                10092,
+                10093,
+                10251,
+                10252,
+                10253,
+            }
             if len(unexpected_Id) > 0:
                 validate_success = False
                 logger.error(
@@ -548,7 +558,16 @@ class GeneratePfsDesign_ssp(object):
                 )
 
             catId = set(tb["input_catalog_id"])
-            unexpected_Id = catId - {3006, 3011, 10091, 10092, 10093, 10251, 10252, 10253}
+            unexpected_Id = catId - {
+                3006,
+                3011,
+                10091,
+                10092,
+                10093,
+                10251,
+                10252,
+                10253,
+            }
             if len(unexpected_Id) > 0:
                 validate_success = False
                 logger.error(
@@ -595,12 +614,12 @@ class GeneratePfsDesign_ssp(object):
         tb_sky["cidx"] = tb_sky["cobraId"] - 1
         tb_fluxstd["cidx"] = tb_fluxstd["cobraId"] - 1
 
-        for band in ['g', 'r', 'i', 'z', 'y']:
+        for band in ["g", "r", "i", "z", "y"]:
             flux_tot = f"total_flux_{band}"
             flux_psf = f"psf_flux_{band}"
             error_tot = f"total_flux_error_{band}"
             error_psf = f"psf_flux_error_{band}"
-        
+
             if flux_tot not in tb_sci.colnames:
                 tb_sci[flux_tot] = tb_sci[flux_psf]
             if error_tot not in tb_sci.colnames:
@@ -737,14 +756,16 @@ class GeneratePfsDesign_ssp(object):
                 ],
                 guidestar_minsep_deg=self.conf["sfa"]["guidestar_minsep_deg"],
             )
-            df_guidestars_toobright = pd.DataFrame({
-                "objId": guidestars_toobright.objId,
-                "ra": guidestars_toobright.ra,
-                "dec": guidestars_toobright.dec,
-                "magnitude": guidestars_toobright.magnitude,
-                "passband": guidestars_toobright.passband,
-                "Cam": guidestars_toobright.agId,
-            })
+            df_guidestars_toobright = pd.DataFrame(
+                {
+                    "objId": guidestars_toobright.objId,
+                    "ra": guidestars_toobright.ra,
+                    "dec": guidestars_toobright.dec,
+                    "magnitude": guidestars_toobright.magnitude,
+                    "passband": guidestars_toobright.passband,
+                    "Cam": guidestars_toobright.agId,
+                }
+            )
             if not df_guidestars_toobright.empty:
                 logger.warning(
                     f"[Validation of ppcList] There are too bright guide stars: {df_guidestars_toobright}"
@@ -801,7 +822,7 @@ class GeneratePfsDesign_ssp(object):
         tb_ppc["pfsDesignId"] = np.zeros(len(tb_ppc), dtype=np.int64)
         tb_ppc["pfsDesignId_hex"] = np.zeros(len(tb_ppc), dtype="U64")
 
-        validate_success_ppc,  ppccode_no_guide = self.ssp_ppc_validate(tb_ppc)
+        validate_success_ppc, ppccode_no_guide = self.ssp_ppc_validate(tb_ppc)
 
         tb_ppc = tb_ppc[~np.in1d(tb_ppc["ppc_code"], ppccode_no_guide)]
 
@@ -1213,17 +1234,21 @@ class GeneratePfsDesign_ssp(object):
             tb_ppc_t["obstime_in_hst"] = tb_ppc_t["ppc_obstime"]
             tb_ppc_t["single_exptime"] = tb_ppc_t["ppc_exptime"]
             tb_ppc_t["n_split_frame"] = tb_ppc_t["ppc_nframes"]
-            
-            from astropy.coordinates import Angle
+
             import astropy.units as u
-            
+            from astropy.coordinates import Angle
+
             # Convert RA to HHMMSS.SS
             ra_angle = Angle(tb_ppc_t["ppc_ra"] * u.deg)
-            tb_ppc_t["ppc_ra_str"] = ra_angle.to_string(unit=u.hourangle, sep='', precision=3, pad=True)
-            
+            tb_ppc_t["ppc_ra_str"] = ra_angle.to_string(
+                unit=u.hourangle, sep="", precision=3, pad=True
+            )
+
             # Convert Dec to DDMMSS.S
             dec_angle = Angle(tb_ppc_t["ppc_dec"] * u.deg)
-            tb_ppc_t["ppc_dec_str"] = dec_angle.to_string(unit=u.deg, sep='', alwayssign=True, precision=2, pad=True)
+            tb_ppc_t["ppc_dec_str"] = dec_angle.to_string(
+                unit=u.deg, sep="", alwayssign=True, precision=2, pad=True
+            )
 
             info = Table.to_pandas(
                 tb_ppc_t[
@@ -1253,7 +1278,9 @@ class GeneratePfsDesign_ssp(object):
             if os.path.exists(ppc_path):
                 tb_ppc = Table.read(ppc_path)
             else:
-                logger.error(f"[Validation of ppcList] ({wg_}) File not found: {ppc_path}")
+                logger.error(
+                    f"[Validation of ppcList] ({wg_}) File not found: {ppc_path}"
+                )
                 continue
 
             validate_success_ppc = self.ssp_ppc_validate(tb_ppc)[0]
@@ -1312,6 +1339,7 @@ class GeneratePfsDesign_ssp(object):
                 True,
                 False,
                 self.conf["ssp"]["ssp"],
+                self.conf,
             )
 
             logger.info(f"validation plots saved under {figpath}")
