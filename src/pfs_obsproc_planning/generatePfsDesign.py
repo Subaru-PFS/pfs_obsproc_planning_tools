@@ -145,7 +145,7 @@ class GeneratePfsDesign(object):
             self.obs_dates = self.conf["qplan"]["obs_dates"]
 
             self.today = date.today().strftime("%Y%m%d")
-            self.outputDir = os.path.join(self.workDir, "output_{self.today}")
+            self.outputDir = os.path.join(self.workDir, f"output_{self.today}")
             self.inputDirPPP = os.path.join(self.workDir, self.conf["ppp"]["inputDir"])
             self.outputDirPPP = os.path.join(
                 self.outputDir, "ppp"
@@ -284,7 +284,7 @@ class GeneratePfsDesign(object):
             },
         }
 
-        cobra_coach, bench_info = nfutils.getBench(
+        bench_info = nfutils.getBench(
             self.conf["packages"]["pfs_instdata_dir"],
             self.conf["sfa"]["cobra_coach_dir"],
             None,
@@ -297,10 +297,9 @@ class GeneratePfsDesign(object):
             num_reserved_fibers = int(
                 self.conf["sfa"]["n_sky"] + self.conf["sfa"]["n_fluxstd"]
             )
-            fiber_non_allocation_cost = self.conf["ppp"]["fiberNonAllocationCost"]
         else:
             num_reserved_fibers = 0
-            fiber_non_allocation_cost = 0.0
+        fiber_non_allocation_cost = self.conf["ppp"]["fiberNonAllocationCost"]
         logger.info(f"{num_reserved_fibers} fibers reserved for calibration targets")
 
         PPP.run(
@@ -384,8 +383,8 @@ class GeneratePfsDesign(object):
                     tw18_date = first_obstime.date()
                 
                 # Define TW18 start and stop time
-                TW18_start = hst.localize(datetime.combine(tw18_date, datetime.min.time()) + timedelta(hours=20, minutes=30))  # 20:30
-                TW18_stop = TW18_start + timedelta(hours=9)  # to next day 05:00
+                TW18_start = hst.localize(datetime.combine(tw18_date, datetime.min.time()) + timedelta(hours=19, minutes=00))  # 19:00
+                TW18_stop = TW18_start + timedelta(hours=10)  # to next day 05:00
         
                 # Filter rows strictly within TW18 window (still needed for safety)
                 df_window = self.df_qplan[
@@ -425,7 +424,7 @@ class GeneratePfsDesign(object):
                         print(f"Gap: start at {last_stop}, stop at {TW18_stop}")
         
                 if len(starttime_backup) > 0:
-                    self.runPPP(100, 100, show_plots=False, backup=True)
+                    self.runPPP(50, 50, show_plots=False, backup=True)
         
                     self.df_qplan_, self.sdlr_, self.figs_qplan_ = qPlan.run(
                         self.conf,

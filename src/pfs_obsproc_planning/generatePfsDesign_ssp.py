@@ -177,7 +177,7 @@ class GeneratePfsDesign_ssp(object):
         self.conf = read_conf(os.path.join(self.workDir, self.config))
 
         # cobracoach dir
-        self.cobraCoachDir = os.path.join(self.conf["sfa"]["cobra_coach_dir"])
+        self.cobraCoachDir = "/home/wanqqq/cobracoach/"#os.path.join(self.conf["sfa"]["cobra_coach_dir"])
 
         # check versions of dependent packages
         def check_version_pfs(self, package):
