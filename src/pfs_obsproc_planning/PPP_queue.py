@@ -36,7 +36,6 @@ warnings.filterwarnings("ignore")
 # below for netflow
 import ets_fiber_assigner.netflow as nf
 from ics.cobraOps.Bench import Bench
-from ics.cobraOps.cobraConstants import NULL_TARGET_ID, NULL_TARGET_POSITION
 from ics.cobraOps.CollisionSimulator import CollisionSimulator
 from ics.cobraOps.TargetGroup import TargetGroup
 
@@ -947,9 +946,9 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
     nPPC = len(ppc_lst_fin)
     resol = _tb_tgt["resolution"][0]
     if backup:
-        ppc_code = [f"PPC_{resol}_{datetime.now().strftime('%Y-%m-%d')}_{int(nn + 1)}_backup" for nn in range(nPPC)]
+        ppc_code = [f"que_{resol}_{datetime.now().strftime('%y%m%d')}_{int(nn + 1)}_backup" for nn in range(nPPC)]
     else:
-        ppc_code = [f"PPC_{resol}_{datetime.now().strftime('%Y-%m-%d')}_{int(nn + 1)}" for nn in range(nPPC)]
+        ppc_code = [f"que_{resol}_{datetime.now().strftime('%y%m%d')}_{int(nn + 1)}" for nn in range(nPPC)]
     ppc_ra = ppc_lst_fin[:,1]
     ppc_dec = ppc_lst_fin[:,2]
     ppc_pa = ppc_lst_fin[:,3]
@@ -1304,18 +1303,18 @@ def netflowRun_single(
 
             ncoll = 0
             for ivis, (vis, tp) in enumerate(zip(res, tpos)):
-                selectedTargets = np.full(
-                    len(bench.cobras.centers), NULL_TARGET_POSITION
-                )
-                ids = np.full(len(bench.cobras.centers), NULL_TARGET_ID)
+                selectedTargets = np.full(len(bench.cobras.centers), TargetGroup.NULL_TARGET_POSITION)
+                ids = np.full(len(bench.cobras.centers), TargetGroup.NULL_TARGET_ID)
                 for tidx, cidx in vis.items():
                     selectedTargets[cidx] = tp[tidx]
                     ids[cidx] = ""
                 for i in range(selectedTargets.size):
-                    if selectedTargets[i] != NULL_TARGET_POSITION:
+                    if selectedTargets[i] != TargetGroup.NULL_TARGET_POSITION:
                         dist = np.abs(selectedTargets[i] - bench.cobras.centers[i])
 
-                simulator = CollisionSimulator(bench, TargetGroup(selectedTargets, ids))
+                simulator = CollisionSimulator(
+                    bench, TargetGroup(selectedTargets, ids)
+                )
                 simulator.run()
                 if np.any(simulator.endPointCollisions):
                     logger.error(
@@ -1330,7 +1329,6 @@ def netflowRun_single(
                     for i2 in range(i1 + 1, len(coll_tidx)):
                         if np.abs(tp[coll_tidx[i1]] - tp[coll_tidx[i2]]) < 10:
                             forbiddenPairs[ivis].append((coll_tidx[i1], coll_tidx[i2]))
-
         done = ncoll == 0
 
     else:
@@ -1408,6 +1406,7 @@ def netflowRun(
     TraCollision=False,
     numReservedFibers=0,
     fiberNonAllocationCost=0.0,
+    backup=False,
 ):
     # run netflow (with iteration and DBSCAN)
 
@@ -1487,12 +1486,14 @@ def netflowRun(
                     ]
                 )
 
+            if backup:
+                ppc_code_ = f"que_{_tb_tgt['resolution'][0]}_{datetime.now().strftime('%y%m%d')}_{int(i + 1)}_backup"
+            else:
+                ppc_code_ = f"que_{_tb_tgt['resolution'][0]}_{datetime.now().strftime('%y%m%d')}_{int(i + 1)}"
+                
             ppc_lst.append(
                 [
-                    "PPC_"
-                    + _tb_tgt["resolution"][0]
-                    + "_"
-                    + str(int(time.time() * 1e7))[-8:],
+                    ppc_code_,
                     "Group_" + str(uu + 1),
                     tel._ra,
                     tel._dec,
@@ -2383,6 +2384,7 @@ def run(
         TraCollision,
         numReservedFibers,
         fiberNonAllocationCost,
+        backup=backup,
     )
 
     tb_tgt_l_fin = netflowAssign(tb_tgt_l1, tb_ppc_l)
@@ -2406,6 +2408,7 @@ def run(
         TraCollision,
         numReservedFibers,
         fiberNonAllocationCost,
+        backup=backup,
     )
 
     tb_tgt_m_fin = netflowAssign(tb_tgt_m1, tb_ppc_m)
