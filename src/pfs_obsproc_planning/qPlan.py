@@ -238,6 +238,9 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
 
     obs_dates = sorted(conf["qplan"]["obs_dates"], key=lambda d: parser.parse(d))
     first_valid_date = None 
+
+    start_time_list_daily = []
+    stop_time_list_daily = []
     
     for date_ in obs_dates:
         date_t = parser.parse(f"{date_} 12:00 HST")
@@ -300,6 +303,8 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
         else:
             stop_time = default_stop_time
 
+        start_time_list_daily.append(start_time)
+        stop_time_list_daily.append(stop_time)
         print(f"{date_}: start obs. at {start_time} ({default_start_time}), stop obs. at {stop_time} ({default_stop_time})")
 
         if start_time == default_start_time and stop_time == default_stop_time:
@@ -535,4 +540,4 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
     else:
         figs = None
 
-    return df, sdlr, figs
+    return df, sdlr, figs, start_time_list_daily, stop_time_list_daily
