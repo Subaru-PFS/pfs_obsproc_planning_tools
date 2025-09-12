@@ -234,12 +234,24 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
     stop_time_list = conf["qplan"].get("stop_time", [])
 
     today = date.today().strftime("%Y-%m-%d")
-    for date_ in sorted(conf["qplan"]["obs_dates"], key=lambda d: parser.parse(d)):
+    date_today = parser.parse(f"{today} 12:00 HST")
+
+    obs_dates = sorted(conf["qplan"]["obs_dates"], key=lambda d: parser.parse(d))
+    first_valid_date = None 
+    
+    for date_ in obs_dates:
         date_t = parser.parse(f"{date_} 12:00 HST")
-        date_today = parser.parse(f"{today} 12:00 HST")
 
         if date_today > date_t:
+            # skip past dates
             continue
+
+        if conf["ppp"]["daily_plan"]:
+            if first_valid_date is None:
+                first_valid_date = date_t  # record the first valid date
+            if date_t != first_valid_date:
+                # skip dates later than the processed date for daily plan
+                continue            
             
         observer.set_date(date_t)
         default_start_time = observer.evening_twilight_18()
@@ -250,17 +262,33 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
         
         for item in start_time_list:
             next_date = (datetime.strptime(date_, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-            if (date_ in item) and parser.parse(f"{item} HST") > default_start_time:
+            if (date_ in item) and parser.parse(f"{item} HST") >= default_start_time:
                 start_override = parser.parse(f"{item} HST")
-            elif (next_date in item) and parser.parse(f"{item} HST") < default_stop_time:
+                start_time_list.remove(item)
+                break
+            elif (date_ in item) and (parser.parse(f"{item} HST") < default_start_time) and (parser.parse(f"{item} HST") > default_start_time - timedelta(hours=1)):
+                start_override = default_start_time
+                start_time_list.remove(item)
+                break
+            elif (next_date in item) and parser.parse(f"{item} HST") <= default_stop_time:
                 start_override = parser.parse(f"{item} HST")
+                start_time_list.remove(item)
+                break
 
         for item in stop_time_list:
             next_date = (datetime.strptime(date_, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-            if (date_ in item) and parser.parse(f"{item} HST") > default_start_time:
+            if (date_ in item) and parser.parse(f"{item} HST") >= default_start_time:
                 stop_override = parser.parse(f"{item} HST")
-            elif (next_date in item) and parser.parse(f"{item} HST") < default_stop_time:
+                stop_time_list.remove(item)
+                break
+            elif (next_date in item) and parser.parse(f"{item} HST") <= default_stop_time:
                 stop_override = parser.parse(f"{item} HST")
+                stop_time_list.remove(item)
+                break
+            elif (next_date in item) and (parser.parse(f"{item} HST") > default_stop_time) and (parser.parse(f"{item} HST") <= default_stop_time + timedelta(hours=1)):
+                stop_override = default_stop_time
+                stop_time_list.remove(item)
+                break
 
         if start_override is not None:
             start_time = start_override
@@ -272,7 +300,7 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
         else:
             stop_time = default_stop_time
 
-        print(f"{date_}: start obs. at {start_time}, stop obs. at {stop_time}")
+        print(f"{date_}: start obs. at {start_time} ({default_start_time}), stop obs. at {stop_time} ({default_stop_time})")
 
         if start_time == default_start_time and stop_time == default_stop_time:
             # Calculate refocus start time as datetime
@@ -382,9 +410,6 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
                             data=cur_data,
                         )
                     ) 
-                    
-        if conf["ppp"]["daily_plan"]:
-            break
 
     if len(rec) == 0:
         print("Error: No time slots available.")
