@@ -26,7 +26,6 @@ from .opefile import OpeFile
 from pfs_design_tool.pointing_utils import nfutils
 import ets_fiber_assigner.netflow as nf
 from pfs_design_tool import reconfigure_fibers_ppp as sfa
-from qplan.util.site import site_subaru as observer
 
 def read_conf(conf):
     config = toml.load(conf)
@@ -417,7 +416,7 @@ class GeneratePfsDesign(object):
                         print(f"Gap: start at {last_stop}, stop at {tw_stop}")
         
                 if len(starttime_backup) > 0:
-                    self.runPPP(50, 50, show_plots=False, backup=True)
+                    self.runPPP(10, 10, show_plots=False, backup=True)
         
                     self.df_qplan_, self.sdlr_, self.figs_qplan_ = qPlan.run(
                         self.conf,

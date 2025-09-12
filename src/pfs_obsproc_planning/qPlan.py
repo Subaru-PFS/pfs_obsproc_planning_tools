@@ -250,6 +250,21 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
             continue
 
         if conf["ppp"]["daily_plan"]:
+            if len(starttime_backup) > 0:
+                for ii in range(len(starttime_backup)):
+                    rec.append(
+                        Bunch(
+                            date=date_,  # date HST
+                            starttime=starttime_backup[ii],
+                            stoptime=stoptime_backup[ii],  # time HST
+                            categories=["open"],
+                            skip=False,
+                            note="",
+                            data=cur_data,
+                        )
+                    ) 
+                    print(f"{date_} (gap): start obs. at {starttime_backup[ii]}, stop obs. at {stoptime_backup[ii]}")
+                break
             if first_valid_date is None:
                 first_valid_date = date_t  # record the first valid date
             if date_t != first_valid_date:
@@ -316,105 +331,40 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
 
             print(time_refocus_start, time_refocus_stop)
 
-            #"""
-            if len(starttime_backup) == 0:
-                rec.append(
-                    Bunch(
-                        date=date_,  # date HST
-                        starttime=start_time,  # time HST
-                        stoptime=parser.parse(f"{time_refocus_start.strftime('%Y-%m-%d %H:%M:%S')} HST"),  # time HST
-                        categories=["open"],
-                        skip=False,
-                        note="",
-                        data=cur_data,
-                    )
+            rec.append(
+                Bunch(
+                    date=date_,  # date HST
+                    starttime=start_time,  # time HST
+                    stoptime=parser.parse(f"{time_refocus_start.strftime('%Y-%m-%d %H:%M:%S')} HST"),  # time HST
+                    categories=["open"],
+                    skip=False,
+                    note="",
+                    data=cur_data,
                 )
-                rec.append(
-                    Bunch(
-                        date=date_,  # date HST
-                        starttime=parser.parse(f"{time_refocus_stop.strftime('%Y-%m-%d %H:%M:%S')} HST"),  # time HST
-                        stoptime=stop_time,  # time HST
-                        categories=["open"],
-                        skip=False,
-                        note="",
-                        data=cur_data,
-                    )
+            )
+            rec.append(
+                Bunch(
+                    date=date_,  # date HST
+                    starttime=parser.parse(f"{time_refocus_stop.strftime('%Y-%m-%d %H:%M:%S')} HST"),  # time HST
+                    stoptime=stop_time,  # time HST
+                    categories=["open"],
+                    skip=False,
+                    note="",
+                    data=cur_data,
                 )
-            else:
-                for ii in range(len(starttime_backup)):
-                    if starttime_backup[ii] < default_start_time:
-                        starttime_backup[ii] = default_start_time
-                    if stoptime_backup[ii] > default_stop_time:
-                        stoptime_backup[ii] = default_stop_time
-                        
-                    if time_refocus_start >= starttime_backup[ii] and time_refocus_stop <= stoptime_backup[ii]:
-                        rec.append(
-                            Bunch(
-                                date=date_,  # date HST
-                                starttime=starttime_backup[ii],  # time HST
-                                stoptime=parser.parse(f"{time_refocus_start.strftime('%Y-%m-%d %H:%M:%S')} HST"),  # time HST
-                                categories=["open"],
-                                skip=False,
-                                note="",
-                                data=cur_data,
-                            )
-                        )
-                        rec.append(
-                            Bunch(
-                                date=date_,  # date HST
-                                starttime=parser.parse(f"{time_refocus_stop.strftime('%Y-%m-%d %H:%M:%S')} HST"),  # time HST
-                                stoptime=stoptime_backup[ii],  # time HST
-                                categories=["open"],
-                                skip=False,
-                                note="",
-                                data=cur_data,
-                            )
-                        )
-                    else:
-                        rec.append(
-                            Bunch(
-                                date=date_,  # date HST
-                                starttime=starttime_backup[ii],
-                                stoptime=stoptime_backup[ii],  # time HST
-                                categories=["open"],
-                                skip=False,
-                                note="",
-                                data=cur_data,
-                            )
-                        ) 
-            #"""
-            
+            )            
         else:
-            if len(starttime_backup) == 0:
-                rec.append(
-                    Bunch(
-                        date=date_,  # date HST
-                        starttime=start_time,  # time HST
-                        stoptime=stop_time,  # time HST
-                        categories=["open"],
-                        skip=False,
-                        note="",
-                        data=cur_data,
-                    )
+            rec.append(
+                Bunch(
+                    date=date_,  # date HST
+                    starttime=start_time,  # time HST
+                    stoptime=stop_time,  # time HST
+                    categories=["open"],
+                    skip=False,
+                    note="",
+                    data=cur_data,
                 )
-            else:
-                for ii in range(len(starttime_backup)):
-                    if starttime_backup[ii] < default_start_time:
-                        starttime_backup[ii] = default_start_time
-                    if stoptime_backup[ii] > default_stop_time:
-                        stoptime_backup[ii] = default_stop_time
-
-                    rec.append(
-                        Bunch(
-                            date=date_,  # date HST
-                            starttime=starttime_backup[ii],
-                            stoptime=stoptime_backup[ii],  # time HST
-                            categories=["open"],
-                            skip=False,
-                            note="",
-                            data=cur_data,
-                        )
-                    ) 
+            )
 
     if len(rec) == 0:
         print("Error: No time slots available.")
