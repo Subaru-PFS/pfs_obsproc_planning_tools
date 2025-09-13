@@ -457,6 +457,36 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
         return df, targets
 
     df, targets = make_schedule_table(slots)
+
+    import re
+
+    def parse_log_for_slew_times(logfile):
+        slew_map = {}
+        
+        with open(logfile) as f:
+            lines = f.readlines()
+        
+        for i in range(1, len(lines)):
+            # current line = assigning line
+            if ("assigning" in lines[i]):
+                # previous line = slew time line
+                prev = lines[i-1]
+                
+                # extract slew time
+                m1 = re.search(r"slew time .*? ([\d.]+) sec", prev)
+                # extract ppc_code
+                m2 = re.search(r"assigning .*?/([^()]+)\(", lines[i])
+                
+                if m1 and m2:
+                    slew_time = float(m1.group(1))
+                    ppc_code = m2.group(1).strip()
+                    slew_map[ppc_code] = slew_time
+        return slew_map
+
+    log_path = os.path.join(outputDirName, "sched.log")
+    slew_map = parse_log_for_slew_times(log_path)
+    df["slew_time"] = df["ppc_code"].map(slew_map)
+
     print(df)
 
     # plot visibility plots for each night
