@@ -87,8 +87,19 @@ class OpeFile(object):
         else:
             self.outfile = os.path.join(self.outfilePath, f"{obsdate}.ope")
 
-        # update PFSDSGNDIR
+        # add time_stamp when ope file is created
+        from datetime import datetime
+        import pytz
+        
+        hst = pytz.timezone("Pacific/Honolulu")
+        dt_hst = datetime.now(hst)
+        time_stamp = dt_hst.strftime("%Y-%m-%d %H:%M:%S HST")
         self.contents1_updated = self.contents1.replace(
+            '### template ope file for PFS operations', f'### This ope created at {time_stamp} \n### template ope file for PFS operations'
+        )
+        
+        # update PFSDSGNDIR
+        self.contents1_updated = self.contents1_updated.replace(
             'PFSDSGNDIR="/data/pfsDesign/"', f'PFSDSGNDIR="{self.designPath}"'
         )
 
