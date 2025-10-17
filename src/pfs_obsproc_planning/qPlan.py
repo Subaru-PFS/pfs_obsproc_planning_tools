@@ -166,9 +166,9 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
         pa = float(pa)
         """
         if "backup" in ob_code:
-            priority = 0
+            priority = 100
         else:
-            priority = float(priority)
+            priority = 0
         #"""
         priority = float(priority) 
 
@@ -234,143 +234,24 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
     stop_time_list = conf["qplan"].get("stop_time", [])
 
     today = date.today().strftime("%Y-%m-%d")
-    for date_ in sorted(conf["qplan"]["obs_dates"], key=lambda d: parser.parse(d)):
+    date_today = parser.parse(f"{today} 12:00 HST")
+
+    obs_dates = sorted(conf["qplan"]["obs_dates"], key=lambda d: parser.parse(d))
+    first_valid_date = None 
+
+    start_time_list_daily = []
+    stop_time_list_daily = []
+    
+    for date_ in obs_dates:
         date_t = parser.parse(f"{date_} 12:00 HST")
-        date_today = parser.parse(f"{today} 12:00 HST")
 
         if date_today > date_t:
+            # skip past dates
             continue
-            
-        observer.set_date(date_t)
-        default_start_time = observer.evening_twilight_18()
-        default_stop_time = observer.morning_twilight_18() + timedelta(minutes=30) #extend TW18 by 30 min for real operation, just in case
 
-        start_override = None
-        stop_override = None
-        
-        for item in start_time_list:
-            next_date = (datetime.strptime(date_, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-            if (date_ in item) and parser.parse(f"{item} HST") > default_start_time:
-                start_override = parser.parse(f"{item} HST")
-            elif (next_date in item) and parser.parse(f"{item} HST") < default_stop_time:
-                start_override = parser.parse(f"{item} HST")
-
-        for item in stop_time_list:
-            next_date = (datetime.strptime(date_, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-            if (date_ in item) and parser.parse(f"{item} HST") > default_start_time:
-                stop_override = parser.parse(f"{item} HST")
-            elif (next_date in item) and parser.parse(f"{item} HST") < default_stop_time:
-                stop_override = parser.parse(f"{item} HST")
-
-        if start_override is not None:
-            start_time = start_override
-        else:
-            start_time = default_start_time
-
-        if stop_override is not None:
-            stop_time = stop_override
-        else:
-            stop_time = default_stop_time
-
-        print(f"{date_}: start obs. at {start_time}, stop obs. at {stop_time}")
-
-        if start_time == default_start_time and stop_time == default_stop_time:
-            # Calculate refocus start time as datetime
-            time_refocus_start = default_start_time + timedelta(minutes=(23.0 + float(conf['qplan']['overhead'])) * 1)
-            
-            # Then compute stop time based on start time
-            time_refocus_stop = time_refocus_start + timedelta(minutes=10.0)
-
-            print(time_refocus_start, time_refocus_stop)
-
-            #"""
-            if len(starttime_backup) == 0:
-                rec.append(
-                    Bunch(
-                        date=date_,  # date HST
-                        starttime=start_time,  # time HST
-                        stoptime=parser.parse(f"{time_refocus_start.strftime('%Y-%m-%d %H:%M:%S')} HST"),  # time HST
-                        categories=["open"],
-                        skip=False,
-                        note="",
-                        data=cur_data,
-                    )
-                )
-                rec.append(
-                    Bunch(
-                        date=date_,  # date HST
-                        starttime=parser.parse(f"{time_refocus_stop.strftime('%Y-%m-%d %H:%M:%S')} HST"),  # time HST
-                        stoptime=stop_time,  # time HST
-                        categories=["open"],
-                        skip=False,
-                        note="",
-                        data=cur_data,
-                    )
-                )
-            else:
+        if conf["ppp"]["daily_plan"]:
+            if len(starttime_backup) > 0:
                 for ii in range(len(starttime_backup)):
-                    if starttime_backup[ii] < default_start_time:
-                        starttime_backup[ii] = default_start_time
-                    if stoptime_backup[ii] > default_stop_time:
-                        stoptime_backup[ii] = default_stop_time
-                        
-                    if time_refocus_start >= starttime_backup[ii] and time_refocus_stop <= stoptime_backup[ii]:
-                        rec.append(
-                            Bunch(
-                                date=date_,  # date HST
-                                starttime=starttime_backup[ii],  # time HST
-                                stoptime=parser.parse(f"{time_refocus_start.strftime('%Y-%m-%d %H:%M:%S')} HST"),  # time HST
-                                categories=["open"],
-                                skip=False,
-                                note="",
-                                data=cur_data,
-                            )
-                        )
-                        rec.append(
-                            Bunch(
-                                date=date_,  # date HST
-                                starttime=parser.parse(f"{time_refocus_stop.strftime('%Y-%m-%d %H:%M:%S')} HST"),  # time HST
-                                stoptime=stoptime_backup[ii],  # time HST
-                                categories=["open"],
-                                skip=False,
-                                note="",
-                                data=cur_data,
-                            )
-                        )
-                    else:
-                        rec.append(
-                            Bunch(
-                                date=date_,  # date HST
-                                starttime=starttime_backup[ii],
-                                stoptime=stoptime_backup[ii],  # time HST
-                                categories=["open"],
-                                skip=False,
-                                note="",
-                                data=cur_data,
-                            )
-                        ) 
-            #"""
-            
-        else:
-            if len(starttime_backup) == 0:
-                rec.append(
-                    Bunch(
-                        date=date_,  # date HST
-                        starttime=start_time,  # time HST
-                        stoptime=stop_time,  # time HST
-                        categories=["open"],
-                        skip=False,
-                        note="",
-                        data=cur_data,
-                    )
-                )
-            else:
-                for ii in range(len(starttime_backup)):
-                    if starttime_backup[ii] < default_start_time:
-                        starttime_backup[ii] = default_start_time
-                    if stoptime_backup[ii] > default_stop_time:
-                        stoptime_backup[ii] = default_stop_time
-
                     rec.append(
                         Bunch(
                             date=date_,  # date HST
@@ -382,9 +263,108 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
                             data=cur_data,
                         )
                     ) 
-                    
-        if conf["ppp"]["daily_plan"]:
-            break
+                    print(f"{date_} (gap): start obs. at {starttime_backup[ii]}, stop obs. at {stoptime_backup[ii]}")
+                break
+            if first_valid_date is None:
+                first_valid_date = date_t  # record the first valid date
+            if date_t != first_valid_date:
+                # skip dates later than the processed date for daily plan
+                continue            
+            
+        observer.set_date(date_t)
+        default_start_time = observer.evening_twilight_18()
+        default_stop_time = observer.morning_twilight_18() + timedelta(minutes=30) #extend TW18 by 30 min for real operation, just in case
+
+        start_override = None
+        stop_override = None
+        
+        for item in start_time_list:
+            next_date = (datetime.strptime(date_, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+            if (date_ in item) and parser.parse(f"{item} HST") >= default_start_time:
+                start_override = parser.parse(f"{item} HST")
+                start_time_list.remove(item)
+                break
+            elif (date_ in item) and (parser.parse(f"{item} HST") < default_start_time) and (parser.parse(f"{item} HST") > default_start_time - timedelta(hours=1)):
+                start_override = default_start_time
+                start_time_list.remove(item)
+                break
+            elif (next_date in item) and parser.parse(f"{item} HST") <= default_stop_time:
+                start_override = parser.parse(f"{item} HST")
+                start_time_list.remove(item)
+                break
+
+        for item in stop_time_list:
+            next_date = (datetime.strptime(date_, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+            if (date_ in item) and parser.parse(f"{item} HST") >= default_start_time:
+                stop_override = parser.parse(f"{item} HST")
+                stop_time_list.remove(item)
+                break
+            elif (next_date in item) and parser.parse(f"{item} HST") <= default_stop_time:
+                stop_override = parser.parse(f"{item} HST")
+                stop_time_list.remove(item)
+                break
+            elif (next_date in item) and (parser.parse(f"{item} HST") > default_stop_time) and (parser.parse(f"{item} HST") <= default_stop_time + timedelta(hours=1)):
+                stop_override = default_stop_time
+                stop_time_list.remove(item)
+                break
+
+        if start_override is not None:
+            start_time = start_override
+        else:
+            start_time = default_start_time
+
+        if stop_override is not None:
+            stop_time = stop_override
+        else:
+            stop_time = default_stop_time
+
+        start_time_list_daily.append(start_time)
+        stop_time_list_daily.append(stop_time)
+        print(f"{date_}: start obs. at {start_time} ({default_start_time}), stop obs. at {stop_time} ({default_stop_time})")
+
+        if start_time == default_start_time and stop_time == default_stop_time:
+            # Calculate refocus start time as datetime
+            time_refocus_start = default_start_time + timedelta(minutes=(23.0 + float(conf['qplan']['overhead'])) * 2)
+            
+            # Then compute stop time based on start time
+            time_refocus_stop = time_refocus_start + timedelta(minutes=10.0)
+
+            print(time_refocus_start, time_refocus_stop)
+
+            rec.append(
+                Bunch(
+                    date=date_,  # date HST
+                    starttime=start_time,  # time HST
+                    stoptime=parser.parse(f"{time_refocus_start.strftime('%Y-%m-%d %H:%M:%S')} HST"),  # time HST
+                    categories=["open"],
+                    skip=False,
+                    note="",
+                    data=cur_data,
+                )
+            )
+            rec.append(
+                Bunch(
+                    date=date_,  # date HST
+                    starttime=parser.parse(f"{time_refocus_stop.strftime('%Y-%m-%d %H:%M:%S')} HST"),  # time HST
+                    stoptime=stop_time,  # time HST
+                    categories=["open"],
+                    skip=False,
+                    note="",
+                    data=cur_data,
+                )
+            )            
+        else:
+            rec.append(
+                Bunch(
+                    date=date_,  # date HST
+                    starttime=start_time,  # time HST
+                    stoptime=stop_time,  # time HST
+                    categories=["open"],
+                    skip=False,
+                    note="",
+                    data=cur_data,
+                )
+            )
 
     if len(rec) == 0:
         print("Error: No time slots available.")
@@ -477,6 +457,36 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
         return df, targets
 
     df, targets = make_schedule_table(slots)
+
+    import re
+
+    def parse_log_for_slew_times(logfile):
+        slew_map = {}
+        
+        with open(logfile) as f:
+            lines = f.readlines()
+        
+        for i in range(1, len(lines)):
+            # current line = assigning line
+            if ("assigning" in lines[i]):
+                # previous line = slew time line
+                prev = lines[i-1]
+                
+                # extract slew time
+                m1 = re.search(r"slew time .*? ([\d.]+) sec", prev)
+                # extract ppc_code
+                m2 = re.search(r"assigning .*?/([^()]+)\(", lines[i])
+                
+                if m1 and m2:
+                    slew_time = float(m1.group(1))
+                    ppc_code = m2.group(1).strip()
+                    slew_map[ppc_code] = slew_time
+        return slew_map
+
+    log_path = os.path.join(outputDirName, "sched.log")
+    slew_map = parse_log_for_slew_times(log_path)
+    df["slew_time"] = df["ppc_code"].map(slew_map)
+
     print(df)
 
     # plot visibility plots for each night
@@ -510,4 +520,4 @@ def run(conf, ppcList, inputDirName=".", outputDirName=".", plotVisibility=False
     else:
         figs = None
 
-    return df, sdlr, figs
+    return df, sdlr, figs, start_time_list_daily, stop_time_list_daily

@@ -25,6 +25,7 @@ from pfs.utils.fiberids import FiberIds
 
 # sys.path.append("/work/moritani/codes/obstools/")
 from . import plotPfsDesign as pldes
+from pfs_design_tool import reconfigure_fibers_ppp as sfa
 
 warnings.filterwarnings("ignore")
 
@@ -64,7 +65,7 @@ def calc_inr(df, obstime):
         inr = np.nan
     return inr, el 
 
-def validation(parentPath, figpath, save, show, ssp):
+def validation(parentPath, figpath, save, show, ssp, conf):
     if not ssp:
         pfsDesignDir = f"{parentPath}/design"
         df_design = pd.read_csv(
@@ -99,6 +100,7 @@ def validation(parentPath, figpath, save, show, ssp):
 
     # This routine just combines a few cells in "trial" section
     df_ch = pldes.init_check_design()
+    count = 0
     for designId in pfsDesignIds:
         pfsDesign0 = PfsDesign.read(designId, dirName=pfsDesignDir)
         pfsDesign0.validate()
@@ -113,8 +115,41 @@ def validation(parentPath, figpath, save, show, ssp):
             logger.warning(
                 f"[Validation of output] There are duplicated fibers: {df_t[index_dup]}"
             )
+
+        # check bright stars in the guiding field
+        ppc_ra = pfsDesign0.raBoresight 
+        ppc_dec = pfsDesign0.decBoresight
+        ppc_pa = pfsDesign0.posAng
+        if not ssp:
+            ppc_obstime_utc = df_design["observation_time"][count]
         else:
-            logger.info("[Validation of output] No duplicated fiber")
+            ppc_obstime_utc = df_design["ppc_obstime_utc"][count]
+        
+        guidestars_toobright = sfa.designutils.generate_guidestars_from_gaiadb(
+                ppc_ra,
+                ppc_dec,
+                ppc_pa,
+                ppc_obstime_utc,  # obstime should be in UTC
+                telescope_elevation=None,
+                conf=conf,
+                guidestar_mag_min=0,
+                guidestar_mag_max=12,
+                guidestar_neighbor_mag_min=21.0,
+                guidestar_minsep_deg=0.0002778,
+            )
+        df_guidestars_toobright = pd.DataFrame({
+            "objId": guidestars_toobright.objId,
+            "ra": guidestars_toobright.ra,
+            "dec": guidestars_toobright.dec,
+            "magnitude": guidestars_toobright.magnitude,
+            "passband": guidestars_toobright.passband,
+        })
+        if not df_guidestars_toobright.empty:
+            logger.warning(
+                f"[Validation of output] There are too bright guide stars: {df_guidestars_toobright}"
+            )
+        count+=1
+        
         pfsflux = np.array([a[0] if len(a) > 0 else np.nan for a in pfsDesign0.psfFlux])
         totalflux = np.array([a[0] if len(a) > 0 else np.nan for a in pfsDesign0.totalFlux])
         # print(len(pfsDesign0[pfsDesign0.fiberStatus==3]))

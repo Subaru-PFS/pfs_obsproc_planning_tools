@@ -50,7 +50,7 @@ def run(conf, workDir="."):
         tb_queue_backup = Table()
     tb_queue = vstack([tb_queue, tb_queue_backup])
         
-    pdf = PdfPages(os.path.join(workDir, 'check-S25A-queue.pdf'))
+    pdf = PdfPages(os.path.join(workDir, 'check-S25B-queue.pdf'))
 
     plot_ppc(conf, tb_tgt, tb_ppc, pdf)
     plot_assign(conf, workDir, pdf)

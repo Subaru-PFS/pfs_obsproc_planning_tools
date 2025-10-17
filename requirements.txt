@@ -16,14 +16,13 @@ ipython>=8.16.0
 jupyter>=1.0.0
 logzero>=1.7.0
 matplotlib>=3.8.0
-numpy<1.24.0
+numpy>=1.24.0
 -e git+https://github.com/Subaru-PFS/spt_operational_database.git#egg=opdb
 pandas>=2.1.0
--e git+https://github.com/Subaru-PFS/datamodel.git#egg=pfs-datamodel
 -e git+https://github.com/Subaru-PFS/pfs_utils.git#egg=pfs-utils
 psycopg2-binary>=2.9.8
 pybind11>=2.11.1
-pyyaml==5.3.1
+pyyaml>=5.3.1
 -e git+https://github.com/naojsoft/qplan.git#egg=qplan
 scikit-learn>=1.3.1
 scipy>=1.9.3

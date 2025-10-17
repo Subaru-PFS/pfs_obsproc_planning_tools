@@ -36,7 +36,6 @@ warnings.filterwarnings("ignore")
 # below for netflow
 import ets_fiber_assigner.netflow as nf
 from ics.cobraOps.Bench import Bench
-from ics.cobraOps.cobraConstants import NULL_TARGET_ID, NULL_TARGET_POSITION
 from ics.cobraOps.CollisionSimulator import CollisionSimulator
 from ics.cobraOps.TargetGroup import TargetGroup
 
@@ -341,6 +340,9 @@ def readTarget(mode, para):
             for col in ["filter_g","filter_r", "filter_i", "filter_z", "filter_y"]:
                 tb_tgt[col] = tb_tgt[col].astype("str")
 
+            if proposalId == 'S25B-126QN':
+                tb_tgt = tb_tgt[tb_tgt["priority"]<=3]
+
             """
             for col in ["psf_flux_g","psf_flux_r", "psf_flux_i", "psf_flux_z", "psf_flux_y"]:
                 tb_tgt[col] = tb_tgt[col].astype(float)
@@ -353,10 +355,6 @@ def readTarget(mode, para):
 
             return tb_tgt
 
-    # only for S25A march run
-    #proposalid = ['S25A-058QN', 'S25A-020QN', 'S25A-099QN', 'S25A-096QN', 'S25A-042QN', 'S25A-101QN']
-    #proposalid = ['S25A-139QN', "S25A-036QN", "S25A-102QN", "S25A-028QN", "S25A-137QN", "S25A-074QN", "S25A-107QN", "S25A-080QN", "S25A-094QN", "S25A-113QN", 'S25A-064QN']
-    #proposalid = ['S25A-058QN', 'S25A-020QN', 'S25A-099QN', 'S25A-096QN', 'S25A-042QN', 'S25A-101QN'，'S25A-139QN', "S25A-036QN", "S25A-102QN", "S25A-028QN", "S25A-137QN", "S25A-074QN", "S25A-107QN", "S25A-080QN", "S25A-094QN", "S25A-113QN"，'S25A-064QN']
     proposalid = para["proposalIds"]
     
     tb_tgt_lst = []
@@ -379,19 +377,19 @@ def readTarget(mode, para):
     ## --only for 020QN, need to confirm with Pyo-san-- updated FH (250530): no need as tgt DB has updated allocated_time_tac
     #"""
     #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-058QN'] = 19848.75
-    tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-020QN'] = 3237.25
+    #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-020QN'] = 3237.25
     #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-099QN'] = 6803.00
     #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-096QN'] = 2661.00
     #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-042QN'] = 18758.75
     #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-101QN'] = 4363.50
-    tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-064QN'] = 10000.0
+    #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-064QN'] = 10000.0
     #"""
 
     #for grade c programs, set completion rate as 70% as upper limit: no need as tgt DB has updated allocated_time_tac
-    #"""
-    proposalid = ["S25A-043QF", "S25A-119QF", "S25A-111QF", "S25A-116QF", "S25A-126QF", "S25A-017QF", "S25A-019QF", "S25A-112QF", "S25A-030QF", "S25A-034QF"]
+    """
+    proposalid = ["S25B-086QN", "S25B-056QN", "S25B-092QN", "S25B-134QN", "S25B-120QN", "S25B-047QN", "S25B-126QN", "S25B-125QN", "S25B-136QN", "S25B-048QN"]
     mask = np.isin(tb_tgt["proposal_id"], proposalid)
-    tb_tgt["allocated_time_tac"][mask] = 2394.0 * 10.0 #tb_tgt["allocated_time_tac"][mask] * 0.7
+    tb_tgt["allocated_time_tac"][mask] = tb_tgt["allocated_time_tac"][mask] * 0.7
     #"""
 
     if len(set(tb_tgt["single_exptime"])) > 1:
@@ -541,7 +539,7 @@ def readTarget(mode, para):
 
         # only for 064 since too huge list, FIX needed
         """
-        if proposalId == 'S25A-064QN':
+        if proposalId == 'S25B-126QN':
             tb_tgt = tb_tgt[tb_tgt["priority"]<=3]
 
         if proposalId in ["S25A-043QF", "S25A-119QF", "S25A-111QF", "S25A-116QF", "S25A-126QF", "S25A-017QF", "S25A-019QF", "S25A-112QF", "S25A-030QF", "S25A-034QF"]:
@@ -549,7 +547,7 @@ def readTarget(mode, para):
             tb_tgt = tb_tgt[(tb_tgt["ra"]>280) * (tb_tgt["dec"]<70) * (tb_tgt["dec"]>-20)]
             n_tgt2 = len(tb_tgt)
             logger.info(f"Visibility limits: {proposalId} {n_tgt1:.0f} -> {n_tgt2:.0f}")
-        #"""
+    
         msk = (tb_tgt["priority"] > 3) & (tb_tgt["proposal_id"] == 'S25A-064QN')
         tb_tgt = tb_tgt[~msk]
 
@@ -559,7 +557,8 @@ def readTarget(mode, para):
             tb_tgt = tb_tgt[~msk]
             n_tgt2 = len(tb_tgt)
             logger.info(f"Visibility limits: {pslid_} {n_tgt1:.0f} -> {n_tgt2:.0f}")
-
+        #"""
+        
         if para["visibility_check"]:
             tb_tgt = visibility_checker(tb_tgt, para["obstimes"], para["starttimes"], para["stoptimes"])
 
@@ -823,6 +822,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
         and len(_tb_tgt_) > 0
         and len(ppc_lst) < nPPC
     ):
+        
         psl_id_undone = list(
             set(
                 tb_fh["proposal_id"][
@@ -946,9 +946,9 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
     nPPC = len(ppc_lst_fin)
     resol = _tb_tgt["resolution"][0]
     if backup:
-        ppc_code = [f"PPC_{resol}_{datetime.now().strftime('%Y-%m-%d')}_{int(nn + 1)}_backup" for nn in range(nPPC)]
+        ppc_code = [f"que_{resol}_{datetime.now().strftime('%y%m%d')}_{int(nn + 1)}_backup" for nn in range(nPPC)]
     else:
-        ppc_code = [f"PPC_{resol}_{datetime.now().strftime('%Y-%m-%d')}_{int(nn + 1)}" for nn in range(nPPC)]
+        ppc_code = [f"que_{resol}_{datetime.now().strftime('%y%m%d')}_{int(nn + 1)}" for nn in range(nPPC)]
     ppc_ra = ppc_lst_fin[:,1]
     ppc_dec = ppc_lst_fin[:,2]
     ppc_pa = ppc_lst_fin[:,3]
@@ -1303,18 +1303,18 @@ def netflowRun_single(
 
             ncoll = 0
             for ivis, (vis, tp) in enumerate(zip(res, tpos)):
-                selectedTargets = np.full(
-                    len(bench.cobras.centers), NULL_TARGET_POSITION
-                )
-                ids = np.full(len(bench.cobras.centers), NULL_TARGET_ID)
+                selectedTargets = np.full(len(bench.cobras.centers), TargetGroup.NULL_TARGET_POSITION)
+                ids = np.full(len(bench.cobras.centers), TargetGroup.NULL_TARGET_ID)
                 for tidx, cidx in vis.items():
                     selectedTargets[cidx] = tp[tidx]
                     ids[cidx] = ""
                 for i in range(selectedTargets.size):
-                    if selectedTargets[i] != NULL_TARGET_POSITION:
+                    if selectedTargets[i] != TargetGroup.NULL_TARGET_POSITION:
                         dist = np.abs(selectedTargets[i] - bench.cobras.centers[i])
 
-                simulator = CollisionSimulator(bench, TargetGroup(selectedTargets, ids))
+                simulator = CollisionSimulator(
+                    bench, TargetGroup(selectedTargets, ids)
+                )
                 simulator.run()
                 if np.any(simulator.endPointCollisions):
                     logger.error(
@@ -1329,7 +1329,6 @@ def netflowRun_single(
                     for i2 in range(i1 + 1, len(coll_tidx)):
                         if np.abs(tp[coll_tidx[i1]] - tp[coll_tidx[i2]]) < 10:
                             forbiddenPairs[ivis].append((coll_tidx[i1], coll_tidx[i2]))
-
         done = ncoll == 0
 
     else:
@@ -1407,6 +1406,7 @@ def netflowRun(
     TraCollision=False,
     numReservedFibers=0,
     fiberNonAllocationCost=0.0,
+    backup=False,
 ):
     # run netflow (with iteration and DBSCAN)
 
@@ -1486,12 +1486,14 @@ def netflowRun(
                     ]
                 )
 
+            if backup:
+                ppc_code_ = f"que_{_tb_tgt['resolution'][0]}_{datetime.now().strftime('%y%m%d')}_{int(i + 1)}_backup"
+            else:
+                ppc_code_ = f"que_{_tb_tgt['resolution'][0]}_{datetime.now().strftime('%y%m%d')}_{int(i + 1)}"
+                
             ppc_lst.append(
                 [
-                    "PPC_"
-                    + _tb_tgt["resolution"][0]
-                    + "_"
-                    + str(int(time.time() * 1e7))[-8:],
+                    ppc_code_,
                     "Group_" + str(uu + 1),
                     tel._ra,
                     tel._dec,
@@ -2382,6 +2384,7 @@ def run(
         TraCollision,
         numReservedFibers,
         fiberNonAllocationCost,
+        backup=backup,
     )
 
     tb_tgt_l_fin = netflowAssign(tb_tgt_l1, tb_ppc_l)
@@ -2405,6 +2408,7 @@ def run(
         TraCollision,
         numReservedFibers,
         fiberNonAllocationCost,
+        backup=backup,
     )
 
     tb_tgt_m_fin = netflowAssign(tb_tgt_m1, tb_ppc_m)
