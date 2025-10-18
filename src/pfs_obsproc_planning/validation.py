@@ -156,7 +156,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
         # Because unassigned fiber doesn't have pfi position, we need to get by calling bench
         # The columns of pfs_instdata_dir may be different..
         bench = sfa.nfutils.getBench(
-                    conf['packages']['pfs_instdata_dir'],  
+                    conf['sfa']['pfs_instdata_dir'],  
                     conf['sfa']['cobra_coach_dir'],
                     conf['sfa']['cobra_coach_module_version'],
                     conf['sfa']['sm'],
@@ -164,7 +164,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
                     )
         
         # The columns of pfs_utils_dir may be different..
-        fibId=FiberIds(path=os.path.join(conf['packages']['pfs_utils_dir'],'data', 'fiberids'))
+        fibId=FiberIds(path=os.path.join(conf['sfa']['pfs_utils_dir'],'data', 'fiberids'))
         # pick up unassigened fibers
         unassigened_fibers = pfsDesign0[pfsDesign0.targetType==TargetType.UNASSIGNED].fiberId
         unfib_bright=[]
