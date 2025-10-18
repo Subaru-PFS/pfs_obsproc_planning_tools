@@ -30,6 +30,9 @@ from pfs_design_tool import reconfigure_fibers_ppp as sfa
 warnings.filterwarnings("ignore")
 
 
+from importlib import reload
+reload(pldes)
+
 def njy_mag(j):
     if j > 0:
         return 23.9 - 2.5 * np.log10(j / 1e3)
@@ -148,6 +151,61 @@ def validation(parentPath, figpath, save, show, ssp, conf):
             logger.warning(
                 f"[Validation of output] There are too bright guide stars: {df_guidestars_toobright}"
             )
+
+        # check bright stars nearby unassigend fibers including disabled fibers
+        # Because unassigned fiber doesn't have pfi position, we need to get by calling bench
+        # The columns of pfs_instdata_dir may be different..
+        bench = sfa.nfutils.getBench(
+                    conf['packages']['pfs_instdata_dir'],  
+                    conf['sfa']['cobra_coach_dir'],
+                    conf['sfa']['cobra_coach_module_version'],
+                    conf['sfa']['sm'],
+                    conf['sfa']['black_dot_radius_margin'],
+                    )
+        
+        # The columns of pfs_utils_dir may be different..
+        fibId=FiberIds(path=os.path.join(conf['packages']['pfs_utils_dir'],'data', 'fiberids'))
+        # pick up unassigened fibers
+        unassigened_fibers = pfsDesign0[pfsDesign0.targetType==TargetType.UNASSIGNED].fiberId
+        unfib_bright=[]
+        for unfib in unassigened_fibers:
+            if pfsDesign0[pfsDesign0.fiberId==unfib].fiberStatus != FiberStatus.BROKENFIBER:  # check if fiber pass the light
+                cidx = fibId.fiberIdToCobraId(unfib)-1
+                ccenter = bench.cobras.centers[cidx]
+                logger.info(f"[Validation of output] {ccenter}")
+                un_ra, un_dec = sfa.designutils.get_skypos_cobra(
+                    ccenter, 
+                    pfsDesign0.obstime,
+                    ppc_ra,
+                    ppc_dec,
+                    ppc_pa
+                )
+
+                unassign_toobright = sfa.dbutils.generate_targets_from_gaiadb(
+                    un_ra,
+                    un_dec,
+                    conf=conf,
+                    search_radius=3/3600. ,  # 5 arcsec. It is better to make it configurable.
+                    band_select="phot_g_mean_mag",
+                    mag_min=-2., 
+                    mag_max=12.,
+                    good_astrometry=False,
+                    write_csv=False
+                )
+                df_unassign_toobright = pd.DataFrame({
+                    "source_id": unassign_toobright.source_id,
+                    "ra": unassign_toobright.ra,
+                    "dec": unassign_toobright.dec,
+                    "magnitude": unassign_toobright.phot_g_mean_mag
+                })
+                if not df_unassign_toobright.empty:
+                    logger.warning(
+                        f"[Validation of output] There are too bright stars nearby fiber {unfib}: {df_unassign_toobright}"
+                    )
+                    unfib_bright.append(unfib)
+        logger.warning(
+                        f"[Validation of output] There are too bright stars nearby these fibers {unfib_bright}"
+                    )
         count+=1
         
         pfsflux = np.array([a[0] if len(a) > 0 else np.nan for a in pfsDesign0.psfFlux])
@@ -189,6 +247,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
             logger.warning(f"[Validation of output] Too bright sources with psfMag or totalMag < 13 (0x{designId:016x}, {pfsDesign0.designName}): {df_too_bright}")
     
         df_fib["sector"] = pldes.get_field_sector2(df_fib)
+
         df_ag = pd.DataFrame(
             data=np.column_stack(
                 (
@@ -211,7 +270,8 @@ def validation(parentPath, figpath, save, show, ssp, conf):
         df_ag["ag_pfi_x"] = np.array(pfix)
         df_ag["ag_pfi_y"] = np.array(pfiy)
 
-        df = pldes.check_design(designId, df_fib, df_ag)
+        df = pldes.check_design(designId, df_fib, df_ag, n_unfib_bright=len(unfib_bright)
+)
         df_ch = pd.concat([df_ch, df], ignore_index=True)
         title = f"designId=0x{designId:016x} ({pfsDesign0.raBoresight:.2f},{pfsDesign0.decBoresight:.2f},PA={pfsDesign0.posAng:.1f})\n{pfsDesign0.designName}"
         fname = f"{figpath}/check_0x{designId:016x}"
@@ -224,6 +284,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
             save=save,
             show=show,
             pa=pfsDesign0.posAng,
+            unfib_bright=unfib_bright,
         )
     df_ch["inr1"] = df_design["inr1"]
     df_ch["inr2"] = df_design["inr2"]
@@ -245,6 +306,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
         .applymap(pldes.colour_background_warning_ag_tot, subset=["ag_sum"])
         .applymap(pldes.colour_background_warning_inr, subset=["inr1", "inr2"])
         .applymap(pldes.colour_background_warning_el, subset=["el1", "el2"])
+        .applymap(pldes.colour_background_warning_unfib, subset=["unfib_bright"])
         .format(precision=1)
     )
     # """

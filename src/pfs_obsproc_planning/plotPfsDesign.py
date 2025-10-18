@@ -68,7 +68,8 @@ def get_pfs_utils_path():
 
 
 def plot_FoV(
-    df_fib, df_ag, alpha=1.0, title="", fname="", save=True, show=True, pa=0.0
+    df_fib, df_ag, alpha=1.0, title="", fname="", save=True, show=True, pa=0.0,
+    unfib_bright=[]
 ):
     """
     df_fib: pandas dataframe with
@@ -122,6 +123,7 @@ def plot_FoV(
 
     c = {
         "un": "slategrey",
+        "un_brt": "brown",
         "dot": "black",
         "sky": "deepskyblue",
         "fstar": "green",
@@ -140,6 +142,17 @@ def plot_FoV(
         alpha=alpha,
         lw=1,
         label=f"UNASSIGNED ({len(df_fib[df_fib.targetType==4].pfi_y)})",
+    )
+    ax1.scatter(
+        df_fib[df_fib.fiberId.isin(unfib_bright)].pfi_x,
+        df_fib[df_fib.fiberId.isin(unfib_bright)].pfi_y,
+        facecolor='none',
+        edgecolor=c["un_brt"],
+        marker="s",
+        s=s * 2.6,
+        alpha=alpha,
+        lw=1,
+        label=f"neaby bright star ({len(unfib_bright)})",
     )
     ax1.scatter(
         df_fib[df_fib.targetType == 10].pfi_x,
@@ -298,6 +311,11 @@ def plot_FoV(
             "totalMag"
         ].values
         n_mags = len(mags)
+        if n_mags == 0:
+            mags = df_fib[(df_fib.targetType == 1) & (df_fib.proposalId == p)][
+                "psfMag"
+            ].values
+            n_mags = len(mags)
         n_too_bright = sum(mags<13)
         for j in range((df_fib.shape[0] - n_mags)):
             mags = np.append(mags, np.nan)
@@ -389,6 +407,11 @@ def colour_background_warning_el(val):
 
     return f"background-color: {colour}"
 
+def colour_background_warning_unfib(val):
+    colour = warning if val > 0 else ""
+
+    return f"background-color: {colour}"
+
 
 def set_style(df_ch):
     styles = df_ch.copy()
@@ -420,12 +443,13 @@ def init_check_design():
             "ag6",
             "ag_sum",
             "designId",
+            "unfib_bright",
         ],
     )
     return df
 
 
-def check_design(designId, df_fib, df_ag):
+def check_design(designId, df_fib, df_ag, n_unfib_bright=0):
     df_ch = pd.DataFrame(
         data=np.append(check_fibers(df_fib), check_ags(df_ag)).reshape(1, 17),
         columns=[
@@ -449,6 +473,7 @@ def check_design(designId, df_fib, df_ag):
         ],
     )
     df_ch["designId"] = f"0x{designId:016x}"
+    df_ch["unfib_bright"] = n_unfib_bright
     # df_ch.style.applymap(colour_background_warning_sky_min, subset=['sky_min'])
 
     return df_ch
