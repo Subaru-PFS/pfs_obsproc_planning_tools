@@ -27,18 +27,22 @@ from pfs_design_tool.pointing_utils import nfutils
 import ets_fiber_assigner.netflow as nf
 from pfs_design_tool import reconfigure_fibers_ppp as sfa
 
+
 def read_conf(conf):
     config = toml.load(conf)
     return config
 
+
 def clear_folder(folder):
     import shutil
+
     for filename in os.listdir(folder):
         file_path = os.path.join(folder, filename)
         if os.path.isfile(file_path) or os.path.islink(file_path):
             os.remove(file_path)
         elif os.path.isdir(file_path):
             shutil.rmtree(file_path)
+
 
 def check_versions(package, repo_path, version_desire):
     """Ensure the repository at repo_path is at the desired version."""
@@ -146,18 +150,10 @@ class GeneratePfsDesign(object):
             self.today = date.today().strftime("%Y%m%d")
             self.outputDir = os.path.join(self.workDir, f"output_{self.today}")
             self.inputDirPPP = os.path.join(self.workDir, self.conf["ppp"]["inputDir"])
-            self.outputDirPPP = os.path.join(
-                self.outputDir, "ppp"
-            )
-            self.outputDirQplan = os.path.join(
-                self.outputDir, "qplan"
-            )
-            self.outputDirDesign = os.path.join(
-                self.outputDir, "design"
-            )
-            self.outputDirOpe = os.path.join(
-                self.outputDir, "ope"
-            )
+            self.outputDirPPP = os.path.join(self.outputDir, "ppp")
+            self.outputDirQplan = os.path.join(self.outputDir, "qplan")
+            self.outputDirDesign = os.path.join(self.outputDir, "design")
+            self.outputDirOpe = os.path.join(self.outputDir, "ope")
             self.cobraCoachDir = os.path.join(
                 self.workDir, self.conf["sfa"]["cobra_coach_dir"]
             )
@@ -181,12 +177,15 @@ class GeneratePfsDesign(object):
             self.conf["sfa"]["cobra_coach_dir_orig"] = self.conf["sfa"][
                 "cobra_coach_dir"
             ]
-            self.conf["sfa"]["cobra_coach_dir"] = self.cobraCoachDir      
+            self.conf["sfa"]["cobra_coach_dir"] = self.cobraCoachDir
 
             try:
                 self.df_runtime = pd.read_csv(self.outputDir + "/runtime.csv")
             except FileNotFoundError:
-                self.df_runtime = pd.DataFrame(np.array([[0, 0, 0]]), columns=["runtime_ppp", "runtime_qplan", "runtime_sfa"])
+                self.df_runtime = pd.DataFrame(
+                    np.array([[0, 0, 0]]),
+                    columns=["runtime_ppp", "runtime_qplan", "runtime_sfa"],
+                )
 
         # check versions of dependent packages
         def check_version_pfs(self, package):
@@ -259,7 +258,7 @@ class GeneratePfsDesign(object):
             obstimes_ = self.conf["qplan"]["obs_dates"]
             starttimes_ = self.conf["qplan"]["start_time"]
             stoptimes_ = self.conf["qplan"]["stop_time"]
-            
+
         readtgt_con = {
             "mode_readtgt": self.conf["ppp"]["mode"],
             "para_readtgt": {
@@ -310,8 +309,7 @@ class GeneratePfsDesign(object):
             numReservedFibers=num_reserved_fibers,
             fiberNonAllocationCost=fiber_non_allocation_cost,
             show_plots=show_plots,
-            backup=backup
-            
+            backup=backup,
         )
 
         ## check output ##
@@ -326,17 +324,19 @@ class GeneratePfsDesign(object):
 
     def runQPlan(self, plotVisibility=False):
         time_start = time.time()
-        
+
         ## update config before run qPlan ##
         self.update_config()
 
         ## import qPlanner module ##
         from . import qPlan
-        
-        #"""
+
+        # """
         try:
             self.df_qplan = pd.read_csv(os.path.join(self.outputDirQplan, "result.csv"))
-            obstimes = [pd.to_datetime(obstime_str) for obstime_str in self.df_qplan["obstime"]]
+            obstimes = [
+                pd.to_datetime(obstime_str) for obstime_str in self.df_qplan["obstime"]
+            ]
             self.resQPlan = {
                 ppc_code: (obstime, ppc_ra, ppc_dec)
                 for obstime, ppc_code, ppc_ra, ppc_dec in zip(
@@ -348,7 +348,13 @@ class GeneratePfsDesign(object):
             }
             return None
         except FileNotFoundError:
-            self.df_qplan, self.sdlr, self.figs_qplan, self.tw_start, self.tw_stop = qPlan.run(
+            (
+                self.df_qplan,
+                self.sdlr,
+                self.figs_qplan,
+                self.tw_start,
+                self.tw_stop,
+            ) = qPlan.run(
                 self.conf,
                 "ppcList.ecsv",
                 inputDirName=self.outputDirPPP,
@@ -363,30 +369,36 @@ class GeneratePfsDesign(object):
                     self.df_qplan["ppc_ra"],
                     self.df_qplan["ppc_dec"],
                 )
-            }               
+            }
 
             if self.conf["ppp"]["daily_plan"]:
                 logger.info(f"Now running for the daily planning")
 
                 if not (self.df_qplan).empty:
-                    self.df_qplan["obstime_hst"] = self.df_qplan["obstime"].dt.tz_convert("US/Hawaii") 
-                    self.df_qplan["obstime_stop"] = self.df_qplan["obstime_hst"] + timedelta(minutes=21)
+                    self.df_qplan["obstime_hst"] = self.df_qplan[
+                        "obstime"
+                    ].dt.tz_convert("US/Hawaii")
+                    self.df_qplan["obstime_stop"] = self.df_qplan[
+                        "obstime_hst"
+                    ] + timedelta(minutes=21)
                 else:
                     self.df_qplan["obstime_hst"] = None
                     self.df_qplan["obstime_stop"] = None
                 df_window = (self.df_qplan).copy()
-                
+
                 starttime_backup = []
                 stoptime_backup = []
-                
+
                 for tw_start, tw_stop in zip(self.tw_start, self.tw_stop):
                     # convert to Timestamp (in case they are strings)
                     tw_start = pd.Timestamp(tw_start)
                     tw_stop = pd.Timestamp(tw_stop)
 
                     # filter df_window to only rows inside this available window
-                    df_sub = df_window[(df_window["obstime_hst"] >= tw_start) &
-                                       (df_window["obstime_hst"] <= tw_stop)].copy()
+                    df_sub = df_window[
+                        (df_window["obstime_hst"] >= tw_start)
+                        & (df_window["obstime_hst"] <= tw_stop)
+                    ].copy()
                     df_sub.sort_values("obstime_hst", inplace=True)
 
                     if df_sub.empty:
@@ -403,25 +415,30 @@ class GeneratePfsDesign(object):
                         starttime_backup.append(tw_start)
                         stoptime_backup.append(first_obs)
                         print(f"Gap: start at {tw_start}, stop at {first_obs}")
-                
+
                     # check gaps between consecutive observations
                     for i in range(len(df_sub) - 1):
-                        gap = df_sub["obstime_hst"].iloc[i + 1] - df_sub["obstime_stop"].iloc[i]
+                        gap = (
+                            df_sub["obstime_hst"].iloc[i + 1]
+                            - df_sub["obstime_stop"].iloc[i]
+                        )
                         if gap > timedelta(minutes=10):
                             starttime_backup.append(df_sub["obstime_stop"].iloc[i])
                             stoptime_backup.append(df_sub["obstime_hst"].iloc[i + 1])
-                            print(f"Gap: start at {df_sub['obstime_stop'].iloc[i]}, stop at {df_sub['obstime_hst'].iloc[i + 1]}")
-                
+                            print(
+                                f"Gap: start at {df_sub['obstime_stop'].iloc[i]}, stop at {df_sub['obstime_hst'].iloc[i + 1]}"
+                            )
+
                     # check gap from last observation → tw_stop
                     last_stop = df_sub["obstime_stop"].iloc[-1]
                     if tw_stop - last_stop > timedelta(minutes=10):
                         starttime_backup.append(last_stop)
                         stoptime_backup.append(tw_stop)
                         print(f"Gap: start at {last_stop}, stop at {tw_stop}")
-        
+
                 if len(starttime_backup) > 0:
                     self.runPPP(100, 100, show_plots=False, backup=True)
-        
+
                     self.df_qplan_, self.sdlr_, self.figs_qplan_ = qPlan.run(
                         self.conf,
                         "ppcList_backup.ecsv",
@@ -431,7 +448,9 @@ class GeneratePfsDesign(object):
                         starttime_backup=starttime_backup,
                         stoptime_backup=stoptime_backup,
                     )[:3]
-                    self.df_qplan = pd.concat([self.df_qplan, self.df_qplan_], ignore_index=True)
+                    self.df_qplan = pd.concat(
+                        [self.df_qplan, self.df_qplan_], ignore_index=True
+                    )
                     self.resQPlan_ = {
                         ppc_code: (obstime, ppc_ra, ppc_dec)
                         for obstime, ppc_code, ppc_ra, ppc_dec in zip(
@@ -442,10 +461,10 @@ class GeneratePfsDesign(object):
                         )
                     }
                     self.resQPlan = {**self.resQPlan, **self.resQPlan_}
-                #"""
-        
+                # """
+
             (self.df_qplan).to_csv(os.path.join(self.outputDirQplan, "result.csv"))
-    
+
             if plotVisibility is True:
                 time_qplan = time.time() - time_start
                 self.df_runtime["runtime_qplan"] = time_qplan
@@ -456,12 +475,12 @@ class GeneratePfsDesign(object):
                 return None
 
         # for test design generation at different obstime
-        #self.resQPlan = {"PPC_L_uh006_1": (pd.to_datetime("2025-03-23T11:40:10.422Z", utc=True), 150.08220377, 2.18805709 ),
+        # self.resQPlan = {"PPC_L_uh006_1": (pd.to_datetime("2025-03-23T11:40:10.422Z", utc=True), 150.08220377, 2.18805709 ),
         #                "PPC_L_uh006_2": (pd.to_datetime("2025-03-24T11:13:28.779Z", utc=True), 150.08220377, 2.18805709),}
 
     def runSFA(self, clearOutput=False):
         time_start = time.time()
-        
+
         from . import SFA
 
         ## update config before run SFA ##
@@ -551,7 +570,7 @@ class GeneratePfsDesign(object):
                 ob_total_flux_error_z,
                 ob_total_flux_error_y,
             ]
-            for proposal_id, ob_code, ob_obj_id, ob_cat_id, ob_ra, ob_dec, ob_pmra, ob_pmdec, ob_parallax, ob_equinox, ob_priority, ob_single_exptime, ob_filter_g, ob_filter_r, ob_filter_i, ob_filter_z, ob_filter_y, ob_psf_flux_g, ob_psf_flux_r, ob_psf_flux_i, ob_psf_flux_z, ob_psf_flux_y, ob_psf_flux_error_g, ob_psf_flux_error_r, ob_psf_flux_error_i, ob_psf_flux_error_z, ob_psf_flux_error_y,ob_total_flux_g, ob_total_flux_r, ob_total_flux_i, ob_total_flux_z, ob_total_flux_y, ob_total_flux_error_g, ob_total_flux_error_r, ob_total_flux_error_i, ob_total_flux_error_z, ob_total_flux_error_y in zip(
+            for proposal_id, ob_code, ob_obj_id, ob_cat_id, ob_ra, ob_dec, ob_pmra, ob_pmdec, ob_parallax, ob_equinox, ob_priority, ob_single_exptime, ob_filter_g, ob_filter_r, ob_filter_i, ob_filter_z, ob_filter_y, ob_psf_flux_g, ob_psf_flux_r, ob_psf_flux_i, ob_psf_flux_z, ob_psf_flux_y, ob_psf_flux_error_g, ob_psf_flux_error_r, ob_psf_flux_error_i, ob_psf_flux_error_z, ob_psf_flux_error_y, ob_total_flux_g, ob_total_flux_r, ob_total_flux_i, ob_total_flux_z, ob_total_flux_y, ob_total_flux_error_g, ob_total_flux_error_r, ob_total_flux_error_i, ob_total_flux_error_z, ob_total_flux_error_y in zip(
                 proposal_ids,
                 ob_codes,
                 ob_obj_ids,
@@ -596,7 +615,9 @@ class GeneratePfsDesign(object):
         ## get a list of assigned OBs ## FIXME (maybe we don't need to use this)
         tb_ppp = Table.read(os.path.join(self.outputDirPPP, "ppcList.ecsv"))
         try:
-            tb_ppp_backup = Table.read(os.path.join(self.outputDirPPP, "ppcList_backup.ecsv"))
+            tb_ppp_backup = Table.read(
+                os.path.join(self.outputDirPPP, "ppcList_backup.ecsv")
+            )
         except:
             tb_ppp_backup = Table()
         data_ppp = vstack([tb_ppp, tb_ppp_backup])
@@ -641,12 +662,22 @@ class GeneratePfsDesign(object):
         )
         ## curate csv (FIXME) ##
         df = pd.read_csv(os.path.join(self.outputDirPPP, filename))
-        df['filter_g'] = df['filter_g'].apply(lambda x: "none" if x in [0.0,"0.0", "[]","--"] else x)
-        df['filter_r'] = df['filter_r'].apply(lambda x: "none" if x in [0.0,"0.0","[]","--"] else x)
-        df['filter_i'] = df['filter_i'].apply(lambda x: "none" if x in [0.0,"0.0","[]","--"] else x)
-        df['filter_z'] = df['filter_z'].apply(lambda x: "none" if x in [0.0,"0.0","[]","--"] else x)
-        df['filter_y'] = df['filter_y'].apply(lambda x: "none" if x in [0.0,"0.0","[]","--"] else x)
-        #df = df.replace("[]", "")
+        df["filter_g"] = df["filter_g"].apply(
+            lambda x: "none" if x in [0.0, "0.0", "[]", "--"] else x
+        )
+        df["filter_r"] = df["filter_r"].apply(
+            lambda x: "none" if x in [0.0, "0.0", "[]", "--"] else x
+        )
+        df["filter_i"] = df["filter_i"].apply(
+            lambda x: "none" if x in [0.0, "0.0", "[]", "--"] else x
+        )
+        df["filter_z"] = df["filter_z"].apply(
+            lambda x: "none" if x in [0.0, "0.0", "[]", "--"] else x
+        )
+        df["filter_y"] = df["filter_y"].apply(
+            lambda x: "none" if x in [0.0, "0.0", "[]", "--"] else x
+        )
+        # df = df.replace("[]", "")
         df.replace(9e-05, np.nan, inplace=True)
         df.to_csv(os.path.join(self.outputDirPPP, filename), index=False)
 
@@ -668,10 +699,10 @@ class GeneratePfsDesign(object):
         for obsdate in self.obs_dates:
             date_t = ps.parse(f"{obsdate} 12:00 HST")
             date_today = ps.parse(f"{self.today} 12:00 HST")
-    
+
             if date_today > date_t:
                 continue
-            
+
             logger.info(f"generating ope file for {obsdate}...")
             ope.loadTemplate()  # initialize
             ope.update_obsdate(obsdate)  # update observation date
@@ -684,12 +715,16 @@ class GeneratePfsDesign(object):
                     ppc_ra_ = res[1]
                     ppc_dec_ = res[2]
 
-                    if isinstance(ppc_ra_, str) and (':' in ppc_ra_):
+                    if isinstance(ppc_ra_, str) and (":" in ppc_ra_):
                         ppc_ra_t = ppc_ra_.replace(":", "")
                         ppc_dec_t = ppc_dec_.replace(":", "")
                     elif isinstance(ppc_ra_, float):
-                        ppc_ra_t = Angle(ppc_ra_ * u.deg).to_string(unit=u.hourangle, sep='', precision=3, pad=True)
-                        ppc_dec_t = Angle(ppc_dec_ * u.deg).to_string(unit=u.deg, sep='', alwayssign=True, precision=2, pad=True)
+                        ppc_ra_t = Angle(ppc_ra_ * u.deg).to_string(
+                            unit=u.hourangle, sep="", precision=3, pad=True
+                        )
+                        ppc_dec_t = Angle(ppc_dec_ * u.deg).to_string(
+                            unit=u.deg, sep="", alwayssign=True, precision=2, pad=True
+                        )
 
                     info.append(
                         [
@@ -730,7 +765,7 @@ class GeneratePfsDesign(object):
 
             if self.conf["ppp"]["daily_plan"]:
                 break
-                
+
         # for pointing, (k,v) in zip(listPointings, pfsDesignIds.items()):
         #    ope.loadTemplate() # initialize
         #    ope.update(pointing=pointing, dictPointings=dictPointings, designId=v, observationTime=k) # update contents
@@ -763,18 +798,20 @@ class GeneratePfsDesign(object):
             self.conf["ssp"]["ssp"],
             self.conf,
         )
-        
+
         logger.info(f"validation plots saved under {figpath}")
 
         if "queue" in self.workDir:
             from . import completion_check
+
             completion_check.run(self.conf, self.outputDir)
-            
+
         logger.info(f"{self.df_runtime}")
 
-        (self.df_runtime).to_csv((self.outputDir + "/runtime.csv"), index = False)
+        (self.df_runtime).to_csv((self.outputDir + "/runtime.csv"), index=False)
 
         return None
+
 
 def get_arguments():
     parser = argparse.ArgumentParser()

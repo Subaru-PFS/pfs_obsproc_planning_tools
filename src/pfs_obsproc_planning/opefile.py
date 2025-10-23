@@ -65,10 +65,18 @@ class OpeFile(object):
                     self.contents2 += line
                 elif science_part == 2:
                     self.contents3 += line
-                if line.startswith(("# SETUPFIELD WITH", "SETUPFIELD", "# Check Auto Guiding", "## Get spectrum", "GETOBJECT")):
+                if line.startswith(
+                    (
+                        "# SETUPFIELD WITH",
+                        "SETUPFIELD",
+                        "# Check Auto Guiding",
+                        "## Get spectrum",
+                        "GETOBJECT",
+                    )
+                ):
                     self.contents2_main += line
                     if line.startswith(("SETUPFIELD", "# Check Auto Guiding")):
-                        self.contents2_main += "\n" 
+                        self.contents2_main += "\n"
 
     def update_obsdate(self, obsdate, utc=False):
         obsdate_orig = obsdate
@@ -90,14 +98,15 @@ class OpeFile(object):
         # add time_stamp when ope file is created
         from datetime import datetime
         import pytz
-        
+
         hst = pytz.timezone("Pacific/Honolulu")
         dt_hst = datetime.now(hst)
         time_stamp = dt_hst.strftime("%Y-%m-%d %H:%M:%S HST")
         self.contents1_updated = self.contents1.replace(
-            '### template ope file for PFS operations', f'### This ope created at {time_stamp} \n### template ope file for PFS operations'
+            "### template ope file for PFS operations",
+            f"### This ope created at {time_stamp} \n### template ope file for PFS operations",
         )
-        
+
         # update PFSDSGNDIR
         self.contents1_updated = self.contents1_updated.replace(
             'PFSDSGNDIR="/data/pfsDesign/"', f'PFSDSGNDIR="{self.designPath}"'
@@ -182,8 +191,8 @@ class OpeFile(object):
             tmpl_longexp = self.contents2_main
             total_exptime = val[7]
             nframe = int(val[8])
-            single_exptime = total_exptime/nframe
-            nframe_long = int(np.ceil(1800.0 / single_exptime))              
+            single_exptime = total_exptime / nframe
+            nframe_long = int(np.ceil(1800.0 / single_exptime))
 
             # add PPC code
             repl1 = "### SCIENCE:START ###"
@@ -235,7 +244,7 @@ class OpeFile(object):
                     tmpl_longexp = tmpl_longexp.replace(repl1, repl2)
                     self.contents2_updated += tmpl_longexp + "\n\n"
                     nframe -= nframe_long
-                
+
             self.contents3 = self.contents3.replace("### SCIENCE:END  ###", "")
 
     def write(self):

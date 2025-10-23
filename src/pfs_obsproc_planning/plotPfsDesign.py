@@ -68,7 +68,16 @@ def get_pfs_utils_path():
 
 
 def plot_FoV(
-    df_fib, df_ag, alpha=1.0, title="", fname="", save=True, show=True, pa=0.0, conf=None, unfib_bright=[]
+    df_fib,
+    df_ag,
+    alpha=1.0,
+    title="",
+    fname="",
+    save=True,
+    show=True,
+    pa=0.0,
+    conf=None,
+    unfib_bright=[],
 ):
     """
     df_fib: pandas dataframe with
@@ -146,7 +155,7 @@ def plot_FoV(
     ax1.scatter(
         df_fib[df_fib.fiberId.isin(unfib_bright)].pfi_x,
         df_fib[df_fib.fiberId.isin(unfib_bright)].pfi_y,
-        facecolor='none',
+        facecolor="none",
         edgecolor=c["un_brt"],
         marker="s",
         s=s * 2.6,
@@ -203,7 +212,7 @@ def plot_FoV(
         s=s,
         alpha=alpha,
         lw=0,
-        #label=f"SCIENCE ({len(df_fib[df_fib.targetType==1].pfi_y)})",
+        # label=f"SCIENCE ({len(df_fib[df_fib.targetType==1].pfi_y)})",
     )
     ax1.scatter(
         df_ag.ag_pfi_x,
@@ -241,23 +250,25 @@ def plot_FoV(
     rs1 = 50
     rs2 = 132.5
     for rs in [rs1, rs2]:
-        circle = patches.Circle((0, 0), radius=rs, 
-                                color='navy', fill=False, lw=0.5)
+        circle = patches.Circle((0, 0), radius=rs, color="navy", fill=False, lw=0.5)
         ax1.add_patch(circle)
     phis = np.radians(np.linspace(0, 360, 6, endpoint=False) + 15 + 90)
-    phis = phis - np.radians(360/60./2.)
+    phis = phis - np.radians(360 / 60.0 / 2.0)
     for phi in phis:
-        xx1, yy1 = rs1*np.cos(phi), rs1*np.sin(phi)
-        xx2, yy2 = rs2*np.cos(phi), rs2*np.sin(phi)
-        line = patches.FancyArrow(xx1, yy1, (xx2-xx1), (yy2-yy1),
-                                  head_width=0, color='navy', lw=0.5)
+        xx1, yy1 = rs1 * np.cos(phi), rs1 * np.sin(phi)
+        xx2, yy2 = rs2 * np.cos(phi), rs2 * np.sin(phi)
+        line = patches.FancyArrow(
+            xx1, yy1, (xx2 - xx1), (yy2 - yy1), head_width=0, color="navy", lw=0.5
+        )
         ax1.add_patch(line)
-    phis = np.radians(np.linspace(0, 360, 13, endpoint=False) -20 + 90)
-    phis = phis - np.radians(360/13./2.)
+    phis = np.radians(np.linspace(0, 360, 13, endpoint=False) - 20 + 90)
+    phis = phis - np.radians(360 / 13.0 / 2.0)
     for phi in phis:
-        xx1, yy1 = rs2*np.cos(phi), rs2*np.sin(phi)
-        xx2, yy2 = r*np.cos(phi), r*np.sin(phi)
-        line = patches.FancyArrow(xx1, yy1, (xx2-xx1), (yy2-yy1), head_width=0, color='navy', lw=0.5)
+        xx1, yy1 = rs2 * np.cos(phi), rs2 * np.sin(phi)
+        xx2, yy2 = r * np.cos(phi), r * np.sin(phi)
+        line = patches.FancyArrow(
+            xx1, yy1, (xx2 - xx1), (yy2 - yy1), head_width=0, color="navy", lw=0.5
+        )
         ax1.add_patch(line)
 
     # show North/East
@@ -327,7 +338,7 @@ def plot_FoV(
                 "psfMag"
             ].values
             n_mags = len(mags)
-        n_too_bright = sum(mags<13)
+        n_too_bright = sum(mags < 13)
         for j in range((df_fib.shape[0] - n_mags)):
             mags = np.append(mags, np.nan)
         # print(mag_per_prog.shape, mags.shape)
@@ -421,10 +432,12 @@ def colour_background_warning_inr(val):
 
     return f"background-color: {colour}"
 
+
 def colour_background_warning_el(val):
     colour = warning if (val < 32) or (val > 75) else ""
 
     return f"background-color: {colour}"
+
 
 def colour_background_warning_unfib(val):
     colour = warning if val > 0 else ""
@@ -584,13 +597,11 @@ def get_field_sector(df_fib):
 
 
 def get_field_sector2(df_fib):
-    
     """
     df_fib: pandas dataframe with
            'targetType', 'pfi_x', 'pfi_y', 'spec', 'fh', 'pfsFlux', 'pfsFlux'
-    divede sectors to 20 (1 + 6 + 13) regions, proposed by Laszlo 
+    divede sectors to 20 (1 + 6 + 13) regions, proposed by Laszlo
     """
-
 
     points = []
     # centre points
@@ -601,7 +612,7 @@ def get_field_sector2(df_fib):
     points.append(100 * np.stack([np.cos(phi), np.sin(phi)], axis=-1))
 
     # outer points
-    phi =  np.radians(np.linspace(0, 360, 13, endpoint=False) - 20 + 90)
+    phi = np.radians(np.linspace(0, 360, 13, endpoint=False) - 20 + 90)
     points.append(175 * np.stack([np.cos(phi), np.sin(phi)], axis=-1))
 
     xy = np.concatenate(points, axis=0)
@@ -613,8 +624,8 @@ def get_field_sector2(df_fib):
     d = distance_matrix(xy, uv)
 
     tag = np.argmin(d, axis=0)
-    #tag.shape
-    
+    # tag.shape
+
     return tag
 
 
