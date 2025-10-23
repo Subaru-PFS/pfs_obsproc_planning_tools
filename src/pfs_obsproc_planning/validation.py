@@ -181,6 +181,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
         df_fib["proposalId"] = pfsDesign0.proposalId
         df_fib["psfMag"] = df_fib["pfsFlux"].apply(njy_mag)
         df_fib["totalMag"] = df_fib["totalFlux"].apply(njy_mag)
+        df_fib["obCode"] = pfsDesign0.obCode
 
         # Identify rows where either magnitude is < 13
         df_too_bright = df_fib[(df_fib["psfMag"] < 13) | (df_fib["totalMag"] < 13)]
@@ -224,6 +225,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
             save=save,
             show=show,
             pa=pfsDesign0.posAng,
+            conf=conf,
         )
     df_ch["inr1"] = df_design["inr1"]
     df_ch["inr2"] = df_design["inr2"]
