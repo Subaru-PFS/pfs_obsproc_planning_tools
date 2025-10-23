@@ -342,6 +342,8 @@ def readTarget(mode, para):
 
             if proposalId == 'S25B-126QN':
                 tb_tgt = tb_tgt[tb_tgt["priority"]<=3]
+            if proposalId == 'S25B-071QN':
+                tb_tgt = tb_tgt[tb_tgt["ra"]<=50]
 
             """
             for col in ["psf_flux_g","psf_flux_r", "psf_flux_i", "psf_flux_z", "psf_flux_y"]:
@@ -741,8 +743,9 @@ def objective1(params, _tb_tgt):
       Negative of the weighted sum of bright and faint counts (since we minimize).
     """
     ra, dec = params
+    pa = 0.0
     #lst_tgtID_assign = netflowRun4PPC(_tb_tgt, ra, dec, pa)
-    index_ = PFS_FoV(ra, dec, 0.0, _tb_tgt)
+    index_ = PFS_FoV(ra, dec, pa, _tb_tgt)
     lst_tgtID_assign = _tb_tgt["identify_code"][index_]
     
     index_assign = np.in1d(_tb_tgt["identify_code"], lst_tgtID_assign)
@@ -773,7 +776,7 @@ def objective1(params, _tb_tgt):
 
     N_Pall = len(lst_tgtID_assign)
 
-    print(f"{ra}, {dec}, {0.0}, {N_Pall}/{len(_tb_tgt)}, {N_P0}/{N_P0_}, {N_P1}/{N_P1_}, {N_P2}/{N_P2_}, {N_P3}/{N_P3_}, {N_P4}/{N_P4_}, {N_P5}/{N_P5_}, {N_P6}/{N_P6_}, {N_P7}/{N_P7_}, {N_P8}/{N_P8_}, {N_P9}/{N_P9_}, {N_P999}/{N_P999_}")
+    print(f"{ra}, {dec}, {pa}, {N_Pall}/{len(_tb_tgt)}, {N_P0}/{N_P0_}, {N_P1}/{N_P1_}, {N_P2}/{N_P2_}, {N_P3}/{N_P3_}, {N_P4}/{N_P4_}, {N_P5}/{N_P5_}, {N_P6}/{N_P6_}, {N_P7}/{N_P7_}, {N_P8}/{N_P8_}, {N_P9}/{N_P9_}, {N_P999}/{N_P999_}")
     
     # Define weights: you can adjust these based on your priorities.
     weight_pall = 1.0
@@ -835,7 +838,8 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
         _tb_tgt_ = _tb_tgt_[
                 (_tb_tgt_["exptime_PPP"] > 0)
                 * np.in1d(_tb_tgt_["proposal_id"], psl_id_undone)
-            ]  # targets not finished        
+            ]  # targets not finished       
+        _tb_tgt_["priority"][_tb_tgt_["exptime_done"]>0] = 999
 
         tb_tgt_t_group = target_DBSCAN(_tb_tgt_, 1.38)
 
@@ -896,8 +900,9 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
                     sum(pslID_n.values()) / sum(FH_goal),
                     len(lst_pslID_assign) / 2394.0,
                     lst_tgtID_assign,
-                ]
-            )
+                ],
+                dtype=object,
+            ),
         )
         # ppc_id, ppc_ra, ppc_dec, ppc_pa, ppc_weight, ppc_fh, ppc_FE
 
