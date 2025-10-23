@@ -30,6 +30,9 @@ from pfs_design_tool import reconfigure_fibers_ppp as sfa
 warnings.filterwarnings("ignore")
 
 
+from importlib import reload
+reload(pldes)
+
 def njy_mag(j):
     if j > 0:
         return 23.9 - 2.5 * np.log10(j / 1e3)
@@ -124,6 +127,8 @@ def validation(parentPath, figpath, save, show, ssp, conf):
             ppc_obstime_utc = df_design["observation_time"][count]
         else:
             ppc_obstime_utc = df_design["ppc_obstime_utc"][count]
+
+        count+=1
         
         guidestars_toobright = sfa.designutils.generate_guidestars_from_gaiadb(
                 ppc_ra,
@@ -138,6 +143,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
                 guidestar_minsep_deg=0.0002778,
             )
         df_guidestars_toobright = pd.DataFrame({
+            "agId": guidestars_toobright.agId,
             "objId": guidestars_toobright.objId,
             "ra": guidestars_toobright.ra,
             "dec": guidestars_toobright.dec,
@@ -148,8 +154,73 @@ def validation(parentPath, figpath, save, show, ssp, conf):
             logger.warning(
                 f"[Validation of output] There are too bright guide stars: {df_guidestars_toobright}"
             )
-        count+=1
+
+        # check bright stars nearby unassigend fibers including disabled fibers
+        # Because unassigned fiber doesn't have pfi position, we need to get by calling bench
+        # The columns of pfs_instdata_dir may be different..
+        bench = sfa.nfutils.getBench(
+            conf['packages']['pfs_instdata_dir'],  
+            conf['sfa']['cobra_coach_dir'],
+            conf['sfa']['cobra_coach_module_version'],
+            conf['sfa']['sm'],
+            conf['sfa']['black_dot_radius_margin'],
+        )
         
+        # The columns of pfs_utils_dir may be different..
+        fibId=FiberIds(path=os.path.join(conf['packages']['pfs_utils_dir'], 'data', 'fiberids'))
+
+        # pick up unassigened fibers
+        unassigened_fibers = pfsDesign0[pfsDesign0.targetType==TargetType.UNASSIGNED].fiberId
+        df_unassigned_toobright = pd.DataFrame()
+        for unfib in unassigened_fibers:
+            if pfsDesign0[pfsDesign0.fiberId==unfib].fiberStatus != FiberStatus.BROKENFIBER:  # check if fiber pass the light
+                cidx = fibId.fiberIdToCobraId(unfib)-1
+                ccenter = bench.cobras.centers[cidx]
+                un_ra, un_dec = sfa.designutils.get_skypos_cobra(
+                    ccenter, 
+                    pfsDesign0.obstime,
+                    ppc_ra,
+                    ppc_dec,
+                    ppc_pa
+                )
+
+                df_gaia_toobright = sfa.dbutils.generate_targets_from_gaiadb(
+                    un_ra,
+                    un_dec,
+                    conf=conf,
+                    search_radius=conf["sfa"]["fill_unassign_radius_check"],  # 5 arcsec. It is better to make it configurable.
+                    band_select="phot_g_mean_mag",
+                    mag_min=-2., 
+                    mag_max=12.,
+                    good_astrometry=False,
+                    write_csv=False
+                )
+
+                if not df_gaia_toobright.empty:
+                    df_tmp = pd.DataFrame({
+                        "fiber_id": [unfib] * len(df_gaia_toobright),
+                        "fiber_ra": [un_ra] * len(df_gaia_toobright),
+                        "fiber_dec": [un_dec] * len(df_gaia_toobright),
+                        "source_id": df_gaia_toobright.source_id,
+                        "ra": df_gaia_toobright.ra,
+                        "dec": df_gaia_toobright.dec,
+                        "magnitude": df_gaia_toobright.phot_g_mean_mag
+                    })
+                    if len(df_unassigned_toobright) == 0:
+                        df_unassigned_toobright = df_tmp.copy()
+                    else:
+                        df_unassigned_toobright = pd.concat([df_unassigned_toobright, df_tmp])
+
+                    logger.warning(
+                        f"[Validation of output] There are {len(df_gaia_toobright)} bright stars nearby fiber {unfib}: {df_tmp}"
+                    )
+        
+        # write to csv
+        if conf["validation"]["save_unassign_toobright"] and not df_unassigned_toobright.empty:
+            out_path = os.path.join(figpath, "df_unassign_bright_nearby.csv")
+            df_unassign_toobright.to_csv(out_path, index=False)
+        
+        # check magnitudes 
         pfsflux = np.array([a[0] if len(a) > 0 else np.nan for a in pfsDesign0.psfFlux])
         totalflux = np.array([a[0] if len(a) > 0 else np.nan for a in pfsDesign0.totalFlux])
         # print(len(pfsDesign0[pfsDesign0.fiberStatus==3]))
@@ -181,7 +252,6 @@ def validation(parentPath, figpath, save, show, ssp, conf):
         df_fib["proposalId"] = pfsDesign0.proposalId
         df_fib["psfMag"] = df_fib["pfsFlux"].apply(njy_mag)
         df_fib["totalMag"] = df_fib["totalFlux"].apply(njy_mag)
-        df_fib["obCode"] = pfsDesign0.obCode
 
         # Identify rows where either magnitude is < 13
         df_too_bright = df_fib[(df_fib["psfMag"] < 13) | (df_fib["totalMag"] < 13)]
@@ -190,6 +260,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
             logger.warning(f"[Validation of output] Too bright sources with psfMag or totalMag < 13 (0x{designId:016x}, {pfsDesign0.designName}): {df_too_bright}")
     
         df_fib["sector"] = pldes.get_field_sector2(df_fib)
+
         df_ag = pd.DataFrame(
             data=np.column_stack(
                 (
@@ -212,7 +283,8 @@ def validation(parentPath, figpath, save, show, ssp, conf):
         df_ag["ag_pfi_x"] = np.array(pfix)
         df_ag["ag_pfi_y"] = np.array(pfiy)
 
-        df = pldes.check_design(designId, df_fib, df_ag)
+        unfib_bright = df_unassign_toobright["fiber_id"].unique().tolist()
+        df = pldes.check_design(designId, df_fib, df_ag, n_unfib_bright=len(unfib_bright))
         df_ch = pd.concat([df_ch, df], ignore_index=True)
         title = f"designId=0x{designId:016x} ({pfsDesign0.raBoresight:.2f},{pfsDesign0.decBoresight:.2f},PA={pfsDesign0.posAng:.1f})\n{pfsDesign0.designName}"
         fname = f"{figpath}/check_0x{designId:016x}"
@@ -226,6 +298,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
             show=show,
             pa=pfsDesign0.posAng,
             conf=conf,
+            unfib_bright=unfib_bright,
         )
     df_ch["inr1"] = df_design["inr1"]
     df_ch["inr2"] = df_design["inr2"]
@@ -247,6 +320,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
         .applymap(pldes.colour_background_warning_ag_tot, subset=["ag_sum"])
         .applymap(pldes.colour_background_warning_inr, subset=["inr1", "inr2"])
         .applymap(pldes.colour_background_warning_el, subset=["el1", "el2"])
+        .applymap(pldes.colour_background_warning_unfib, subset=["unfib_bright"])
         .format(precision=1)
     )
     # """
@@ -256,5 +330,5 @@ def validation(parentPath, figpath, save, show, ssp, conf):
 
     with open(os.path.join(figpath, "validation_report.html"), "w") as f:
         f.write(html_str)
+        f.close()
 
-    # df_ch.to_csv(f"{figpath}/validation_report.csv")
