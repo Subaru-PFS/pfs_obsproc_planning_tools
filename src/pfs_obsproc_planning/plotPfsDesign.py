@@ -68,7 +68,7 @@ def get_pfs_utils_path():
 
 
 def plot_FoV(
-    df_fib, df_ag, alpha=1.0, title="", fname="", save=True, show=True, pa=0.0
+    df_fib, df_ag, alpha=1.0, title="", fname="", save=True, show=True, pa=0.0, conf=None,
 ):
     """
     df_fib: pandas dataframe with
@@ -87,6 +87,7 @@ def plot_FoV(
     df_fib["pfi_y"] = df_fib.pfi_y.astype(float)
     df_fib["targetType"] = df_fib.targetType.astype(int)
     df_fib["fiberId"] = df_fib.fiberId.astype(int)
+    df_fib["obCode"] = df_fib.obCode.astype(str)
 
     # set the font sizes for labels
 
@@ -180,6 +181,17 @@ def plot_FoV(
         alpha=alpha,
         lw=0,
         label=f"SCIENCE ({len(df_fib[df_fib.targetType==1].pfi_y)})",
+    )
+    # plot top-rank target in cla program 25b-116
+    ax1.scatter(
+        df_fib[df_fib.obCode == "M31_30410_R31_02730_v2"].pfi_x,
+        df_fib[df_fib.obCode == "M31_30410_R31_02730_v2"].pfi_y,
+        c="red",
+        marker="o",
+        s=s,
+        alpha=alpha,
+        lw=0,
+        #label=f"SCIENCE ({len(df_fib[df_fib.targetType==1].pfi_y)})",
     )
     ax1.scatter(
         df_ag.ag_pfi_x,
@@ -303,7 +315,15 @@ def plot_FoV(
             mags = np.append(mags, np.nan)
         # print(mag_per_prog.shape, mags.shape)
         mag_per_prog = np.vstack((mag_per_prog, mags))
-        label_per_prog.append(f"{p} ({n_mags}; {n_too_bright}<13mag)")
+        if conf["ppp"]["mode"] == "classic":
+            if p in conf["sfa"]["proposalIds_obsFiller"]:
+                label_per_prog.append(f"obs. filler ({n_mags}; {n_too_bright}<13mag)")
+            elif p in conf["ppp"]["proposalIds"]:
+                label_per_prog.append(f"{p} ({n_mags}; {n_too_bright}<13mag)")
+            else:
+                label_per_prog.append(f"usr filler ({n_mags}; {n_too_bright}<13mag)")
+        else:
+            label_per_prog.append(f"{p} ({n_mags}; {n_too_bright}<13mag)")
 
     mag_per_prog = mag_per_prog[1:]
     # print(mag_per_prog.shape, mag_per_prog)
