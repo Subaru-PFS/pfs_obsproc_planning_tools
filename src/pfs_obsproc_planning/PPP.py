@@ -201,7 +201,7 @@ def readTarget(mode, para):
             sql = f"SELECT ob_code,obj_id,c.input_catalog_id,ra,dec,epoch,priority,pmra,pmdec,parallax,effective_exptime,single_exptime,qa_reference_arm,is_medium_resolution,proposal.proposal_id,rank,grade,allocated_time_lr+allocated_time_mr as \"allocated_time\",allocated_time_lr,allocated_time_mr,filter_g,filter_r,filter_i,filter_z,filter_y,psf_flux_g,psf_flux_r,psf_flux_i,psf_flux_z,psf_flux_y,psf_flux_error_g,psf_flux_error_r,psf_flux_error_i,psf_flux_error_z,psf_flux_error_y,total_flux_g,total_flux_r,total_flux_i,total_flux_z,total_flux_y,total_flux_error_g,total_flux_error_r,total_flux_error_i,total_flux_error_z,total_flux_error_y FROM target JOIN proposal ON target.proposal_id=proposal.proposal_id JOIN input_catalog AS c ON target.input_catalog_id = c.input_catalog_id WHERE proposal.proposal_id in ('{proposalId}') AND c.active;"
 
             if proposalId == "S25B-UH016-A":
-                sql = sql[:-1] + " AND c.input_catalog_id = 10259;"
+                sql = sql[:-1] + " AND c.input_catalog_id in (10258, 10259);"
     
             conn = tgtDB.connect()
             query = conn.execute(sa.sql.text(sql))
@@ -1520,7 +1520,7 @@ def PPC_centers_single(_tb_tgt, nPPC):
         )
 
     #ppcList.write("/home/wanqqq/examples/run_2503/S25A-UH006-B/output/ppp/ppcList.ecsv", format="ascii.ecsv", overwrite=True) 
-    ppcList.write("/home/wanqqq/workDir_pfs/run_2509/S25B-116N/output_20250909/ppp/ppcList.ecsv", format="ascii.ecsv", overwrite=True) 
+    #ppcList.write("/home/wanqqq/workDir_pfs/run_2509/S25B-116N/output_20250914/ppp/ppcList1.ecsv", format="ascii.ecsv", overwrite=True) 
 
     logger.info(
         f"[S2] Determine pointing centers done ( nppc = {len(ppc_lst_fin):.0f}; takes {round(time.time()-time_start,3)} sec)"
@@ -1655,7 +1655,7 @@ def NetflowPreparation(_tb_tgt):
             "calib": False,
         },
         "sci_P1": {
-            "nonObservationCost": 200,
+            "nonObservationCost": 100,
             "partialObservationCost": 200,
             "calib": False,
         },
@@ -1665,37 +1665,37 @@ def NetflowPreparation(_tb_tgt):
             "calib": False,
         },
         "sci_P3": {
-            "nonObservationCost": 7,
+            "nonObservationCost": 70,
             "partialObservationCost": 200,
             "calib": False,
         },
         "sci_P4": {
-            "nonObservationCost": 6,
+            "nonObservationCost": 60,
             "partialObservationCost": 200,
             "calib": False,
         },
         "sci_P5": {
-            "nonObservationCost": 5,
+            "nonObservationCost": 50,
             "partialObservationCost": 200,
             "calib": False,
         },
         "sci_P6": {
-            "nonObservationCost": 4,
+            "nonObservationCost": 40,
             "partialObservationCost": 200,
             "calib": False,
         },
         "sci_P7": {
-            "nonObservationCost": 3,
+            "nonObservationCost": 30,
             "partialObservationCost": 200,
             "calib": False,
         },
         "sci_P8": {
-            "nonObservationCost": 2,
+            "nonObservationCost": 20,
             "partialObservationCost": 200,
             "calib": False,
         },
         "sci_P9": {
-            "nonObservationCost": 1,
+            "nonObservationCost": 10,
             "partialObservationCost": 200,
             "calib": False,
         },
@@ -2008,8 +2008,6 @@ def netflowRun(
         if len(_index) == 0:
             continue
         _tb_tgt_inuse = _tb_tgt[list(set(_index))]
-
-        print(_tb_tgt_inuse)
 
         logger.info(
             f"[S3] Group {uu + 1:3d}: nppc = {len(ppc_g[uu]):5d}, n_tgt = {len(_tb_tgt_inuse):6d}"
