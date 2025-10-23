@@ -40,16 +40,31 @@ def run(conf, workDir="."):
 
     # read target list in qDB
     today_str = datetime.today().strftime("%Y%m%d")
-    main_csv = os.path.join(workDir, "ppp", f"tgt_queueDB_{today_str}.csv")
-    backup_csv = os.path.join(workDir, "ppp", f"tgt_queueDB_{today_str}_backup.csv")
-    tb_queue = Table.read(main_csv)
+    base = os.path.join(workDir, "ppp", f"tgt_queueDB_{today_str}")
+    main_csv = f"{base}.csv"
+    backup_csv = f"{base}_backup.csv"
+    
+    # --- read main table ---
+    try:
+        tb_queue = Table.read(main_csv)
+    except Exception as e:
+        logger.warning(f"[EET] Could not read {main_csv}: {e}")
+        tb_queue = Table()
+
+    # --- read backup table ---
     try:
         tb_queue_backup = Table.read(backup_csv)
+        tb_queue_backup["ob_code"] = tb_queue_backup["ob_code"].astype(str)
     except Exception as e:
         logger.error(f"[EET] Could not read {backup_csv}: {e}")
         tb_queue_backup = Table()
-    tb_queue = vstack([tb_queue, tb_queue_backup])
-        
+
+    # --- combine ---
+    if len(tb_queue) > 0 and len(tb_queue_backup) > 0:
+        tb_queue = vstack([tb_queue, tb_queue_backup])
+    elif len(tb_queue) == 0 and len(tb_queue_backup) > 0:
+        tb_queue = tb_queue_backup    
+            
     pdf = PdfPages(os.path.join(workDir, 'check-S25B-queue.pdf'))
 
     plot_ppc(conf, tb_tgt, tb_ppc, pdf)
