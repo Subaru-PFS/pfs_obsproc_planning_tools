@@ -368,8 +368,12 @@ class GeneratePfsDesign(object):
             if self.conf["ppp"]["daily_plan"]:
                 logger.info(f"Now running for the daily planning")
 
-                self.df_qplan["obstime_hst"] = self.df_qplan["obstime"].dt.tz_convert("US/Hawaii") 
-                self.df_qplan["obstime_stop"] = self.df_qplan["obstime_hst"] + timedelta(minutes=21)
+                if not (self.df_qplan).empty:
+                    self.df_qplan["obstime_hst"] = self.df_qplan["obstime"].dt.tz_convert("US/Hawaii") 
+                    self.df_qplan["obstime_stop"] = self.df_qplan["obstime_hst"] + timedelta(minutes=21)
+                else:
+                    self.df_qplan["obstime_hst"] = None
+                    self.df_qplan["obstime_stop"] = None
                 df_window = (self.df_qplan).copy()
                 
                 starttime_backup = []
@@ -416,7 +420,7 @@ class GeneratePfsDesign(object):
                         print(f"Gap: start at {last_stop}, stop at {tw_stop}")
         
                 if len(starttime_backup) > 0:
-                    self.runPPP(1, 1, show_plots=False, backup=True)
+                    self.runPPP(100, 100, show_plots=False, backup=True)
         
                     self.df_qplan_, self.sdlr_, self.figs_qplan_ = qPlan.run(
                         self.conf,
