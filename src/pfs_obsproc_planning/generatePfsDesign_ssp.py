@@ -196,6 +196,7 @@ class GeneratePfsDesign_ssp(object):
             "pfs_utils",
             "ets_pointing",
             "ets_shuffle",
+            "pfs_obsproc_planning",
             "pfs_datamodel",
             "ics_cobraCharmer",
             "ics_cobraOps",
