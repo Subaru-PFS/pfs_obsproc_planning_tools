@@ -1150,9 +1150,9 @@ class GeneratePfsDesign_ssp(object):
         def parse_datetime(date_string):
             formats = [
                 "%Y-%m-%d %H:%M:%S",
-                "%Y-%m-%dT%H:%M:%S.%f",
-                "%Y-%m-%dT%H:%M:%S",
                 "%Y-%m-%d %H:%M:%S.%f",
+                "%Y-%m-%dT%H:%M:%S",
+                "%Y-%m-%dT%H:%M:%S.%f",
             ]
             # check if the date_string is in one of the possible formats
             for format_str in formats:
@@ -1206,7 +1206,13 @@ class GeneratePfsDesign_ssp(object):
         ## ope file generation ##
         ope = OpeFile(conf=self.conf, workDir=self.workDir)
 
+        today_utc = datetime.utcnow().date()
         for obsdate_utc in obsdates_utc:
+            # skip if earlier than today
+            obsdate_ = datetime.strptime(obsdate_utc, "%Y-%m-%d").date()
+            if obsdate_ < today_utc:
+                continue
+        
             logger.info(f"[Make ope] generating ope file for {obsdate_utc} (UTC)...")
             template_file = (
                 self.conf["ope"]["template"]

@@ -11,6 +11,8 @@ from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.table import Table
 from astropy.time import Time, TimeDelta
+from datetime import datetime
+import pytz
 
 warnings.filterwarnings("ignore")
 
@@ -30,7 +32,19 @@ class OpeFile(object):
             self.outfilePath = os.path.join(workDir, "ope")
             self.designPath = os.path.join(workDir, "design")
         elif self.conf["ssp"]["ssp"]:
-            self.outfilePath = os.path.join(workDir, self.conf["ope"]["outfilePath"])
+            base_out = os.path.join(workDir, self.conf["ope"]["outfilePath"])
+            os.makedirs(base_out, exist_ok=True)
+
+            # --- today's folder name ---
+            today_str = datetime.datetime.today().strftime("%Y-%m-%d")
+            target_dir = os.path.join(base_out, today_str)
+            version = 0
+            while os.path.exists(target_dir):
+                version += 1
+                target_dir = os.path.join(base_out, f"{today_str}_v{version}")
+            os.makedirs(target_dir, exist_ok=True)
+            self.outfilePath = target_dir
+    
             self.designPath = os.path.join(workDir, self.conf["ope"]["designPath"])
         # self.runName = conf["ope"]["runName"]  # not used in the current implementation
         # self.exptime_ppp = conf["ppp"]["TEXP_NOMINAL"]
@@ -96,9 +110,6 @@ class OpeFile(object):
             self.outfile = os.path.join(self.outfilePath, f"{obsdate}.ope")
 
         # add time_stamp when ope file is created
-        from datetime import datetime
-        import pytz
-
         hst = pytz.timezone("Pacific/Honolulu")
         dt_hst = datetime.now(hst)
         time_stamp = dt_hst.strftime("%Y-%m-%d %H:%M:%S HST")
