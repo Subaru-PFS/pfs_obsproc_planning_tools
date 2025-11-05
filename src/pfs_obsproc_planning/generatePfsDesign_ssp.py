@@ -552,7 +552,7 @@ class GeneratePfsDesign_ssp(object):
                 )
 
             catId = set(tb["input_catalog_id"])
-            expected_Ids = self.conf["ssp"]["input_catalog_ids_ftd"]
+            expected_Ids = self.conf["ssp"]["input_catalog_ids_fluxstd"]
             unexpected_Id = catId - expected_Ids
             if len(unexpected_Id) > 0:
                 validate_success = False
