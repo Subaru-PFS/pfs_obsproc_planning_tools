@@ -178,7 +178,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
             conf["sfa"]["cobra_coach_dir"],
             conf["sfa"]["cobra_coach_module_version"],
             conf["sfa"]["sm"],
-            conf["sfa"]["black_dot_radius_margin"],
+            conf["sfa"]["dot_margin"],
         )
 
         # The columns of pfs_utils_dir may be different..
@@ -188,8 +188,8 @@ def validation(parentPath, figpath, save, show, ssp, conf):
 
         # pick up unassigened fibers
         unassigened_fibers = pfsDesign0[
-            pfsDesign0.targetType == TargetType.UNASSIGNED
-        ].fiberId
+            pfsDesign0.targetType == 4
+        ].fiberId # TargetType.UNASSIGNED=4
         df_unassigned_toobright = pd.DataFrame()
         for unfib in unassigened_fibers:
             if (
@@ -245,7 +245,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
             and not df_unassigned_toobright.empty
         ):
             out_path = os.path.join(figpath, "df_unassign_bright_nearby.csv")
-            df_unassign_toobright.to_csv(out_path, index=False)
+            df_unassigned_toobright.to_csv(out_path, index=False)
 
         # check magnitudes
         pfsflux = np.array([a[0] if len(a) > 0 else np.nan for a in pfsDesign0.psfFlux])
@@ -315,7 +315,10 @@ def validation(parentPath, figpath, save, show, ssp, conf):
         df_ag["ag_pfi_x"] = np.array(pfix)
         df_ag["ag_pfi_y"] = np.array(pfiy)
 
-        unfib_bright = df_unassign_toobright["fiber_id"].unique().tolist()
+        if not df_unassigned_toobright.empty:
+            unfib_bright = df_unassigned_toobright["fiber_id"].unique().tolist()
+        else:
+            unfib_bright = []
         df = pldes.check_design(
             designId, df_fib, df_ag, n_unfib_bright=len(unfib_bright)
         )
