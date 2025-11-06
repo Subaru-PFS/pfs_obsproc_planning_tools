@@ -36,7 +36,7 @@ class OpeFile(object):
             os.makedirs(base_out, exist_ok=True)
 
             # --- today's folder name ---
-            today_str = datetime.datetime.today().strftime("%Y-%m-%d")
+            today_str = datetime.today().strftime("%Y-%m-%d")
             target_dir = os.path.join(base_out, today_str)
             version = 0
             while os.path.exists(target_dir):
