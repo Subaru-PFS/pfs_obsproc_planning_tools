@@ -11,7 +11,7 @@ from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.table import Table
 from astropy.time import Time, TimeDelta
-from datetime import datetime
+from datetime import datetime as dt
 import pytz
 
 warnings.filterwarnings("ignore")
@@ -36,7 +36,7 @@ class OpeFile(object):
             os.makedirs(base_out, exist_ok=True)
 
             # --- today's folder name ---
-            today_str = datetime.today().strftime("%Y-%m-%d")
+            today_str = dt.today().strftime("%Y-%m-%d")
             target_dir = os.path.join(base_out, today_str)
             version = 0
             while os.path.exists(target_dir):
@@ -111,7 +111,7 @@ class OpeFile(object):
 
         # add time_stamp when ope file is created
         hst = pytz.timezone("Pacific/Honolulu")
-        dt_hst = datetime.now(hst)
+        dt_hst = dt.now(hst)
         time_stamp = dt_hst.strftime("%Y-%m-%d %H:%M:%S HST")
         self.contents1_updated = self.contents1.replace(
             "### template ope file for PFS operations",
