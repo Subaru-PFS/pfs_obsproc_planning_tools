@@ -494,7 +494,7 @@ class GeneratePfsDesign_ssp(object):
                 f"{ppc_code} ({tgt_type}): psl_id = {set(tb['proposal_id'])}, tgt_type = {set(tb['target_type_id'])}, catId = {set(tb['input_catalog_id'])}"
             )
 
-            proposal_id = set(tb["proposal_id"])
+            proposal_id = list(set(tb["proposal_id"]))
             proposal_id_req = self.conf["ssp"]["proposal_ids"]
             if proposal_id != proposal_id_req:
                 validate_success = False
@@ -509,7 +509,7 @@ class GeneratePfsDesign_ssp(object):
                     f"[Validation of tgtLists] Target_type for science is incorrect (should be 1; {ppc_code}, {tgt_type}): {target_type}"
                 )
 
-            catId = set(tb["input_catalog_id"])
+            catId = list(set(tb["input_catalog_id"]))
             expected_Ids = self.conf["ssp"]["input_catalog_ids_sci"]
             unexpected_Id = catId - expected_Ids 
             if len(unexpected_Id) > 0:
@@ -530,7 +530,7 @@ class GeneratePfsDesign_ssp(object):
                     f"[Validation of tgtLists] Target_type for sky is incorrect (should be 2; {ppc_code}, {tgt_type}): {target_type}"
                 )
 
-            catId = set(tb["input_catalog_id"])
+            catId = list(set(tb["input_catalog_id"]))
             expected_Ids = self.conf["ssp"]["input_catalog_ids_sky"]
             unexpected_Id = catId - expected_Ids
             if len(unexpected_Id) > 0:
@@ -551,7 +551,7 @@ class GeneratePfsDesign_ssp(object):
                     f"[Validation of tgtLists] Target_type for fluxstd is incorrect (should be 3; {ppc_code}, {tgt_type}): {target_type}"
                 )
 
-            catId = set(tb["input_catalog_id"])
+            catId = list(set(tb["input_catalog_id"]))
             expected_Ids = self.conf["ssp"]["input_catalog_ids_fluxstd"]
             unexpected_Id = catId - expected_Ids
             if len(unexpected_Id) > 0:
