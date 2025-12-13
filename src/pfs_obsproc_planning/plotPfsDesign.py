@@ -89,6 +89,7 @@ def plot_FoV(
     fiberIds = FiberIds(get_pfs_utils_path())
     df_fibId = pd.DataFrame(fiberIds.data)
 
+    """
     ## it seems ideal to handle these before calling this function.
     df_fib["cadId"] = df_fib.catId.astype(int)
     df_fib["pfsFlux"] = df_fib.pfsFlux.astype(float)
@@ -96,6 +97,7 @@ def plot_FoV(
     df_fib["pfi_y"] = df_fib.pfi_y.astype(float)
     df_fib["targetType"] = df_fib.targetType.astype(int)
     df_fib["fiberId"] = df_fib.fiberId.astype(int)
+    """
     df_fib["obCode"] = df_fib.obCode.astype(str)
 
     # set the font sizes for labels
@@ -119,16 +121,17 @@ def plot_FoV(
     # plt.clf()
     fig = plt.figure(
         num="design_FoV",
-        figsize=(10, 6),
+        figsize=(12, 9),
         dpi=80,
         clear=True,
         facecolor="w",
         edgecolor="k",
     )
-    gs = fig.add_gridspec(2, 2)
-    ax1 = fig.add_subplot(gs[:, 0], aspect="equal")
-    ax2 = fig.add_subplot(gs[0, 1])
-    ax3 = fig.add_subplot(gs[1, 1], sharex=ax2)
+    gs = fig.add_gridspec(5, 2)
+    ax1 = fig.add_subplot(gs[:4,0], aspect='equal')
+    ax2 = fig.add_subplot(gs[0:2, 1])
+    ax3 = fig.add_subplot(gs[2:4, 1], sharex=ax2)
+    ax4 = fig.add_subplot(gs[4,:])
 
     c = {
         "un": "slategrey",
@@ -224,9 +227,15 @@ def plot_FoV(
         lw=0,
         label="guidestar",
     )
+
+    # store the number of the guide star candidates at the same time
+    agnum_table=[]
+    agnum_threshold=19
     for i in range(1, 7):
         ang = np.deg2rad(-60 * (i - 1) - 9)
         agn = len(df_ag[df_ag.camId == (i - 1)].ag_pfi_x)
+        agn_bright=len(df_ag[(df_ag.camId==(i-1))&(df_ag.agMag<=agnum_threshold)].ag_pfi_x)
+        agnum_table.append([agn, agn_bright])
         ax1.text(
             245 * np.cos(ang),
             245 * np.sin(ang),
@@ -234,8 +243,9 @@ def plot_FoV(
             ha="center",
             fontsize=10,
         )
+    agnum_table=[list(i) for i in zip(*agnum_table)]
 
-    ax1.legend(fontsize="x-small", bbox_to_anchor=(0.5, 1.2), ncol=2)
+    ax1.legend(fontsize="x-small", loc='upper left',bbox_to_anchor=(0.2, 1.2), ncol=3)
     ax1.set_xlim(xmin=-255, xmax=255)
     ax1.set_ylim(ymin=-255, ymax=255)
 
@@ -303,31 +313,27 @@ def plot_FoV(
         color="dimgrey",
     )
 
-    proposals = np.unique(df_fib.proposalId.values)
-    # c_sci = np.full(df_fib.shape[0], '')
-    c_sci = []
-    for i in range(len(proposals)):
-        c_sci.append(next(c_list))
-        # cc = np.full(df_fib.shape[0], next(c_list))
-        # c_sci = np.vstack((c_sci, cc))
-    # c_sci = c_sci[1:]
-    # print(c_sci, proposals, end='')
+    ## split flux per proposal and filter
+    df_mags = df_fib[['proposalId', 'pfsMag_plot', 'pfsflux_plot_filter']].groupby(by=['proposalId', 'pfsflux_plot_filter'], as_index=False)
 
+    c_sci = []
     bins = 10
     mmin = 13
     mmax = 25
     bins = int((mmax - mmin) * 2)
     mag_per_prog = np.zeros(df_fib.shape[0])
     label_per_prog = []
+    filtername_std = df_fib[df_fib.targetType==3].pfsflux_plot_filter.values[0]
     ax2.hist(
-        df_fib[df_fib.targetType == 3]["psfMag"],
+        df_fib[df_fib.targetType == 3]["pfsMag_plot"],
         bins=bins,
         range=(mmin, mmax),
         color=c["fstar"],
         lw=0,
         alpha=0.4,
-        label="Std star",
+        label=f"Std star ({filtername_std}, {len(df_fib[df_fib.targetType==3]['pfsMag_plot'])})",
     )
+    """
     for i, p in enumerate(proposals):
         mags = df_fib[(df_fib.targetType == 1) & (df_fib.proposalId == p)][
             "totalMag"
@@ -343,15 +349,27 @@ def plot_FoV(
             mags = np.append(mags, np.nan)
         # print(mag_per_prog.shape, mags.shape)
         mag_per_prog = np.vstack((mag_per_prog, mags))
+        label_per_prog.append(f"{p} ({n_mags}; {n_too_bright}<13mag)")
+    """
+    for k, v in df_mags.groups.items():
+        if k[0] == 'N/A': continue
+        mags = df_fib.pfsMag_plot[v].values
+        n_mags = len(mags)
+        n_too_bright = sum(mags<13)
+        for j in range((df_fib.shape[0] - n_mags)):
+            mags = np.append(mags, np.nan)
+        #print(mag_per_prog.shape, mags.shape)
+        mag_per_prog = np.vstack((mag_per_prog, mags))
         if conf["ppp"]["mode"] == "classic":
-            if p in conf["sfa"]["proposalIds_obsFiller"]:
+            if k[0] in conf["sfa"]["proposalIds_obsFiller"]:
                 label_per_prog.append(f"obs. filler ({n_mags}; {n_too_bright}<13mag)")
-            elif p in conf["ppp"]["proposalIds"]:
-                label_per_prog.append(f"{p} ({n_mags}; {n_too_bright}<13mag)")
+            elif k[0] in conf["ppp"]["proposalIds"]:
+                label_per_prog.append(f"{k[0]} ({n_mags}; {n_too_bright}<13mag)")
             else:
                 label_per_prog.append(f"usr filler ({n_mags}; {n_too_bright}<13mag)")
         else:
-            label_per_prog.append(f"{p} ({n_mags}; {n_too_bright}<13mag)")
+            label_per_prog.append(f"{k[0]} ({k[1]}, {n_mags}; {n_too_bright}<13mag)")
+        c_sci.append(next(c_list))
 
     mag_per_prog = mag_per_prog[1:]
     # print(mag_per_prog.shape, mag_per_prog)
@@ -368,7 +386,8 @@ def plot_FoV(
     )
     # ax2.hist(df_fib[df_fib['targetType']==1]['psfMag'], bins=bins, range=(mmin, mmax),
     #         color=c['sci'], lw=0, alpha=0.4, label='Target')
-    ax2.legend()
+
+    ax2.legend(fontsize='x-small', loc='upper left',bbox_to_anchor=(0.2, 1.2), ncol=2)
     ax2.set_xlabel("mag", fontsize=12)
     ax2.set_ylabel("N (target or STD)", fontsize=12)
 
@@ -378,6 +397,16 @@ def plot_FoV(
     ax3.set_ylabel("N (AG)", fontsize=12)
     ax3.set_xlabel("mag", fontsize=12)
 
+    # AG magnitude table
+    ax4.table(agnum_table, loc='center',
+              colLabels=['AG1', 'AG2', 'AG3', 'AG4', 'AG5', 'AG6'],
+              rowLabels=['Total', f"<={agnum_threshold} mag"],
+              colWidths=[0.1, 0.1, 0.1, 0.1, 0.1, 0.1])
+    ax4.tick_params(axis='both', bottom=False, top=False, left=False, right=False,
+                    labelbottom=False, labeltop=False, labelleft=False, labelright=False,
+                     labelsize=7)
+    ax4.set_frame_on(False)
+    
     fig.suptitle(title, fontsize=12)
 
     if save == True:

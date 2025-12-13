@@ -252,6 +252,30 @@ def validation(parentPath, figpath, save, show, ssp, conf):
         totalflux = np.array(
             [a[0] if len(a) > 0 else np.nan for a in pfsDesign0.totalFlux]
         )
+
+        # Cobmine the pfs/total Flux for vakidation plot
+        pfsflux_l=[]
+        pfsflux_f=[]
+        filt=pfsDesign0[pfsDesign0.targetType==TargetType.FLUXSTD].filterNames[0][0] 
+        for t,fl,a,b in zip(pfsDesign0.targetType, pfsDesign0.filterNames, pfsDesign0.totalFlux, pfsDesign0.psfFlux):
+            if t==TargetType.FLUXSTD:
+                pfsflux_l.append(b[0])   # g_ps1 basically.
+                pfsflux_f.append(fl[0])
+            # target
+            elif t==TargetType.SCIENCE:
+                if filt in fl:    # first choise is the same filter as flux standards
+                    pfsflux_l.append(a[fl.index(filt)] if not np.nan else b[fl.index(filt)])
+                    pfsflux_f.append(filt)
+                else:
+                    indices = [i for i, item in enumerate(fl) if item!='none']   # pickup the first available filter
+                    pfsflux_l.append(a[indices[0]] if not np.nan else b[indices[0]])
+                    pfsflux_f.append(fl[indices[0]])
+            else:
+                pfsflux_l.append(np.nan)
+                pfsflux_f.append('none')
+        pfsflux_plot=np.array(pfsflux_l)
+        pfsflux_plot_filter=np.array(pfsflux_f)
+
         # print(len(pfsDesign0[pfsDesign0.fiberStatus==3]))
         df_fib = pd.DataFrame(
             data=np.column_stack(
@@ -264,6 +288,8 @@ def validation(parentPath, figpath, save, show, ssp, conf):
                     pfsflux,
                     totalflux,
                     pfsDesign0.catId,
+                    pfsflux_plot,
+                    pfsflux_plot_filter,
                 )
             ),
             columns=[
@@ -276,12 +302,26 @@ def validation(parentPath, figpath, save, show, ssp, conf):
                 "pfsFlux",
                 "totalFlux",
                 "catId",
+                "pfsFlux_plot",
+                "pfsflux_plot_filter"
             ],
         )
+        # proably it is smarter to determine datatype for each column.
         df_fib["proposalId"] = pfsDesign0.proposalId
+        df_fib['pfsFlux']=df_fib.pfsFlux.astype(float)
+        df_fib['totalFlux']=df_fib.totalFlux.astype(float)
+        df_fib['pfsFlux_plot']=df_fib.pfsFlux_plot.astype(float)
+        df_fib['pfi_x']=df_fib.pfi_x.astype(float)
+        df_fib['pfi_y']=df_fib.pfi_y.astype(float)
+        df_fib['cadId']=df_fib.catId.astype(int)
+        df_fib['targetType']=df_fib.targetType.astype(int)
+        df_fib['fiberId']=df_fib.fiberId.astype(int)
+
         df_fib["psfMag"] = df_fib["pfsFlux"].apply(njy_mag)
         df_fib["totalMag"] = df_fib["totalFlux"].apply(njy_mag)
         df_fib["obCode"] = pfsDesign0.obCode
+        # For plot
+        df_fib["pfsMag_plot"] = df_fib["pfsFlux_plot"].apply(njy_mag)
 
         # Identify rows where either magnitude is < 13
         df_too_bright = df_fib[(df_fib["psfMag"] < 13) | (df_fib["totalMag"] < 13)]
