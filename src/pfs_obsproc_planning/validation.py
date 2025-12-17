@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+"""Validation utilities for PFS designs.
+
+This module verifies PfsDesign outputs, checks for problematic guide stars
+and bright sources, computes InR/El at observation times, and generates
+an HTML validation report and per-design FoV plots.
+
+Refactored for clarity: helper functions were added to simplify the
+flow and make individual checks easier to test.
+"""
+
 # validation.py : Subaru Fiber Allocation software
 
 import os
@@ -36,6 +46,10 @@ reload(pldes)
 
 
 def njy_mag(j):
+    """Convert flux `j` (in arbitrary units) to an approximate magnitude.
+
+    The original behaviour uses 23.9 - 2.5*log10(j/1e3) when j>0 and NaN otherwise.
+    """
     if j > 0:
         return 23.9 - 2.5 * np.log10(j / 1e3)
     else:
@@ -43,6 +57,11 @@ def njy_mag(j):
 
 
 def calc_inr(df, obstime):
+    """Compute instrument rotator angle (InR) and elevation at `obstime`.
+
+    Tries to use 'ppc_ra/dec/pa' columns first (when present), otherwise
+    falls back to 'ra_center/dec_center/pa_center'. Returns (inr, el).
+    """
     try:
         az, el, inr = radec_to_subaru(
             df["ppc_ra"],
@@ -71,7 +90,11 @@ def calc_inr(df, obstime):
     return inr, el
 
 
-def validation(parentPath, figpath, save, show, ssp, conf):
+def _load_design_summary(parentPath: str, ssp: bool):
+    """Load design summary CSV and return (pfsDesignDir, df_design).
+
+    Handles both PPP output layout (ssp=False) and SSP layout.
+    """
     if not ssp:
         pfsDesignDir = f"{parentPath}/design"
         df_design = pd.read_csv(
@@ -83,7 +106,6 @@ def validation(parentPath, figpath, save, show, ssp, conf):
         df_design["observation_time_stop"] = (
             df_design["observation_time"] + pd.DateOffset(seconds=1260)
         ).dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-
     else:
         pfsDesignDir = parentPath
         df_design = pd.read_csv(
@@ -97,8 +119,14 @@ def validation(parentPath, figpath, save, show, ssp, conf):
             + pd.to_timedelta(df_design["ppc_exptime"], unit="s")
         ).dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # Calcurate InR at observing time
-    # df_design['pa']=0.
+    return pfsDesignDir, df_design
+
+
+def _add_inr_columns(df_design: pd.DataFrame) -> pd.DataFrame:
+    """Compute inr1/el1 and inr2/el2 for all entries and add as columns.
+
+    Returns the modified DataFrame (in-place-and-return for convenience).
+    """
     df_design[["inr1", "el1"]] = df_design.apply(
         lambda row: pd.Series(calc_inr(row, obstime=row["observation_time"])), axis=1
     )
@@ -106,6 +134,241 @@ def validation(parentPath, figpath, save, show, ssp, conf):
         lambda row: pd.Series(calc_inr(row, obstime=row["observation_time_stop"])),
         axis=1,
     )
+    return df_design
+
+
+def _warn_duplicate_fibers(pfsDesign0):
+    """Log a warning if a PfsDesign contains duplicated fiber IDs."""
+    df_t = pd.DataFrame({"fiberId": pfsDesign0.fiberId, "obCode": pfsDesign0.obCode})
+    index_dup = df_t.duplicated(subset=["fiberId"], keep=False)
+    if sum(index_dup) > 0:
+        logger.warning(
+            f"[Validation of output] There are duplicated fibers: {df_t[index_dup]}"
+        )
+
+
+def _warn_too_bright_guidestars(ppc_ra, ppc_dec, ppc_pa, ppc_obstime_utc, conf):
+    """Query Gaia for very bright guide stars and return a DataFrame of results.
+
+    Returns an empty DataFrame if none found.
+    """
+    guidestars_toobright = sfa.designutils.generate_guidestars_from_gaiadb(
+        ppc_ra,
+        ppc_dec,
+        ppc_pa,
+        ppc_obstime_utc,  # obstime should be in UTC
+        telescope_elevation=None,
+        conf=conf,
+        guidestar_mag_min=0,
+        guidestar_mag_max=12,
+        guidestar_neighbor_mag_min=21.0,
+        guidestar_minsep_deg=0.0002778,
+    )
+    df_guidestars_toobright = pd.DataFrame(
+        {
+            "agId": guidestars_toobright.agId,
+            "objId": guidestars_toobright.objId,
+            "ra": guidestars_toobright.ra,
+            "dec": guidestars_toobright.dec,
+            "magnitude": guidestars_toobright.magnitude,
+            "passband": guidestars_toobright.passband,
+        }
+    )
+    if not df_guidestars_toobright.empty:
+        logger.warning(
+            f"[Validation of output] There are too bright guide stars: {df_guidestars_toobright}"
+        )
+    return df_guidestars_toobright
+
+
+def _find_unassigned_bright_nearby(pfsDesign0, bench, fibId, ppc_ra, ppc_dec, ppc_pa, conf):
+    """Search for bright Gaia sources around unassigned fibers.
+
+    Returns a DataFrame (possibly empty) with columns matching the original script.
+    """
+    unassigened_fibers = pfsDesign0[pfsDesign0.targetType == 4].fiberId
+    df_unassigned_toobright = pd.DataFrame()
+    for unfib in unassigened_fibers:
+        if (
+            pfsDesign0[pfsDesign0.fiberId == unfib].fiberStatus
+            != FiberStatus.BROKENFIBER
+        ):
+            cidx = fibId.fiberIdToCobraId(unfib) - 1
+            ccenter = bench.cobras.centers[cidx]
+            un_ra, un_dec = sfa.designutils.get_skypos_cobra(
+                ccenter, pfsDesign0.obstime, ppc_ra, ppc_dec, ppc_pa
+            )
+
+            df_gaia_toobright = sfa.dbutils.generate_targets_from_gaiadb(
+                un_ra,
+                un_dec,
+                conf=conf,
+                search_radius=conf["sfa"]["fill_unassign_radius_check"],
+                band_select="phot_g_mean_mag",
+                mag_min=-2.0,
+                mag_max=12.0,
+                good_astrometry=False,
+                write_csv=False,
+            )
+
+            if not df_gaia_toobright.empty:
+                df_tmp = pd.DataFrame(
+                    {
+                        "fiber_id": [unfib] * len(df_gaia_toobright),
+                        "fiber_ra": [un_ra] * len(df_gaia_toobright),
+                        "fiber_dec": [un_dec] * len(df_gaia_toobright),
+                        "source_id": df_gaia_toobright.source_id,
+                        "ra": df_gaia_toobright.ra,
+                        "dec": df_gaia_toobright.dec,
+                        "magnitude": df_gaia_toobright.phot_g_mean_mag,
+                    }
+                )
+                if len(df_unassigned_toobright) == 0:
+                    df_unassigned_toobright = df_tmp.copy()
+                else:
+                    df_unassigned_toobright = pd.concat(
+                        [df_unassigned_toobright, df_tmp]
+                    )
+
+                logger.warning(
+                    f"[Validation of output] There are {len(df_gaia_toobright)} bright stars nearby fiber {unfib}: {df_tmp}"
+                )
+
+    return df_unassigned_toobright
+
+
+def _build_df_fib(pfsDesign0):
+    """Construct the per-fiber DataFrame used for plotting and checks.
+
+    This preserves the original logic and column names.
+    """
+    pfsflux = np.array([a[0] if len(a) > 0 else np.nan for a in pfsDesign0.psfFlux])
+    totalflux = np.array([a[0] if len(a) > 0 else np.nan for a in pfsDesign0.totalFlux])
+
+    # Combine the pfs/total Flux for validation plot
+    pfsflux_l = []
+    pfsflux_f = []
+    try:
+        filt = pfsDesign0[pfsDesign0.targetType == TargetType.FLUXSTD].filterNames[0][0]
+    except Exception:
+        filt = None
+
+    for t, fl, a, b in zip(
+        pfsDesign0.targetType, pfsDesign0.filterNames, pfsDesign0.totalFlux, pfsDesign0.psfFlux
+    ):
+        if t == TargetType.FLUXSTD:
+            pfsflux_l.append(b[0])
+            pfsflux_f.append(fl[0])
+        elif t == TargetType.SCIENCE:
+            if filt is not None and filt in fl:
+                # Preserve the original branching behaviour (note: original used `if not np.nan`)
+                pfsflux_l.append(a[fl.index(filt)] if not np.nan else b[fl.index(filt)])
+                pfsflux_f.append(filt)
+            else:
+                indices = [i for i, item in enumerate(fl) if item != "none"]
+                pfsflux_l.append(a[indices[0]] if not np.nan else b[indices[0]])
+                pfsflux_f.append(fl[indices[0]])
+        else:
+            pfsflux_l.append(np.nan)
+            pfsflux_f.append("none")
+
+    pfsflux_plot = np.array(pfsflux_l)
+    pfsflux_plot_filter = np.array(pfsflux_f)
+
+    df_fib = pd.DataFrame(
+        data=np.column_stack(
+            (
+                pfsDesign0.fiberId,
+                pfsDesign0.targetType,
+                pfsDesign0.pfiNominal,
+                pfsDesign0.spectrograph,
+                pfsDesign0.fiberHole,
+                pfsflux,
+                totalflux,
+                pfsDesign0.catId,
+                pfsflux_plot,
+                pfsflux_plot_filter,
+            )
+        ),
+        columns=[
+            "fiberId",
+            "targetType",
+            "pfi_x",
+            "pfi_y",
+            "spec",
+            "fh",
+            "pfsFlux",
+            "totalFlux",
+            "catId",
+            "pfsFlux_plot",
+            "pfsflux_plot_filter",
+        ],
+    )
+
+    # Set column types and derived columns
+    df_fib["proposalId"] = pfsDesign0.proposalId
+    df_fib["pfsFlux"] = df_fib.pfsFlux.astype(float)
+    df_fib["totalFlux"] = df_fib.totalFlux.astype(float)
+    df_fib["pfsFlux_plot"] = df_fib.pfsFlux_plot.astype(float)
+    df_fib["pfi_x"] = df_fib.pfi_x.astype(float)
+    df_fib["pfi_y"] = df_fib.pfi_y.astype(float)
+    df_fib["cadId"] = df_fib.catId.astype(int)
+    df_fib["targetType"] = df_fib.targetType.astype(int)
+    df_fib["fiberId"] = df_fib.fiberId.astype(int)
+
+    df_fib["psfMag"] = df_fib["pfsFlux"].apply(njy_mag)
+    df_fib["totalMag"] = df_fib["totalFlux"].apply(njy_mag)
+    df_fib["obCode"] = pfsDesign0.obCode
+    df_fib["pfsMag_plot"] = df_fib["pfsFlux_plot"].apply(njy_mag)
+
+    return df_fib
+
+
+def _build_df_ag(pfsDesign0):
+    """Return a DataFrame of AG positions in PFI coordinates for plotting."""
+    df_ag = pd.DataFrame(
+        data=np.column_stack(
+            (
+                pfsDesign0.guideStars.agX,
+                pfsDesign0.guideStars.agY,
+                pfsDesign0.guideStars.magnitude,
+                pfsDesign0.guideStars.agId,
+            )
+        ),
+        columns=["agx", "agy", "agMag", "camId"],
+    )
+    df_ag["camId"] = df_ag["camId"].astype(int)
+    arr = df_ag[["camId", "agx", "agy"]].values
+    pfix = []
+    pfiy = []
+    for a in arr:
+        x, y = ag_pixel_to_pfimm(int(a[0]), a[1], a[2])
+        pfix.append(x)
+        pfiy.append(y)
+    df_ag["ag_pfi_x"] = np.array(pfix)
+    df_ag["ag_pfi_y"] = np.array(pfiy)
+    return df_ag
+
+
+def validation(parentPath, figpath, save, show, ssp, conf):
+    """Run validation for all PfsDesigns found in the summary at `parentPath`.
+
+    Parameters
+    - parentPath: top-level directory containing PPP or SSP outputs
+    - figpath: directory to write figures and the HTML report
+    - save, show: booleans controlling plotting behaviour
+    - ssp: if True, use SSP summary layout; otherwise use PPP layout
+    - conf: configuration dict used for external queries and data paths
+    """
+    # Load design summary and normalize observation times
+    pfsDesignDir, df_design = _load_design_summary(parentPath, ssp)
+
+    # Compute InR/El at start and stop times
+    df_design = _add_inr_columns(df_design)
+
+
+    # InR/El columns were added by _add_inr_columns above.
+    # (Kept for backward compatibility and readability.)
 
     # Make pdf files and store the statistical data
     pfsDesignIds = (
@@ -116,6 +379,23 @@ def validation(parentPath, figpath, save, show, ssp, conf):
 
     # This routine just combines a few cells in "trial" section
     df_ch = pldes.init_check_design()
+
+    # Bench and fiber mappings are shared across designs; set them up once.
+    bench = sfa.nfutils.getBench(
+        conf["packages"]["pfs_instdata_dir"],
+        conf["sfa"]["cobra_coach_dir"],
+        conf["sfa"]["cobra_coach_module_version"],
+        conf["sfa"]["sm"],
+        conf["sfa"]["dot_margin"],
+    )
+
+    fibId = FiberIds(
+        path=os.path.join(conf["packages"]["pfs_utils_dir"], "data", "fiberids")
+    )
+
+    # Accumulate bright sources near unassigned fibers across all designs
+    df_all_unassigned_toobright = pd.DataFrame()
+
     count = 0
     for designId in pfsDesignIds:
         pfsDesign0 = PfsDesign.read(designId, dirName=pfsDesignDir)
@@ -123,14 +403,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
         print(f"{pfsDesign0.designName}, {pfsDesign0.arms}")
 
         # check fiber duplicates
-        df_t = pd.DataFrame(
-            {"fiberId": pfsDesign0.fiberId, "obCode": pfsDesign0.obCode}
-        )
-        index_dup = df_t.duplicated(subset=["fiberId"], keep=False)
-        if sum(index_dup) > 0:
-            logger.warning(
-                f"[Validation of output] There are duplicated fibers: {df_t[index_dup]}"
-            )
+        _warn_duplicate_fibers(pfsDesign0)
 
         # check bright stars in the guiding field
         ppc_ra = pfsDesign0.raBoresight
@@ -143,189 +416,30 @@ def validation(parentPath, figpath, save, show, ssp, conf):
 
         count += 1
 
-        guidestars_toobright = sfa.designutils.generate_guidestars_from_gaiadb(
-            ppc_ra,
-            ppc_dec,
-            ppc_pa,
-            ppc_obstime_utc,  # obstime should be in UTC
-            telescope_elevation=None,
-            conf=conf,
-            guidestar_mag_min=0,
-            guidestar_mag_max=12,
-            guidestar_neighbor_mag_min=21.0,
-            guidestar_minsep_deg=0.0002778,
-        )
-        df_guidestars_toobright = pd.DataFrame(
-            {
-                "agId": guidestars_toobright.agId,
-                "objId": guidestars_toobright.objId,
-                "ra": guidestars_toobright.ra,
-                "dec": guidestars_toobright.dec,
-                "magnitude": guidestars_toobright.magnitude,
-                "passband": guidestars_toobright.passband,
-            }
-        )
-        if not df_guidestars_toobright.empty:
-            logger.warning(
-                f"[Validation of output] There are too bright guide stars: {df_guidestars_toobright}"
-            )
+        df_guidestars_toobright = _warn_too_bright_guidestars(ppc_ra, ppc_dec, ppc_pa, ppc_obstime_utc, conf)
 
-        # check bright stars nearby unassigend fibers including disabled fibers
-        # Because unassigned fiber doesn't have pfi position, we need to get by calling bench
-        # The columns of pfs_instdata_dir may be different..
-        bench = sfa.nfutils.getBench(
-            conf["packages"]["pfs_instdata_dir"],
-            conf["sfa"]["cobra_coach_dir"],
-            conf["sfa"]["cobra_coach_module_version"],
-            conf["sfa"]["sm"],
-            conf["sfa"]["dot_margin"],
+        # check bright stars nearby unassigned fibers including disabled fibers
+        # Use pre-initialized bench and fiber-id mapping created outside the loop.
+
+        # Find bright Gaia sources near unassigned fibers
+        df_unassigned_toobright = _find_unassigned_bright_nearby(
+            pfsDesign0, bench, fibId, ppc_ra, ppc_dec, ppc_pa, conf
         )
 
-        # The columns of pfs_utils_dir may be different..
-        fibId = FiberIds(
-            path=os.path.join(conf["packages"]["pfs_utils_dir"], "data", "fiberids")
-        )
-
-        # pick up unassigened fibers
-        unassigened_fibers = pfsDesign0[
-            pfsDesign0.targetType == 4
-        ].fiberId # TargetType.UNASSIGNED=4
-        df_unassigned_toobright = pd.DataFrame()
-        for unfib in unassigened_fibers:
-            if (
-                pfsDesign0[pfsDesign0.fiberId == unfib].fiberStatus
-                != FiberStatus.BROKENFIBER
-            ):  # check if fiber pass the light
-                cidx = fibId.fiberIdToCobraId(unfib) - 1
-                ccenter = bench.cobras.centers[cidx]
-                un_ra, un_dec = sfa.designutils.get_skypos_cobra(
-                    ccenter, pfsDesign0.obstime, ppc_ra, ppc_dec, ppc_pa
-                )
-
-                df_gaia_toobright = sfa.dbutils.generate_targets_from_gaiadb(
-                    un_ra,
-                    un_dec,
-                    conf=conf,
-                    search_radius=conf["sfa"][
-                        "fill_unassign_radius_check"
-                    ],  # 5 arcsec. It is better to make it configurable.
-                    band_select="phot_g_mean_mag",
-                    mag_min=-2.0,
-                    mag_max=12.0,
-                    good_astrometry=False,
-                    write_csv=False,
-                )
-
-                if not df_gaia_toobright.empty:
-                    df_tmp = pd.DataFrame(
-                        {
-                            "fiber_id": [unfib] * len(df_gaia_toobright),
-                            "fiber_ra": [un_ra] * len(df_gaia_toobright),
-                            "fiber_dec": [un_dec] * len(df_gaia_toobright),
-                            "source_id": df_gaia_toobright.source_id,
-                            "ra": df_gaia_toobright.ra,
-                            "dec": df_gaia_toobright.dec,
-                            "magnitude": df_gaia_toobright.phot_g_mean_mag,
-                        }
-                    )
-                    if len(df_unassigned_toobright) == 0:
-                        df_unassigned_toobright = df_tmp.copy()
-                    else:
-                        df_unassigned_toobright = pd.concat(
-                            [df_unassigned_toobright, df_tmp]
-                        )
-
-                    logger.warning(
-                        f"[Validation of output] There are {len(df_gaia_toobright)} bright stars nearby fiber {unfib}: {df_tmp}"
-                    )
-
-        # write to csv
-        if (
-            conf["validation"]["save_unassign_toobright"]
-            and not df_unassigned_toobright.empty
-        ):
-            out_path = os.path.join(figpath, "df_unassign_bright_nearby.csv")
-            df_unassigned_toobright.to_csv(out_path, index=False)
-
-        # check magnitudes
-        pfsflux = np.array([a[0] if len(a) > 0 else np.nan for a in pfsDesign0.psfFlux])
-        totalflux = np.array(
-            [a[0] if len(a) > 0 else np.nan for a in pfsDesign0.totalFlux]
-        )
-
-        # Cobmine the pfs/total Flux for vakidation plot
-        pfsflux_l=[]
-        pfsflux_f=[]
-        filt=pfsDesign0[pfsDesign0.targetType==TargetType.FLUXSTD].filterNames[0][0] 
-        for t,fl,a,b in zip(pfsDesign0.targetType, pfsDesign0.filterNames, pfsDesign0.totalFlux, pfsDesign0.psfFlux):
-            if t==TargetType.FLUXSTD:
-                pfsflux_l.append(b[0])   # g_ps1 basically.
-                pfsflux_f.append(fl[0])
-            # target
-            elif t==TargetType.SCIENCE:
-                if filt in fl:    # first choise is the same filter as flux standards
-                    pfsflux_l.append(a[fl.index(filt)] if not np.nan else b[fl.index(filt)])
-                    pfsflux_f.append(filt)
-                else:
-                    indices = [i for i, item in enumerate(fl) if item!='none']   # pickup the first available filter
-                    pfsflux_l.append(a[indices[0]] if not np.nan else b[indices[0]])
-                    pfsflux_f.append(fl[indices[0]])
+        # Accumulate unassigned-bright objects to write once after all designs processed
+        if not df_unassigned_toobright.empty:
+            if len(df_all_unassigned_toobright) == 0:
+                df_all_unassigned_toobright = df_unassigned_toobright.copy()
             else:
-                pfsflux_l.append(np.nan)
-                pfsflux_f.append('none')
-        pfsflux_plot=np.array(pfsflux_l)
-        pfsflux_plot_filter=np.array(pfsflux_f)
-
-        # print(len(pfsDesign0[pfsDesign0.fiberStatus==3]))
-        df_fib = pd.DataFrame(
-            data=np.column_stack(
-                (
-                    pfsDesign0.fiberId,
-                    pfsDesign0.targetType,
-                    pfsDesign0.pfiNominal,
-                    pfsDesign0.spectrograph,
-                    pfsDesign0.fiberHole,
-                    pfsflux,
-                    totalflux,
-                    pfsDesign0.catId,
-                    pfsflux_plot,
-                    pfsflux_plot_filter,
+                df_all_unassigned_toobright = pd.concat(
+                    [df_all_unassigned_toobright, df_unassigned_toobright],
+                    ignore_index=True,
                 )
-            ),
-            columns=[
-                "fiberId",
-                "targetType",
-                "pfi_x",
-                "pfi_y",
-                "spec",
-                "fh",
-                "pfsFlux",
-                "totalFlux",
-                "catId",
-                "pfsFlux_plot",
-                "pfsflux_plot_filter"
-            ],
-        )
-        # proably it is smarter to determine datatype for each column.
-        df_fib["proposalId"] = pfsDesign0.proposalId
-        df_fib['pfsFlux']=df_fib.pfsFlux.astype(float)
-        df_fib['totalFlux']=df_fib.totalFlux.astype(float)
-        df_fib['pfsFlux_plot']=df_fib.pfsFlux_plot.astype(float)
-        df_fib['pfi_x']=df_fib.pfi_x.astype(float)
-        df_fib['pfi_y']=df_fib.pfi_y.astype(float)
-        df_fib['cadId']=df_fib.catId.astype(int)
-        df_fib['targetType']=df_fib.targetType.astype(int)
-        df_fib['fiberId']=df_fib.fiberId.astype(int)
 
-        df_fib["psfMag"] = df_fib["pfsFlux"].apply(njy_mag)
-        df_fib["totalMag"] = df_fib["totalFlux"].apply(njy_mag)
-        df_fib["obCode"] = pfsDesign0.obCode
-        # For plot
-        df_fib["pfsMag_plot"] = df_fib["pfsFlux_plot"].apply(njy_mag)
+        # Build per-fiber DataFrame and check magnitudes
+        df_fib = _build_df_fib(pfsDesign0)
 
-        # Identify rows where either magnitude is < 13
         df_too_bright = df_fib[(df_fib["psfMag"] < 13) | (df_fib["totalMag"] < 13)]
-
         if not df_too_bright.empty:
             logger.warning(
                 f"[Validation of output] Too bright sources with psfMag or totalMag < 13 (0x{designId:016x}, {pfsDesign0.designName}): {df_too_bright}"
@@ -333,35 +447,14 @@ def validation(parentPath, figpath, save, show, ssp, conf):
 
         df_fib["sector"] = pldes.get_field_sector2(df_fib)
 
-        df_ag = pd.DataFrame(
-            data=np.column_stack(
-                (
-                    pfsDesign0.guideStars.agX,
-                    pfsDesign0.guideStars.agY,
-                    pfsDesign0.guideStars.magnitude,
-                    pfsDesign0.guideStars.agId,
-                )
-            ),
-            columns=["agx", "agy", "agMag", "camId"],
-        )
-        df_ag["camId"] = df_ag["camId"].astype(int)
-        arr = df_ag[["camId", "agx", "agy"]].values
-        pfix = []
-        pfiy = []
-        for a in arr:
-            x, y = ag_pixel_to_pfimm(int(a[0]), a[1], a[2])
-            pfix.append(x)
-            pfiy.append(y)
-        df_ag["ag_pfi_x"] = np.array(pfix)
-        df_ag["ag_pfi_y"] = np.array(pfiy)
+        df_ag = _build_df_ag(pfsDesign0)
 
         if not df_unassigned_toobright.empty:
             unfib_bright = df_unassigned_toobright["fiber_id"].unique().tolist()
         else:
             unfib_bright = []
-        df = pldes.check_design(
-            designId, df_fib, df_ag, n_unfib_bright=len(unfib_bright)
-        )
+
+        df = pldes.check_design(designId, df_fib, df_ag, n_unfib_bright=len(unfib_bright))
         df_ch = pd.concat([df_ch, df], ignore_index=True)
         title = f"designId=0x{designId:016x} ({pfsDesign0.raBoresight:.2f},{pfsDesign0.decBoresight:.2f},PA={pfsDesign0.posAng:.1f})\n{pfsDesign0.designName}"
         fname = f"{figpath}/check_0x{designId:016x}"
@@ -377,6 +470,13 @@ def validation(parentPath, figpath, save, show, ssp, conf):
             conf=conf,
             unfib_bright=unfib_bright,
         )
+
+    # After processing all designs, optionally save a single CSV containing
+    # all bright sources found near unassigned fibers.
+    if conf["validation"]["save_unassign_toobright"] and not df_all_unassigned_toobright.empty:
+        out_path = os.path.join(figpath, "df_unassign_bright_nearby.csv")
+        df_all_unassigned_toobright.to_csv(out_path, index=False)
+
     df_ch["inr1"] = df_design["inr1"]
     df_ch["inr2"] = df_design["inr2"]
     df_ch["el1"] = df_design["el1"]

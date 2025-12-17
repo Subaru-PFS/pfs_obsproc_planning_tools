@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 from astropy.coordinates import SkyCoord
-from astropy.table import Table, vstack
+from astropy.table import Table, vstack, join
 from astropy.io import fits
 from astropy import units as u
 from matplotlib.backends.backend_pdf import PdfPages
@@ -24,7 +24,7 @@ warnings.filterwarnings("ignore")
 
 def run(conf, workDir="."):
     # read obList
-    tb_tgt = Table.read(os.path.join(workDir, "ppp/obList.ecsv"))
+    tb_tgt = Table.read(os.path.join(workDir, "ppp/obList_tot.ecsv"))
     try:
         tb_tgt_backup = Table.read(os.path.join(workDir, "ppp/obList_backup.ecsv"))
     except:
@@ -118,8 +118,8 @@ def plot_ppc(conf, tb_tgt, tb_ppc, pdf):
     for idx, proposal_id in enumerate(proposal_ids):
         targets = tb_tgt[tb_tgt["proposal_id"] == proposal_id]
         plt.plot(
-            targets["ob_ra"],
-            targets["ob_dec"],
+            targets["ra"],
+            targets["dec"],
             "o",
             mfc=color_list[idx],
             mec="none",
@@ -473,8 +473,24 @@ def plot_CR(conf, tb_tgt, tb_queue, workDir, pdf):
     """
 
     # --- Prepare target table ---
+    tb_tgt = join(tb_tgt, tb_queue,
+                    keys_left=["proposal_id", "ob_code"],
+                    keys_right=["psl_id", "ob_code"],
+                    join_type="left")
+    
+    exptime_usr = np.ma.filled(tb_tgt["effective_exptime"], 0.0)
+    exptime_done_real = np.ma.filled(tb_tgt["eff_exptime_done_real"], 0.0)
+
+    exptime_usr = exptime_usr.astype(float)
+    exptime_done_real = exptime_done_real.astype(float)
+    
+    tb_tgt["eff_exptime_done_rec"] = np.minimum(exptime_usr, exptime_done_real)
+
+    tb_tgt.rename_column("ob_code_1", "ob_code")
+    #cols_to_remove = [c for c in tb_tgt.colnames if c in tb_queuedb.colnames and "ob_code" not in c]
+    #tb_tgt.remove_columns(cols_to_remove)
+
     tb_tgt["exptime_assign"] = 0.0
-    tb_tgt["exptime_done"] = 0.0
 
     # --- Calculate expected exposure time ---
     pfsdeg_files = glob(os.path.join(workDir, "design/*.fits"))
@@ -496,18 +512,18 @@ def plot_CR(conf, tb_tgt, tb_queue, workDir, pdf):
         queue_ = tb_queue[tb_queue["psl_id"] == psl_id]
         tgt_ = tb_tgt[tb_tgt["proposal_id"] == psl_id]
 
-        fh_tot_ = np.sum(tgt_["ob_exptime_usr"]) / 3600.0
+        fh_tot_ = np.sum(tgt_["effective_exptime"]) / 3600.0
         fh_allo_ = list(set(tgt_["allocated_time_tac"]))[0] if len(tgt_) > 0 else 0
         fh_com_ = (
             np.sum(
-                queue_["eff_exptime_done_rec"][
-                    queue_["eff_exptime_done_rec"] >= queue_["exptime"]
+                tgt_["eff_exptime_done_rec"][
+                    tgt_["eff_exptime_done_rec"] >= tgt_["effective_exptime"]
                 ]
             )
             / 3600.0
         )
-        fh_now_ = np.sum(queue_["eff_exptime_done_rec"]) / 3600.0
-        fh_real_ = np.sum(queue_["exptime_done_real"]) / 3600.0
+        fh_now_ = np.sum(tgt_["eff_exptime_done_rec"]) / 3600.0
+        fh_real_ = np.sum(tgt_["exptime_done_real"]) / 3600.0
         fh_exp_ = np.sum(tgt_["exptime_exp"]) / 3600.0 + fh_now_
 
         logger.info(
