@@ -1,6 +1,7 @@
 # import os,sys,re
 # import math as mt
 import numpy as np
+import re
 
 # from scipy import ndimage
 # from scipy.optimize import curve_fit
@@ -368,7 +369,7 @@ def plot_FoV(
     )
     # ax2.hist(df_fib[df_fib['targetType']==1]['psfMag'], bins=bins, range=(mmin, mmax),
     #         color=c['sci'], lw=0, alpha=0.4, label='Target')
-    ax2.legend()
+    ax2.legend(fontsize=8)
     ax2.set_xlabel("mag", fontsize=12)
     ax2.set_ylabel("N (target or STD)", fontsize=12)
 
@@ -392,55 +393,62 @@ warning = "hotpink"  # colour for warning
 
 
 def colour_background_warning_sky_tot(val):
-    colour = warning if val < 400 else ""
+    colour = warning if float(val) < 400 else ""
 
     return f"background-color: {colour}"
 
 
 def colour_background_warning_std_tot(val):
-    colour = warning if val < 40 else ""
+    colour = warning if float(val) < 40 else ""
 
     return f"background-color: {colour}"
 
 
 def colour_background_warning_sky_min(val):
-    colour = warning if val < 12 else ""
+    colour = warning if float(val) < 12 else ""
 
     return f"background-color: {colour}"
 
 
 def colour_background_warning_std_min(val):
-    colour = warning if val < 3 else ""
+    colour = warning if float(val) < 3 else ""
 
     return f"background-color: {colour}"
 
 
 def colour_background_warning_ag_tot(val):
-    colour = warning if val < 10 else ""
+    # extract numbers: e.g. '3 (1)' -> ['3', '1']
+    nums = list(map(int, re.findall(r"\d+", str(val))))
+    i = nums[0] if nums else 0
+    j = nums[1] if len(nums) > 1 else 0
+    colour = warning if (i < 10 or j > 0) else ""
 
     return f"background-color: {colour}"
 
 
 def colour_background_warning_ag_min(val):
-    colour = warning if val < 2 else ""
+    # extract numbers: e.g. '3 (1)' -> ['3', '1']
+    nums = list(map(int, re.findall(r"\d+", str(val))))
+    i = nums[0] if nums else 0
+    j = nums[1] if len(nums) > 1 else 0
+    colour = warning if (i < 2 or j > 0) else ""
 
     return f"background-color: {colour}"
 
-
 def colour_background_warning_inr(val):
-    colour = warning if (val < -174) or (val > 174) else ""
+    colour = warning if (float(val) < -174) or (float(val) > 174) else ""
 
     return f"background-color: {colour}"
 
 
 def colour_background_warning_el(val):
-    colour = warning if (val < 32) or (val > 75) else ""
+    colour = warning if (float(val) < 32) or (float(val) > 75) else ""
 
     return f"background-color: {colour}"
 
 
 def colour_background_warning_unfib(val):
-    colour = warning if val > 0 else ""
+    colour = warning if float(val) > 0 else ""
 
     return f"background-color: {colour}"
 
@@ -475,37 +483,32 @@ def init_check_design():
             "ag6",
             "ag_sum",
             "designId",
+            "ppc_code",
             "unfib_bright",
         ],
     )
     return df
 
 
-def check_design(designId, df_fib, df_ag, n_unfib_bright=0):
+def check_design(designId, df_fib, df_ag, df_guidestars_toobright):
+    a, a_ = check_ags(df_ag, df_guidestars_toobright)
+    ag_cols = [
+        f"{ai} ({aj})" if aj > 0 else f"{ai}"
+        for ai, aj in zip(a, a_)
+    ]
+    
+    vals = check_fibers(df_fib)
+
     df_ch = pd.DataFrame(
-        data=np.append(check_fibers(df_fib), check_ags(df_ag)).reshape(1, 17),
+        data=np.append(vals, ag_cols).reshape(1, len(vals) + len(ag_cols)),
         columns=[
-            "sky_mean",
-            "sky_std",
-            "sky_min",
-            "sky_max",
-            "sky_sum",
-            "std_mean",
-            "std_std",
-            "std_min",
-            "std_max",
-            "std_sum",
-            "ag1",
-            "ag2",
-            "ag3",
-            "ag4",
-            "ag5",
-            "ag6",
-            "ag_sum",
-        ],
+                "sky_mean", "sky_std", "sky_min", "sky_max", "sky_sum",
+                "std_mean", "std_std", "std_min", "std_max", "std_sum",
+                "ag1", "ag2", "ag3", "ag4", "ag5", "ag6", "ag_sum",
+            ],
     )
+
     df_ch["designId"] = f"0x{designId:016x}"
-    df_ch["unfib_bright"] = n_unfib_bright
     # df_ch.style.applymap(colour_background_warning_sky_min, subset=['sky_min'])
 
     return df_ch
@@ -549,19 +552,23 @@ def check_fibers(df_fib):
     return np.array(f)
 
 
-def check_ags(df_ag):
+def check_ags(df_ag, df_guidestars_toobright):
     """
     df_ag: pandas dataframe with
            'agx', 'agy', 'agMag', 'camId', 'ag_pfi_x', 'ag_pfi_y'
     """
 
     cam = df_ag["camId"].values
+    cam_ = df_guidestars_toobright["agId"].values
     a = []
+    a_ = []
     for i in range(0, 6):
         a.append(np.sum(cam == i))
+        a_.append(np.sum(cam_ == i))
 
     a.append(np.sum(a))
-    return np.array(a)
+    a_.append(np.sum(a_))
+    return np.array(a), np.array(a_)
 
 
 def get_field_sector(df_fib):
