@@ -772,9 +772,9 @@ class GeneratePfsDesign_ssp(object):
 
         try:
             tb_ppc = Table.read(ppc_path)
-        except FileNotFoundError as e:
-            logger.error(f"Missing ppcList.ecsv for WG={WG}: {ppc_path}", file=sys.stderr)
-            return Table()
+        except:
+            logger.error(f"Missing ppcList.ecsv for WG={WG}: {ppc_path}")
+            continue
     
         mask = np.array(
             [
