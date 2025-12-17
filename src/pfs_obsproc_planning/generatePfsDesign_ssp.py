@@ -768,8 +768,14 @@ class GeneratePfsDesign_ssp(object):
         logger.info(f"[For SSP] Make design for {WG}")
 
         # read ppcList.ecsv
-        tb_ppc = Table.read(os.path.join(self.workDir, "targets", WG, "ppcList.ecsv"))
+        ppc_path = os.path.join(self.workDir, "targets", WG, "ppcList.ecsv")
 
+        try:
+            tb_ppc = Table.read(ppc_path)
+        except FileNotFoundError as e:
+            logger.error(f"Missing ppcList.ecsv for WG={WG}: {ppc_path}", file=sys.stderr)
+            return Table()
+    
         mask = np.array(
             [
                 (isinstance(val, str) and val.strip().lower() != "nan")
