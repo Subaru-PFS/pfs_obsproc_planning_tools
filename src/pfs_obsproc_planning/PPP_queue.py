@@ -95,7 +95,7 @@ def visibility_checker(tb_tgt, obstimes, start_time_list, stop_time_list):
 
     tb_tgt["is_visible"] = False
 
-    for i in range(len(tb_tgt)):
+    for i in range(1):#len(tb_tgt)):
         target = entity.StaticTarget(
             name=tb_tgt["ob_code"][i],
             ra=tb_tgt["ra"][i],
@@ -107,9 +107,15 @@ def visibility_checker(tb_tgt, obstimes, start_time_list, stop_time_list):
         )  # SEC
 
         t_obs_ok = 0
+        today = date.today().strftime("%Y-%m-%d")
+        date_today = parser.parse(f"{today} 12:00 HST")
 
-        for date in obstimes:
-            date_t = parser.parse(f"{date} 12:00 HST")
+        for date_i in obstimes:
+            date_t = parser.parse(f"{date_i} 12:00 HST")
+            if date_today > date_t:
+                # skip past dates
+                continue
+            
             observer.set_date(date_t)
             default_start_time = observer.evening_twilight_18()
             default_stop_time = observer.morning_twilight_18()
@@ -119,38 +125,68 @@ def visibility_checker(tb_tgt, obstimes, start_time_list, stop_time_list):
 
             for item in start_time_list:
                 next_date = (
-                    datetime.strptime(date, "%Y-%m-%d") + timedelta(days=1)
+                    datetime.strptime(date_i, "%Y-%m-%d") + timedelta(days=1)
                 ).strftime("%Y-%m-%d")
-                if (date in item) and parser.parse(f"{item} HST") > default_start_time:
+                if (date_i in item) and parser.parse(f"{item} HST") >= default_start_time:
                     start_override = parser.parse(f"{item} HST")
+                    start_time_list.remove(item)
+                    break
+                elif (
+                    (date_i in item)
+                    and (parser.parse(f"{item} HST") < default_start_time)
+                    and (
+                        parser.parse(f"{item} HST")
+                        > default_start_time - timedelta(hours=1)
+                    )
+                ):
+                    start_override = default_start_time
+                    start_time_list.remove(item)
+                    break
                 elif (next_date in item) and parser.parse(
                     f"{item} HST"
-                ) < default_stop_time:
+                ) <= default_stop_time:
                     start_override = parser.parse(f"{item} HST")
-
+                    start_time_list.remove(item)
+                    break
+    
             for item in stop_time_list:
                 next_date = (
-                    datetime.strptime(date, "%Y-%m-%d") + timedelta(days=1)
+                    datetime.strptime(date_i, "%Y-%m-%d") + timedelta(days=1)
                 ).strftime("%Y-%m-%d")
-                if (date in item) and parser.parse(f"{item} HST") > default_start_time:
+                if (date_i in item) and parser.parse(f"{item} HST") >= default_start_time:
                     stop_override = parser.parse(f"{item} HST")
+                    stop_time_list.remove(item)
+                    break
                 elif (next_date in item) and parser.parse(
                     f"{item} HST"
-                ) < default_stop_time:
+                ) <= default_stop_time:
                     stop_override = parser.parse(f"{item} HST")
-
+                    stop_time_list.remove(item)
+                    break
+                elif (
+                    (next_date in item)
+                    and (parser.parse(f"{item} HST") > default_stop_time)
+                    and (
+                        parser.parse(f"{item} HST")
+                        <= default_stop_time + timedelta(hours=1)
+                    )
+                ):
+                    stop_override = default_stop_time
+                    stop_time_list.remove(item)
+                    break
+    
             if start_override is not None:
                 start_time = start_override
             else:
                 start_time = default_start_time
-
+    
             if stop_override is not None:
                 stop_time = stop_override
             else:
                 stop_time = default_stop_time
 
             if i == 0:
-                logger.info(f"date: {date}, start={start_time}, stop={stop_time}")
+                logger.info(f"date: {date_i}, start={start_time}, stop={stop_time}")
 
             key = target
             obs_ok, t_start, t_stop = eph_cache.observable(
