@@ -68,7 +68,16 @@ def get_pfs_utils_path():
 
 
 def plot_FoV(
-    df_fib, df_ag, alpha=1.0, title="", fname="", save=True, show=True, pa=0.0
+    df_fib,
+    df_ag,
+    alpha=1.0,
+    title="",
+    fname="",
+    save=True,
+    show=True,
+    pa=0.0,
+    conf=None,
+    unfib_bright=[],
 ):
     """
     df_fib: pandas dataframe with
@@ -87,6 +96,7 @@ def plot_FoV(
     df_fib["pfi_y"] = df_fib.pfi_y.astype(float)
     df_fib["targetType"] = df_fib.targetType.astype(int)
     df_fib["fiberId"] = df_fib.fiberId.astype(int)
+    df_fib["obCode"] = df_fib.obCode.astype(str)
 
     # set the font sizes for labels
 
@@ -122,6 +132,7 @@ def plot_FoV(
 
     c = {
         "un": "slategrey",
+        "un_brt": "brown",
         "dot": "black",
         "sky": "deepskyblue",
         "fstar": "green",
@@ -140,6 +151,17 @@ def plot_FoV(
         alpha=alpha,
         lw=1,
         label=f"UNASSIGNED ({len(df_fib[df_fib.targetType==4].pfi_y)})",
+    )
+    ax1.scatter(
+        df_fib[df_fib.fiberId.isin(unfib_bright)].pfi_x,
+        df_fib[df_fib.fiberId.isin(unfib_bright)].pfi_y,
+        facecolor="none",
+        edgecolor=c["un_brt"],
+        marker="s",
+        s=s * 2.6,
+        alpha=alpha,
+        lw=1,
+        label=f"neaby bright star ({len(unfib_bright)})",
     )
     ax1.scatter(
         df_fib[df_fib.targetType == 10].pfi_x,
@@ -181,6 +203,17 @@ def plot_FoV(
         lw=0,
         label=f"SCIENCE ({len(df_fib[df_fib.targetType==1].pfi_y)})",
     )
+    # plot top-rank target in cla program 25b-116
+    ax1.scatter(
+        df_fib[df_fib.obCode == "M31_30410_R31_02730_v2"].pfi_x,
+        df_fib[df_fib.obCode == "M31_30410_R31_02730_v2"].pfi_y,
+        c="red",
+        marker="o",
+        s=s,
+        alpha=alpha,
+        lw=0,
+        # label=f"SCIENCE ({len(df_fib[df_fib.targetType==1].pfi_y)})",
+    )
     ax1.scatter(
         df_ag.ag_pfi_x,
         df_ag.ag_pfi_y,
@@ -217,23 +250,25 @@ def plot_FoV(
     rs1 = 50
     rs2 = 132.5
     for rs in [rs1, rs2]:
-        circle = patches.Circle((0, 0), radius=rs, 
-                                color='navy', fill=False, lw=0.5)
+        circle = patches.Circle((0, 0), radius=rs, color="navy", fill=False, lw=0.5)
         ax1.add_patch(circle)
     phis = np.radians(np.linspace(0, 360, 6, endpoint=False) + 15 + 90)
-    phis = phis - np.radians(360/60./2.)
+    phis = phis - np.radians(360 / 60.0 / 2.0)
     for phi in phis:
-        xx1, yy1 = rs1*np.cos(phi), rs1*np.sin(phi)
-        xx2, yy2 = rs2*np.cos(phi), rs2*np.sin(phi)
-        line = patches.FancyArrow(xx1, yy1, (xx2-xx1), (yy2-yy1),
-                                  head_width=0, color='navy', lw=0.5)
+        xx1, yy1 = rs1 * np.cos(phi), rs1 * np.sin(phi)
+        xx2, yy2 = rs2 * np.cos(phi), rs2 * np.sin(phi)
+        line = patches.FancyArrow(
+            xx1, yy1, (xx2 - xx1), (yy2 - yy1), head_width=0, color="navy", lw=0.5
+        )
         ax1.add_patch(line)
-    phis = np.radians(np.linspace(0, 360, 13, endpoint=False) -20 + 90)
-    phis = phis - np.radians(360/13./2.)
+    phis = np.radians(np.linspace(0, 360, 13, endpoint=False) - 20 + 90)
+    phis = phis - np.radians(360 / 13.0 / 2.0)
     for phi in phis:
-        xx1, yy1 = rs2*np.cos(phi), rs2*np.sin(phi)
-        xx2, yy2 = r*np.cos(phi), r*np.sin(phi)
-        line = patches.FancyArrow(xx1, yy1, (xx2-xx1), (yy2-yy1), head_width=0, color='navy', lw=0.5)
+        xx1, yy1 = rs2 * np.cos(phi), rs2 * np.sin(phi)
+        xx2, yy2 = r * np.cos(phi), r * np.sin(phi)
+        line = patches.FancyArrow(
+            xx1, yy1, (xx2 - xx1), (yy2 - yy1), head_width=0, color="navy", lw=0.5
+        )
         ax1.add_patch(line)
 
     # show North/East
@@ -298,12 +333,25 @@ def plot_FoV(
             "totalMag"
         ].values
         n_mags = len(mags)
-        n_too_bright = sum(mags<13)
+        if n_mags == 0:
+            mags = df_fib[(df_fib.targetType == 1) & (df_fib.proposalId == p)][
+                "psfMag"
+            ].values
+            n_mags = len(mags)
+        n_too_bright = sum(mags < 13)
         for j in range((df_fib.shape[0] - n_mags)):
             mags = np.append(mags, np.nan)
         # print(mag_per_prog.shape, mags.shape)
         mag_per_prog = np.vstack((mag_per_prog, mags))
-        label_per_prog.append(f"{p} ({n_mags}; {n_too_bright}<13mag)")
+        if conf["ppp"]["mode"] == "classic":
+            if p in conf["sfa"]["proposalIds_obsFiller"]:
+                label_per_prog.append(f"obs. filler ({n_mags}; {n_too_bright}<13mag)")
+            elif p in conf["ppp"]["proposalIds"]:
+                label_per_prog.append(f"{p} ({n_mags}; {n_too_bright}<13mag)")
+            else:
+                label_per_prog.append(f"usr filler ({n_mags}; {n_too_bright}<13mag)")
+        else:
+            label_per_prog.append(f"{p} ({n_mags}; {n_too_bright}<13mag)")
 
     mag_per_prog = mag_per_prog[1:]
     # print(mag_per_prog.shape, mag_per_prog)
@@ -384,8 +432,15 @@ def colour_background_warning_inr(val):
 
     return f"background-color: {colour}"
 
+
 def colour_background_warning_el(val):
     colour = warning if (val < 32) or (val > 75) else ""
+
+    return f"background-color: {colour}"
+
+
+def colour_background_warning_unfib(val):
+    colour = warning if val > 0 else ""
 
     return f"background-color: {colour}"
 
@@ -420,12 +475,13 @@ def init_check_design():
             "ag6",
             "ag_sum",
             "designId",
+            "unfib_bright",
         ],
     )
     return df
 
 
-def check_design(designId, df_fib, df_ag):
+def check_design(designId, df_fib, df_ag, n_unfib_bright=0):
     df_ch = pd.DataFrame(
         data=np.append(check_fibers(df_fib), check_ags(df_ag)).reshape(1, 17),
         columns=[
@@ -449,6 +505,7 @@ def check_design(designId, df_fib, df_ag):
         ],
     )
     df_ch["designId"] = f"0x{designId:016x}"
+    df_ch["unfib_bright"] = n_unfib_bright
     # df_ch.style.applymap(colour_background_warning_sky_min, subset=['sky_min'])
 
     return df_ch
@@ -540,13 +597,11 @@ def get_field_sector(df_fib):
 
 
 def get_field_sector2(df_fib):
-    
     """
     df_fib: pandas dataframe with
            'targetType', 'pfi_x', 'pfi_y', 'spec', 'fh', 'pfsFlux', 'pfsFlux'
-    divede sectors to 20 (1 + 6 + 13) regions, proposed by Laszlo 
+    divede sectors to 20 (1 + 6 + 13) regions, proposed by Laszlo
     """
-
 
     points = []
     # centre points
@@ -557,7 +612,7 @@ def get_field_sector2(df_fib):
     points.append(100 * np.stack([np.cos(phi), np.sin(phi)], axis=-1))
 
     # outer points
-    phi =  np.radians(np.linspace(0, 360, 13, endpoint=False) - 20 + 90)
+    phi = np.radians(np.linspace(0, 360, 13, endpoint=False) - 20 + 90)
     points.append(175 * np.stack([np.cos(phi), np.sin(phi)], axis=-1))
 
     xy = np.concatenate(points, axis=0)
@@ -569,8 +624,8 @@ def get_field_sector2(df_fib):
     d = distance_matrix(xy, uv)
 
     tag = np.argmin(d, axis=0)
-    #tag.shape
-    
+    # tag.shape
+
     return tag
 
 

@@ -11,6 +11,8 @@ from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.table import Table
 from astropy.time import Time, TimeDelta
+from datetime import datetime as dt
+import pytz
 
 warnings.filterwarnings("ignore")
 
@@ -30,7 +32,19 @@ class OpeFile(object):
             self.outfilePath = os.path.join(workDir, "ope")
             self.designPath = os.path.join(workDir, "design")
         elif self.conf["ssp"]["ssp"]:
-            self.outfilePath = os.path.join(workDir, self.conf["ope"]["outfilePath"])
+            base_out = os.path.join(workDir, self.conf["ope"]["outfilePath"])
+            os.makedirs(base_out, exist_ok=True)
+
+            # --- today's folder name ---
+            today_str = dt.today().strftime("%Y-%m-%d")
+            target_dir = os.path.join(base_out, today_str)
+            version = 0
+            while os.path.exists(target_dir):
+                version += 1
+                target_dir = os.path.join(base_out, f"{today_str}_v{version}")
+            os.makedirs(target_dir, exist_ok=True)
+            self.outfilePath = target_dir
+    
             self.designPath = os.path.join(workDir, self.conf["ope"]["designPath"])
         # self.runName = conf["ope"]["runName"]  # not used in the current implementation
         # self.exptime_ppp = conf["ppp"]["TEXP_NOMINAL"]
@@ -65,10 +79,18 @@ class OpeFile(object):
                     self.contents2 += line
                 elif science_part == 2:
                     self.contents3 += line
-                if line.startswith(("# SETUPFIELD WITH", "SETUPFIELD", "# Check Auto Guiding", "## Get spectrum", "GETOBJECT")):
+                if line.startswith(
+                    (
+                        "# SETUPFIELD WITH",
+                        "SETUPFIELD",
+                        "# Check Auto Guiding",
+                        "## Get spectrum",
+                        "GETOBJECT",
+                    )
+                ):
                     self.contents2_main += line
                     if line.startswith(("SETUPFIELD", "# Check Auto Guiding")):
-                        self.contents2_main += "\n" 
+                        self.contents2_main += "\n"
 
     def update_obsdate(self, obsdate, utc=False):
         obsdate_orig = obsdate
@@ -88,16 +110,14 @@ class OpeFile(object):
             self.outfile = os.path.join(self.outfilePath, f"{obsdate}.ope")
 
         # add time_stamp when ope file is created
-        from datetime import datetime
-        import pytz
-        
         hst = pytz.timezone("Pacific/Honolulu")
-        dt_hst = datetime.now(hst)
+        dt_hst = dt.now(hst)
         time_stamp = dt_hst.strftime("%Y-%m-%d %H:%M:%S HST")
         self.contents1_updated = self.contents1.replace(
-            '### template ope file for PFS operations', f'### This ope created at {time_stamp} \n### template ope file for PFS operations'
+            "### template ope file for PFS operations",
+            f"### This ope created at {time_stamp} \n### template ope file for PFS operations",
         )
-        
+
         # update PFSDSGNDIR
         self.contents1_updated = self.contents1_updated.replace(
             'PFSDSGNDIR="/data/pfsDesign/"', f'PFSDSGNDIR="{self.designPath}"'
@@ -182,8 +202,8 @@ class OpeFile(object):
             tmpl_longexp = self.contents2_main
             total_exptime = val[7]
             nframe = int(val[8])
-            single_exptime = total_exptime/nframe
-            nframe_long = int(np.ceil(1800.0 / single_exptime))              
+            single_exptime = total_exptime / nframe
+            nframe_long = int(np.ceil(1800.0 / single_exptime))
 
             # add PPC code
             repl1 = "### SCIENCE:START ###"
@@ -235,7 +255,7 @@ class OpeFile(object):
                     tmpl_longexp = tmpl_longexp.replace(repl1, repl2)
                     self.contents2_updated += tmpl_longexp + "\n\n"
                     nframe -= nframe_long
-                
+
             self.contents3 = self.contents3.replace("### SCIENCE:END  ###", "")
 
     def write(self):

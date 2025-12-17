@@ -196,6 +196,7 @@ class GeneratePfsDesign_ssp(object):
             "pfs_utils",
             "ets_pointing",
             "ets_shuffle",
+            "pfs_obsproc_planning",
             "pfs_datamodel",
             "ics_cobraCharmer",
             "ics_cobraOps",
@@ -494,11 +495,11 @@ class GeneratePfsDesign_ssp(object):
             )
 
             proposal_id = set(tb["proposal_id"])
-            proposal_id_req = {"S25B-OT02"}
+            proposal_id_req = set(self.conf["ssp"]["proposal_ids"])
             if proposal_id != proposal_id_req:
                 validate_success = False
                 logger.error(
-                    f"[Validation of tgtLists] Proposal_id is incorrect (should be S25B-OT02; {ppc_code}, {tgt_type}): {proposal_id}"
+                    f"[Validation of tgtLists] Proposal_id is incorrect (should be {proposal_id_req}; {ppc_code}, {tgt_type}): {proposal_id}"
                 )
 
             target_type = set(tb["target_type_id"])
@@ -509,11 +510,12 @@ class GeneratePfsDesign_ssp(object):
                 )
 
             catId = set(tb["input_catalog_id"])
-            unexpected_Id = catId - {10091, 10092, 10093, 10251, 10252, 10253}
+            expected_Ids = set(self.conf["ssp"]["input_catalog_ids_sci"])
+            unexpected_Id = catId - expected_Ids 
             if len(unexpected_Id) > 0:
                 validate_success = False
                 logger.error(
-                    f"[Validation of tgtLists] Incorrect catId (should be 10091/2/3 or 10251/2/3; {ppc_code}, {tgt_type}): {unexpected_Id}"
+                    f"[Validation of tgtLists] Incorrect catId (should be in {expected_Ids}; {ppc_code}, {tgt_type}): {unexpected_Id}"
                 )
 
         elif tgt_type == "sky":
@@ -529,20 +531,12 @@ class GeneratePfsDesign_ssp(object):
                 )
 
             catId = set(tb["input_catalog_id"])
-            unexpected_Id = catId - {
-                1006,
-                1007,
-                10091,
-                10092,
-                10093,
-                10251,
-                10252,
-                10253,
-            }
+            expected_Ids = set(self.conf["ssp"]["input_catalog_ids_sky"])
+            unexpected_Id = catId - expected_Ids
             if len(unexpected_Id) > 0:
                 validate_success = False
                 logger.error(
-                    f"[Validation of tgtLists] Incorrect catId (should be 1006/7 or 10091/2/3 or 10251/2/3; {ppc_code}, {tgt_type}): {unexpected_Id}"
+                    f"[Validation of tgtLists] Incorrect catId (should be in {expected_Ids}; {ppc_code}, {tgt_type}): {unexpected_Id}"
                 )
 
         elif tgt_type == "fluxstd":
@@ -558,16 +552,8 @@ class GeneratePfsDesign_ssp(object):
                 )
 
             catId = set(tb["input_catalog_id"])
-            unexpected_Id = catId - {
-                3006,
-                3011,
-                10091,
-                10092,
-                10093,
-                10251,
-                10252,
-                10253,
-            }
+            expected_Ids = set(self.conf["ssp"]["input_catalog_ids_fluxstd"])
+            unexpected_Id = catId - expected_Ids
             if len(unexpected_Id) > 0:
                 validate_success = False
                 logger.error(
@@ -1150,9 +1136,9 @@ class GeneratePfsDesign_ssp(object):
         def parse_datetime(date_string):
             formats = [
                 "%Y-%m-%d %H:%M:%S",
-                "%Y-%m-%dT%H:%M:%S.%f",
-                "%Y-%m-%dT%H:%M:%S",
                 "%Y-%m-%d %H:%M:%S.%f",
+                "%Y-%m-%dT%H:%M:%S",
+                "%Y-%m-%dT%H:%M:%S.%f",
             ]
             # check if the date_string is in one of the possible formats
             for format_str in formats:
@@ -1206,7 +1192,13 @@ class GeneratePfsDesign_ssp(object):
         ## ope file generation ##
         ope = OpeFile(conf=self.conf, workDir=self.workDir)
 
+        today_utc = datetime.utcnow().date()
         for obsdate_utc in obsdates_utc:
+            # skip if earlier than today
+            obsdate_ = datetime.strptime(obsdate_utc, "%Y-%m-%d").date()
+            if obsdate_ < today_utc:
+                continue
+        
             logger.info(f"[Make ope] generating ope file for {obsdate_utc} (UTC)...")
             template_file = (
                 self.conf["ope"]["template"]

@@ -74,6 +74,7 @@ def count_N_overlap(_tb_tgt_psl, _tb_tgt):
 
     return _tb_tgt_psl
 
+
 def removeObjIdDuplication(df):
     num1 = len(df)
     df = df.drop_duplicates(
@@ -84,6 +85,7 @@ def removeObjIdDuplication(df):
     num2 = len(df)
     logger.info(f"Duplication removed: {num1} --> {num2}")
     return df
+
 
 def visibility_checker(tb_tgt, obstimes, start_time_list, stop_time_list):
     tz_HST = tz.gettz("US/Hawaii")
@@ -109,44 +111,52 @@ def visibility_checker(tb_tgt, obstimes, start_time_list, stop_time_list):
         for date in obstimes:
             date_t = parser.parse(f"{date} 12:00 HST")
             observer.set_date(date_t)
-            default_start_time = observer.evening_twilight_18() 
+            default_start_time = observer.evening_twilight_18()
             default_stop_time = observer.morning_twilight_18()
 
             start_override = None
             stop_override = None
-            
+
             for item in start_time_list:
-                next_date = (datetime.strptime(date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+                next_date = (
+                    datetime.strptime(date, "%Y-%m-%d") + timedelta(days=1)
+                ).strftime("%Y-%m-%d")
                 if (date in item) and parser.parse(f"{item} HST") > default_start_time:
                     start_override = parser.parse(f"{item} HST")
-                elif (next_date in item) and parser.parse(f"{item} HST") < default_stop_time:
+                elif (next_date in item) and parser.parse(
+                    f"{item} HST"
+                ) < default_stop_time:
                     start_override = parser.parse(f"{item} HST")
-    
+
             for item in stop_time_list:
-                next_date = (datetime.strptime(date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+                next_date = (
+                    datetime.strptime(date, "%Y-%m-%d") + timedelta(days=1)
+                ).strftime("%Y-%m-%d")
                 if (date in item) and parser.parse(f"{item} HST") > default_start_time:
                     stop_override = parser.parse(f"{item} HST")
-                elif (next_date in item) and parser.parse(f"{item} HST") < default_stop_time:
+                elif (next_date in item) and parser.parse(
+                    f"{item} HST"
+                ) < default_stop_time:
                     stop_override = parser.parse(f"{item} HST")
-    
+
             if start_override is not None:
                 start_time = start_override
             else:
                 start_time = default_start_time
-    
+
             if stop_override is not None:
                 stop_time = stop_override
             else:
                 stop_time = default_stop_time
 
-            if i==0:
+            if i == 0:
                 logger.info(f"date: {date}, start={start_time}, stop={stop_time}")
 
             key = target
             obs_ok, t_start, t_stop = eph_cache.observable(
-                key, 
-                target, 
-                observer, 
+                key,
+                target,
+                observer,
                 start_time,
                 stop_time,
                 min_el,
@@ -231,10 +241,10 @@ def readTarget(mode, para):
 
         def query_target_from_db(proposalId):
             sql = f"SELECT ob_code,obj_id,c.input_catalog_id,ra,dec,epoch,priority,pmra,pmdec,parallax,effective_exptime,single_exptime,qa_reference_arm,is_medium_resolution,proposal.proposal_id,rank,grade,allocated_time_lr+allocated_time_mr as \"allocated_time\",allocated_time_lr,allocated_time_mr,filter_g,filter_r,filter_i,filter_z,filter_y,psf_flux_g,psf_flux_r,psf_flux_i,psf_flux_z,psf_flux_y,psf_flux_error_g,psf_flux_error_r,psf_flux_error_i,psf_flux_error_z,psf_flux_error_y,total_flux_g,total_flux_r,total_flux_i,total_flux_z,total_flux_y,total_flux_error_g,total_flux_error_r,total_flux_error_i,total_flux_error_z,total_flux_error_y FROM target JOIN proposal ON target.proposal_id=proposal.proposal_id JOIN input_catalog AS c ON target.input_catalog_id = c.input_catalog_id WHERE proposal.proposal_id in ('{proposalId}') AND c.active;"
-    
+
             conn = tgtDB.connect()
             query = conn.execute(sa.sql.text(sql))
-    
+
             df_tgt = pd.DataFrame(
                 query.fetchall(),
                 columns=[
@@ -289,9 +299,11 @@ def readTarget(mode, para):
             df_tgt = df_tgt.rename(columns={"epoch": "equinox"})
             df_tgt = df_tgt.rename(columns={"effective_exptime": "exptime_usr"})
             df_tgt = df_tgt.rename(columns={"is_medium_resolution": "resolution"})
-    
+
             # convert Boolean to String
-            df_tgt["resolution"] = ["M" if v == True else "L" for v in df_tgt["resolution"]]
+            df_tgt["resolution"] = [
+                "M" if v == True else "L" for v in df_tgt["resolution"]
+            ]
             df_tgt["allocated_time_tac"] = [
                 df_tgt["allocated_time_lr"][ii]
                 if df_tgt["resolution"][ii] == "L"
@@ -301,13 +313,13 @@ def readTarget(mode, para):
             df_tgt = df_tgt.drop(columns=["allocated_time_lr", "allocated_time_mr"])
 
             df_tgt = removeObjIdDuplication(df_tgt)
-    
+
             df_tgt["psf_flux_g"][df_tgt["psf_flux_g"].isnull()] = np.nan
             df_tgt["psf_flux_r"][df_tgt["psf_flux_r"].isnull()] = np.nan
             df_tgt["psf_flux_i"][df_tgt["psf_flux_i"].isnull()] = np.nan
             df_tgt["psf_flux_z"][df_tgt["psf_flux_z"].isnull()] = np.nan
             df_tgt["psf_flux_y"][df_tgt["psf_flux_y"].isnull()] = np.nan
-    
+
             df_tgt["psf_flux_error_g"][df_tgt["psf_flux_error_g"].isnull()] = np.nan
             df_tgt["psf_flux_error_r"][df_tgt["psf_flux_error_r"].isnull()] = np.nan
             df_tgt["psf_flux_error_i"][df_tgt["psf_flux_error_i"].isnull()] = np.nan
@@ -319,29 +331,49 @@ def readTarget(mode, para):
             df_tgt["total_flux_i"][df_tgt["total_flux_i"].isnull()] = np.nan
             df_tgt["total_flux_z"][df_tgt["total_flux_z"].isnull()] = np.nan
             df_tgt["total_flux_y"][df_tgt["total_flux_y"].isnull()] = np.nan
-    
+
             df_tgt["total_flux_error_g"][df_tgt["total_flux_error_g"].isnull()] = np.nan
             df_tgt["total_flux_error_r"][df_tgt["total_flux_error_r"].isnull()] = np.nan
             df_tgt["total_flux_error_i"][df_tgt["total_flux_error_i"].isnull()] = np.nan
             df_tgt["total_flux_error_z"][df_tgt["total_flux_error_z"].isnull()] = np.nan
             df_tgt["total_flux_error_y"][df_tgt["total_flux_error_y"].isnull()] = np.nan
 
-            cols = ["psf_flux_g", "psf_flux_r", "psf_flux_i", "psf_flux_z", "psf_flux_y",
-                    "psf_flux_error_g", "psf_flux_error_r", "psf_flux_error_i", "psf_flux_error_z", "psf_flux_error_y",
-                    "total_flux_g", "total_flux_r", "total_flux_i", "total_flux_z", "total_flux_y",
-                    "total_flux_error_g", "total_flux_error_r", "total_flux_error_i", "total_flux_error_z", "total_flux_error_y"]
-            
+            cols = [
+                "psf_flux_g",
+                "psf_flux_r",
+                "psf_flux_i",
+                "psf_flux_z",
+                "psf_flux_y",
+                "psf_flux_error_g",
+                "psf_flux_error_r",
+                "psf_flux_error_i",
+                "psf_flux_error_z",
+                "psf_flux_error_y",
+                "total_flux_g",
+                "total_flux_r",
+                "total_flux_i",
+                "total_flux_z",
+                "total_flux_y",
+                "total_flux_error_g",
+                "total_flux_error_r",
+                "total_flux_error_i",
+                "total_flux_error_z",
+                "total_flux_error_y",
+            ]
+
             for col in cols:
                 # Convert the column to numeric; non-convertible values (e.g., "N/A") become np.nan.
-                df_tgt[col] = pd.to_numeric(df_tgt[col], errors='coerce')
-    
+                df_tgt[col] = pd.to_numeric(df_tgt[col], errors="coerce")
+
             tb_tgt = Table.from_pandas(df_tgt)
 
-            for col in ["filter_g","filter_r", "filter_i", "filter_z", "filter_y"]:
+            for col in ["filter_g", "filter_r", "filter_i", "filter_z", "filter_y"]:
                 tb_tgt[col] = tb_tgt[col].astype("str")
 
-            if proposalId == 'S25B-126QN':
-                tb_tgt = tb_tgt[tb_tgt["priority"]<=3]
+            if proposalId == "S25B-126QN":
+                tb_tgt = tb_tgt[tb_tgt["priority"] <= 3]
+            if proposalId == "S25B-071QN":
+                tb_tgt = tb_tgt[tb_tgt["ra"] <= 50]
 
             """
             for col in ["psf_flux_g","psf_flux_r", "psf_flux_i", "psf_flux_z", "psf_flux_y"]:
@@ -350,17 +382,17 @@ def readTarget(mode, para):
             for col in ["psf_flux_error_g","psf_flux_error_r", "psf_flux_error_i", "psf_flux_error_z", "psf_flux_error_y"]:
                 tb_tgt[col] = tb_tgt[col].astype(float)
             #"""
-            
+
             conn.close()
 
             return tb_tgt
 
     proposalid = para["proposalIds"]
-    
+
     tb_tgt_lst = []
     for proposalid_ in proposalid:
         tb_tgt_lst.append(query_target_from_db(proposalid_))
-    tb_tgt=vstack(tb_tgt_lst)
+    tb_tgt = vstack(tb_tgt_lst)
 
     tb_tgt["ra"] = tb_tgt["ra"].astype(float)
     tb_tgt["dec"] = tb_tgt["dec"].astype(float)
@@ -375,17 +407,17 @@ def readTarget(mode, para):
     tb_tgt["exptime_done"] = 0.0  # observed exptime
 
     ## --only for 020QN, need to confirm with Pyo-san-- updated FH (250530): no need as tgt DB has updated allocated_time_tac
-    #"""
-    #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-058QN'] = 19848.75
-    #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-020QN'] = 3237.25
-    #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-099QN'] = 6803.00
-    #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-096QN'] = 2661.00
-    #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-042QN'] = 18758.75
-    #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-101QN'] = 4363.50
-    #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-064QN'] = 10000.0
-    #"""
+    # """
+    # tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-058QN'] = 19848.75
+    # tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-020QN'] = 3237.25
+    # tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-099QN'] = 6803.00
+    # tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-096QN'] = 2661.00
+    # tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-042QN'] = 18758.75
+    # tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-101QN'] = 4363.50
+    # tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-064QN'] = 10000.0
+    # """
 
-    #for grade c programs, set completion rate as 70% as upper limit: no need as tgt DB has updated allocated_time_tac
+    # for grade c programs, set completion rate as 70% as upper limit: no need as tgt DB has updated allocated_time_tac
     """
     proposalid = ["S25B-086QN", "S25B-056QN", "S25B-092QN", "S25B-134QN", "S25B-120QN", "S25B-047QN", "S25B-126QN", "S25B-125QN", "S25B-136QN", "S25B-048QN"]
     mask = np.isin(tb_tgt["proposal_id"], proposalid)
@@ -413,7 +445,7 @@ def readTarget(mode, para):
         # list of all psl_id
         psl_id = sorted(set(tb_tgt["proposal_id"]))
 
-        #"""
+        # """
         # connect with queueDB
         qdb = q_db.QueueDatabase(logger_qplan)
         qdb.read_config(para["DBPath_qDB"])
@@ -422,48 +454,81 @@ def readTarget(mode, para):
         qq = q_query.QueueQuery(qa, use_cache=False)
 
         # determine observed exptime
-        #"""
+        # """
         nn = 0
         tt = []
         for psl_id_ in psl_id:
             ex_obs = qq.get_executed_obs_by_proposal(psl_id_)
-            if len(ex_obs)==0:
+            if len(ex_obs) == 0:
                 continue
             for ex_ob in ex_obs:
                 exps = qq.get_exposures(ex_ob)
                 ob = qq.get_ob(ex_ob.ob_key)
                 arm = ob.inscfg.qa_reference_arm
-                
+
                 exptime_exe_b = sum(exp.effective_exptime_b or 0 for exp in exps)
                 exptime_exe_r = sum(exp.effective_exptime_r or 0 for exp in exps)
                 exptime_exe_m = sum(exp.effective_exptime_m or 0 for exp in exps)
                 exptime_exe_n = sum(exp.effective_exptime_n or 0 for exp in exps)
-                
-                if arm == 'r':
+
+                if arm == "r":
                     exptime_exe = sum(exp.effective_exptime_r or 0 for exp in exps)
-                elif arm == 'b':
+                elif arm == "b":
                     exptime_exe = sum(exp.effective_exptime_b or 0 for exp in exps)
-                elif arm == 'n':
+                elif arm == "n":
                     exptime_exe = sum(exp.effective_exptime_n or 0 for exp in exps)
-                elif arm == 'm':
+                elif arm == "m":
                     exptime_exe = sum(exp.effective_exptime_m or 0 for exp in exps)
 
-                msk = (tb_tgt["proposal_id"] == ex_ob.ob_key[0]) & (tb_tgt["ob_code"] == ex_ob.ob_key[1])
+                msk = (tb_tgt["proposal_id"] == ex_ob.ob_key[0]) & (
+                    tb_tgt["ob_code"] == ex_ob.ob_key[1]
+                )
 
-                if len(tb_tgt[msk])==0:
+                if len(tb_tgt[msk]) == 0:
                     continue
-                    
+
                 exptime_usr = tb_tgt[msk]["exptime_usr"].data[0]
                 exptime_exe_fin = min(
                     exptime_usr, exptime_exe
                 )  # ignore over-observation
-                if exptime_exe>=0:
-                    nn+=1
-                    tt.append([nn, psl_id_, ex_ob.ob_key[1], exptime_usr, arm, exptime_exe, exptime_exe_b, exptime_exe_r, exptime_exe_m, exptime_exe_n, exptime_exe_fin, len(exps)*450])
+                if exptime_exe >= 0:
+                    nn += 1
+                    tt.append(
+                        [
+                            nn,
+                            psl_id_,
+                            ex_ob.ob_key[1],
+                            exptime_usr,
+                            arm,
+                            exptime_exe,
+                            exptime_exe_b,
+                            exptime_exe_r,
+                            exptime_exe_m,
+                            exptime_exe_n,
+                            exptime_exe_fin,
+                            len(exps) * 450,
+                        ]
+                    )
                 tb_tgt["exptime_done"][msk] = exptime_exe_fin
-            
-        tb_queuedb=Table(np.array(tt),names=["N","psl_id","ob_code","exptime","ref_arm","eff_exptime_done_real", "eff_exptime_done_real_b", "eff_exptime_done_real_r", "eff_exptime_done_real_m", "eff_exptime_done_real_n", "eff_exptime_done_rec","exptime_done_real"])
-        #"""
+
+        tb_queuedb = Table(
+            np.array(tt),
+            names=[
+                "N",
+                "psl_id",
+                "ob_code",
+                "exptime",
+                "ref_arm",
+                "eff_exptime_done_real",
+                "eff_exptime_done_real_b",
+                "eff_exptime_done_real_r",
+                "eff_exptime_done_real_m",
+                "eff_exptime_done_real_n",
+                "eff_exptime_done_rec",
+                "exptime_done_real",
+            ],
+        )
+        # """
 
         """
         tb_queuedb = Table.read("/home/wanqqq/workDir_pfs/run_2506/S25A-queue/output_20250622/ppp/tgt_queueDB_20250622_backup.csv")
@@ -535,7 +600,9 @@ def readTarget(mode, para):
             np.ceil(tb_tgt["exptime"] / 900) * 900
         )  # exptime needs to be multiples of 900 so netflow can be successfully executed
         n_tgt2 = len(tb_tgt)
-        logger.info(f"There are {n_tgt2:.0f} (partial-obs: {sum(tb_tgt['exptime_done'] > 0):.0f}) / {n_tgt1:.0f} targets not completed")
+        logger.info(
+            f"There are {n_tgt2:.0f} (partial-obs: {sum(tb_tgt['exptime_done'] > 0):.0f}) / {n_tgt1:.0f} targets not completed"
+        )
 
         # only for 064 since too huge list, FIX needed
         """
@@ -558,9 +625,11 @@ def readTarget(mode, para):
             n_tgt2 = len(tb_tgt)
             logger.info(f"Visibility limits: {pslid_} {n_tgt1:.0f} -> {n_tgt2:.0f}")
         #"""
-        
+
         if para["visibility_check"]:
-            tb_tgt = visibility_checker(tb_tgt, para["obstimes"], para["starttimes"], para["stoptimes"])
+            tb_tgt = visibility_checker(
+                tb_tgt, para["obstimes"], para["starttimes"], para["stoptimes"]
+            )
 
         # separete the sample by 'resolution' (L/M)
         tb_tgt_l = tb_tgt[tb_tgt["resolution"] == "L"]
@@ -575,6 +644,7 @@ def readTarget(mode, para):
             f"[S1] n_tgt_low = {len(tb_tgt_l):.0f}, n_tgt_medium = {len(tb_tgt_m):.0f}"
         )
         return tb_tgt, tb_tgt_l, tb_tgt_m, tb_queuedb, tb_queuedb
+
 
 def count_N(_tb_tgt):
     # calculate local count of targets (bin_width is 1 deg in ra&dec)
@@ -637,6 +707,7 @@ def sciRank_pri(_tb_tgt):
 
     return _tb_tgt
 
+
 """
 def weight(_tb_tgt, para_sci, para_exp, para_n):
     # calculate weights of targets (higher weights mean more important)
@@ -697,7 +768,9 @@ def target_DBSCAN(_tb_tgt, sep=1.38):
     for ii in np.array(tgt_pri_ord)[:, 0]:
         tgt_t = _tb_tgt[labels == ii]
         tgt_group.append(tgt_t)
-        print(f'({tgt_t["ra"][0]}, {tgt_t["dec"][0]}): {set(tgt_t["proposal_id"])}, {sum(tgt_t["rank_fin"])}')
+        print(
+            f'({tgt_t["ra"][0]}, {tgt_t["dec"][0]}): {set(tgt_t["proposal_id"])}, {sum(tgt_t["rank_fin"])}'
+        )
 
     return tgt_group
 
@@ -729,63 +802,70 @@ def PFS_FoV(ppc_ra, ppc_dec, PA, _tb_tgt):
 
     return index_
 
+
 def objective1(params, _tb_tgt):
     """
     Objective function to optimize the PPC parameters.
-    
+
     Parameters:
       params: list or array-like of [ppc_ra, ppc_dec, ppc_pa]
       tb: pandas DataFrame containing target information, including 'i2_mag'
-    
+
     Returns:
       Negative of the weighted sum of bright and faint counts (since we minimize).
     """
     ra, dec = params
-    #lst_tgtID_assign = netflowRun4PPC(_tb_tgt, ra, dec, pa)
-    index_ = PFS_FoV(ra, dec, 0.0, _tb_tgt)
+    pa = 0.0
+    # lst_tgtID_assign = netflowRun4PPC(_tb_tgt, ra, dec, pa)
+    index_ = PFS_FoV(ra, dec, pa, _tb_tgt)
     lst_tgtID_assign = _tb_tgt["identify_code"][index_]
-    
+
     index_assign = np.in1d(_tb_tgt["identify_code"], lst_tgtID_assign)
 
-    N_P0 = sum(index_assign * (_tb_tgt["priority"]==0))
-    N_P1 = sum(index_assign * (_tb_tgt["priority"]==1))
-    N_P2 = sum(index_assign * (_tb_tgt["priority"]==2))
-    N_P3 = sum(index_assign * (_tb_tgt["priority"]==3))
-    N_P4 = sum(index_assign * (_tb_tgt["priority"]==4))
-    N_P5 = sum(index_assign * (_tb_tgt["priority"]==5))
-    N_P6 = sum(index_assign * (_tb_tgt["priority"]==6))
-    N_P7 = sum(index_assign * (_tb_tgt["priority"]==7))
-    N_P8 = sum(index_assign * (_tb_tgt["priority"]==8))
-    N_P9 = sum(index_assign * (_tb_tgt["priority"]==9))
-    N_P999 = sum(index_assign * (_tb_tgt["priority"]==999))
+    N_P0 = sum(index_assign * (_tb_tgt["priority"] == 0))
+    N_P1 = sum(index_assign * (_tb_tgt["priority"] == 1))
+    N_P2 = sum(index_assign * (_tb_tgt["priority"] == 2))
+    N_P3 = sum(index_assign * (_tb_tgt["priority"] == 3))
+    N_P4 = sum(index_assign * (_tb_tgt["priority"] == 4))
+    N_P5 = sum(index_assign * (_tb_tgt["priority"] == 5))
+    N_P6 = sum(index_assign * (_tb_tgt["priority"] == 6))
+    N_P7 = sum(index_assign * (_tb_tgt["priority"] == 7))
+    N_P8 = sum(index_assign * (_tb_tgt["priority"] == 8))
+    N_P9 = sum(index_assign * (_tb_tgt["priority"] == 9))
+    N_P999 = sum(index_assign * (_tb_tgt["priority"] == 999))
 
-    N_P0_ = sum((_tb_tgt["priority"]==0))
-    N_P1_ = sum((_tb_tgt["priority"]==1))
-    N_P2_ = sum((_tb_tgt["priority"]==2))
-    N_P3_ = sum((_tb_tgt["priority"]==3))
-    N_P4_ = sum((_tb_tgt["priority"]==4))
-    N_P5_ = sum((_tb_tgt["priority"]==5))
-    N_P6_ = sum((_tb_tgt["priority"]==6))
-    N_P7_ = sum((_tb_tgt["priority"]==7))
-    N_P8_ = sum((_tb_tgt["priority"]==8))
-    N_P9_ = sum((_tb_tgt["priority"]==9))
-    N_P999_ = sum((_tb_tgt["priority"]==999))
+    N_P0_ = sum((_tb_tgt["priority"] == 0))
+    N_P1_ = sum((_tb_tgt["priority"] == 1))
+    N_P2_ = sum((_tb_tgt["priority"] == 2))
+    N_P3_ = sum((_tb_tgt["priority"] == 3))
+    N_P4_ = sum((_tb_tgt["priority"] == 4))
+    N_P5_ = sum((_tb_tgt["priority"] == 5))
+    N_P6_ = sum((_tb_tgt["priority"] == 6))
+    N_P7_ = sum((_tb_tgt["priority"] == 7))
+    N_P8_ = sum((_tb_tgt["priority"] == 8))
+    N_P9_ = sum((_tb_tgt["priority"] == 9))
+    N_P999_ = sum((_tb_tgt["priority"] == 999))
 
     N_Pall = len(lst_tgtID_assign)
 
-    print(f"{ra}, {dec}, {0.0}, {N_Pall}/{len(_tb_tgt)}, {N_P0}/{N_P0_}, {N_P1}/{N_P1_}, {N_P2}/{N_P2_}, {N_P3}/{N_P3_}, {N_P4}/{N_P4_}, {N_P5}/{N_P5_}, {N_P6}/{N_P6_}, {N_P7}/{N_P7_}, {N_P8}/{N_P8_}, {N_P9}/{N_P9_}, {N_P999}/{N_P999_}")
-    
+    print(
+        f"{ra}, {dec}, {pa}, {N_Pall}/{len(_tb_tgt)}, {N_P0}/{N_P0_}, {N_P1}/{N_P1_}, {N_P2}/{N_P2_}, {N_P3}/{N_P3_}, {N_P4}/{N_P4_}, {N_P5}/{N_P5_}, {N_P6}/{N_P6_}, {N_P7}/{N_P7_}, {N_P8}/{N_P8_}, {N_P9}/{N_P9_}, {N_P999}/{N_P999_}"
+    )
+
     # Define weights: you can adjust these based on your priorities.
     weight_pall = 1.0
     weight_p0 = 0.5
     weight_p999 = 1.10
-    
+
     # We want to maximize the weighted sum; since the optimizer minimizes,
     # we return the negative of the weighted sum.
     score = weight_pall * N_Pall + weight_p0 * N_P0 + weight_p999 * N_P999
     return -score
 
-def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=True, backup=False):
+
+def PPP_centers(
+    _tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=True, backup=False
+):
     # determine pointing centers
     time_start = time.time()
     logger.info(f"[S2] Determine pointing centers started")
@@ -822,7 +902,6 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
         and len(_tb_tgt_) > 0
         and len(ppc_lst) < nPPC
     ):
-        
         psl_id_undone = list(
             set(
                 tb_fh["proposal_id"][
@@ -833,9 +912,10 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
         print(f"The non-complete proposals: {psl_id_undone}")
 
         _tb_tgt_ = _tb_tgt_[
-                (_tb_tgt_["exptime_PPP"] > 0)
-                * np.in1d(_tb_tgt_["proposal_id"], psl_id_undone)
-            ]  # targets not finished        
+            (_tb_tgt_["exptime_PPP"] > 0)
+            * np.in1d(_tb_tgt_["proposal_id"], psl_id_undone)
+        ]  # targets not finished
+        _tb_tgt_["priority"][_tb_tgt_["exptime_done"] > 0] = 999
 
         tb_tgt_t_group = target_DBSCAN(_tb_tgt_, 1.38)
 
@@ -849,16 +929,22 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
         #"""
 
         initial_guess = [_tb_tgt_t_["ra"][0], _tb_tgt_t_["dec"][0]]
-        result = minimize(objective1, initial_guess, args=(_tb_tgt_t_,), method='Nelder-Mead',options={'xatol': 0.01, 'fatol': 0.001})
+        result = minimize(
+            objective1,
+            initial_guess,
+            args=(_tb_tgt_t_,),
+            method="Nelder-Mead",
+            options={"xatol": 0.01, "fatol": 0.001},
+        )
         print(result.x)
         ppc_ra_, ppc_dec_ = result.x[0], result.x[1]
         ppc_pa_ = 0.0
 
-        index_ = PFS_FoV(
-                ppc_ra_, ppc_dec_, ppc_pa_, _tb_tgt_
-            ) 
+        index_ = PFS_FoV(ppc_ra_, ppc_dec_, ppc_pa_, _tb_tgt_)
 
-        lst_tgtID_assign = netflowRun4PPC(_tb_tgt_[list(index_)], ppc_ra_, ppc_dec_, ppc_pa_)
+        lst_tgtID_assign = netflowRun4PPC(
+            _tb_tgt_[list(index_)], ppc_ra_, ppc_dec_, ppc_pa_
+        )
 
         iter_tem = 0
         while len(lst_tgtID_assign) == 0 and iter_tem < 2:
@@ -879,8 +965,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
         lst_pslID_assign = [ii.split("_")[0] for ii in lst_tgtID_assign]
         pslID_ = sorted(set(lst_pslID_assign))
         pslID_n = {
-            tt: lst_pslID_assign.count(tt) * single_exptime_ / 3600.0
-            for tt in pslID_
+            tt: lst_pslID_assign.count(tt) * single_exptime_ / 3600.0 for tt in pslID_
         }
 
         print(f"{ppc_ra_}, {ppc_dec_}, {len(lst_pslID_assign)}")
@@ -896,40 +981,42 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
                     sum(pslID_n.values()) / sum(FH_goal),
                     len(lst_pslID_assign) / 2394.0,
                     lst_tgtID_assign,
-                ]
-            )
+                ],
+                dtype=object,
+            ),
         )
         # ppc_id, ppc_ra, ppc_dec, ppc_pa, ppc_weight, ppc_fh, ppc_FE
 
         _tb_tgt_["exptime_PPP"][
-                index_assign
-            ] -= single_exptime_  # targets in the PPC observed with single_exptime sec
-
-        _tb_tgt_["exptime_done"][
             index_assign
-        ] += single_exptime_
-        
-        _tb_tgt_["priority"][_tb_tgt_["exptime_done"]>0] = 999
+        ] -= single_exptime_  # targets in the PPC observed with single_exptime sec
+
+        _tb_tgt_["exptime_done"][index_assign] += single_exptime_
+
+        _tb_tgt_["priority"][_tb_tgt_["exptime_done"] > 0] = 999
 
         for tt in list(pslID_n.keys()):
-            tb_fh["N_psl"].data[tb_fh["proposal_id"] == tt] = sum(_tb_tgt["proposal_id"] == tt)
+            tb_fh["N_psl"].data[tb_fh["proposal_id"] == tt] = sum(
+                _tb_tgt["proposal_id"] == tt
+            )
             tb_fh["FH_done"].data[tb_fh["proposal_id"] == tt] += pslID_n[tt]
             tb_fh["N_done"].data[tb_fh["proposal_id"] == tt] += sum(
                 (_tb_tgt_["exptime_PPP"] <= 0) * (_tb_tgt_["proposal_id"] == tt)
             )
             tb_fh["N_obs"].data[tb_fh["proposal_id"] == tt] = sum(
-                (_tb_tgt_["exptime_PPP"] < _tb_tgt_["exptime"]) * (_tb_tgt_["proposal_id"] == tt)
+                (_tb_tgt_["exptime_PPP"] < _tb_tgt_["exptime"])
+                * (_tb_tgt_["proposal_id"] == tt)
             )
 
-        n_uncom1 = sum(_tb_tgt_["exptime_done"]>0)
+        n_uncom1 = sum(_tb_tgt_["exptime_done"] > 0)
         _tb_tgt_ = _tb_tgt_[_tb_tgt_["exptime_PPP"] > 0]  # targets not finished
-        n_uncom2 = sum(_tb_tgt_["exptime_done"]>0)
-        
+        n_uncom2 = sum(_tb_tgt_["exptime_done"] > 0)
+
         print(
             f"PPC_{len(ppc_lst):3d}: {len(_tb_tgt)-len(_tb_tgt_):5d}/{len(_tb_tgt):10d} targets are finished (w={weight_tem_tot:.2f}). (partial = {n_uncom1}, {n_uncom2})"
         )
         Table.pprint_all(tb_fh)
-        
+
     if len(ppc_lst) > nPPC:
         ppc_lst_fin = sorted(ppc_lst, key=lambda x: x[4], reverse=True)[:nPPC]
 
@@ -946,75 +1033,82 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
     nPPC = len(ppc_lst_fin)
     resol = _tb_tgt["resolution"][0]
     if backup:
-        ppc_code = [f"que_{resol}_{datetime.now().strftime('%y%m%d')}_{int(nn + 1)}_backup" for nn in range(nPPC)]
+        ppc_code = [
+            f"que_{resol}_{datetime.now().strftime('%y%m%d')}_{int(nn + 1)}_backup"
+            for nn in range(nPPC)
+        ]
     else:
-        ppc_code = [f"que_{resol}_{datetime.now().strftime('%y%m%d')}_{int(nn + 1)}" for nn in range(nPPC)]
-    ppc_ra = ppc_lst_fin[:,1]
-    ppc_dec = ppc_lst_fin[:,2]
-    ppc_pa = ppc_lst_fin[:,3]
+        ppc_code = [
+            f"que_{resol}_{datetime.now().strftime('%y%m%d')}_{int(nn + 1)}"
+            for nn in range(nPPC)
+        ]
+    ppc_ra = ppc_lst_fin[:, 1]
+    ppc_dec = ppc_lst_fin[:, 2]
+    ppc_pa = ppc_lst_fin[:, 3]
     ppc_equinox = ["J2000"] * nPPC
     ppc_priority = weight_for_qplan
     ppc_priority_usr = weight_for_qplan
     ppc_exptime = [900.0] * nPPC
     ppc_totaltime = [1200.0] * nPPC
     ppc_resolution = [resol] * nPPC
-    ppc_fibAlloFrac = ppc_lst_fin[:,-2]
-    ppc_tgtAllo = ppc_lst_fin[:,-1]
+    ppc_fibAlloFrac = ppc_lst_fin[:, -2]
+    ppc_tgtAllo = ppc_lst_fin[:, -1]
     ppc_comment = [""] * nPPC
 
     ppcList = Table(
-            [
-                ppc_code,
-                ppc_ra,
-                ppc_dec,
-                ppc_pa,
-                ppc_equinox,
-                ppc_priority,
-                ppc_priority_usr,
-                ppc_exptime,
-                ppc_totaltime,
-                ppc_resolution,
-                ppc_fibAlloFrac,
-                ppc_tgtAllo,
-                ppc_comment,
-            ],
-            names=[
-                "ppc_code",
-                "ppc_ra",
-                "ppc_dec",
-                "ppc_pa",
-                "ppc_equinox",
-                "ppc_priority",
-                "ppc_priority_usr",
-                "ppc_exptime",
-                "ppc_totaltime",
-                "ppc_resolution",
-                "ppc_fiber_usage_frac",
-                "ppc_allocated_targets",
-                "ppc_comment",
-            ],
-            dtype=[
-                np.str_,
-                np.float64,
-                np.float64,
-                np.float64,
-                np.str_,
-                np.float64,
-                np.float64,
-                np.float64,
-                np.float64,
-                np.str_,
-                np.float64,
-                object,
-                np.str_,
-            ],
-        )
-        
+        [
+            ppc_code,
+            ppc_ra,
+            ppc_dec,
+            ppc_pa,
+            ppc_equinox,
+            ppc_priority,
+            ppc_priority_usr,
+            ppc_exptime,
+            ppc_totaltime,
+            ppc_resolution,
+            ppc_fibAlloFrac,
+            ppc_tgtAllo,
+            ppc_comment,
+        ],
+        names=[
+            "ppc_code",
+            "ppc_ra",
+            "ppc_dec",
+            "ppc_pa",
+            "ppc_equinox",
+            "ppc_priority",
+            "ppc_priority_usr",
+            "ppc_exptime",
+            "ppc_totaltime",
+            "ppc_resolution",
+            "ppc_fiber_usage_frac",
+            "ppc_allocated_targets",
+            "ppc_comment",
+        ],
+        dtype=[
+            np.str_,
+            np.float64,
+            np.float64,
+            np.float64,
+            np.str_,
+            np.float64,
+            np.float64,
+            np.float64,
+            np.float64,
+            np.str_,
+            np.float64,
+            object,
+            np.str_,
+        ],
+    )
+
     logger.info(
         f"[S2] Determine pointing centers done ( nppc = {len(ppc_lst_fin):.0f}; takes {round(time.time()-time_start,3)} sec)"
     )
 
     return ppc_lst_fin, ppcList
+
 
 def ppc_DBSCAN(_tb_tgt):
     # separate pointings into different group (skip due to FH upper limit -24-02-07; NEED TO FIX)
@@ -1039,6 +1133,7 @@ def ppc_DBSCAN(_tb_tgt):
     #"""
 
     return np.array([ppc_xy])
+
 
 def sam2netflow(_tb_tgt, for_ppc=False):
     # put targets to the format which can be read by netflow
@@ -1081,7 +1176,7 @@ def sam2netflow(_tb_tgt, for_ppc=False):
         _tgt_lst_psl_id.append("sci_" + tgt_proposal_id_ + "_P" + str(int(int_)))
         int_ += 1
         #"""
-          
+
         tgt_lst_netflow.append(
             nf.ScienceTarget(
                 tgt_id_,
@@ -1103,11 +1198,9 @@ def sam2netflow(_tb_tgt, for_ppc=False):
 
         for psl_id_ in psl_id:
             tt_ = tuple([tt for tt in _tgt_lst_psl_id if psl_id_ in tt])
-            fh_ = _tb_tgt[_tb_tgt["proposal_id"] == psl_id_][
-                    "allocated_time"
-                ][0]
+            fh_ = _tb_tgt[_tb_tgt["proposal_id"] == psl_id_]["allocated_time"][0]
             tgt_psl_FH_tac_[tt_] = fh_
-            
+
             print(f"{psl_id_}: FH_limit = {tgt_psl_FH_tac_[tt_]:.2f}")
     #'''
 
@@ -1303,7 +1396,9 @@ def netflowRun_single(
 
             ncoll = 0
             for ivis, (vis, tp) in enumerate(zip(res, tpos)):
-                selectedTargets = np.full(len(bench.cobras.centers), TargetGroup.NULL_TARGET_POSITION)
+                selectedTargets = np.full(
+                    len(bench.cobras.centers), TargetGroup.NULL_TARGET_POSITION
+                )
                 ids = np.full(len(bench.cobras.centers), TargetGroup.NULL_TARGET_ID)
                 for tidx, cidx in vis.items():
                     selectedTargets[cidx] = tp[tidx]
@@ -1312,9 +1407,7 @@ def netflowRun_single(
                     if selectedTargets[i] != TargetGroup.NULL_TARGET_POSITION:
                         dist = np.abs(selectedTargets[i] - bench.cobras.centers[i])
 
-                simulator = CollisionSimulator(
-                    bench, TargetGroup(selectedTargets, ids)
-                )
+                simulator = CollisionSimulator(bench, TargetGroup(selectedTargets, ids))
                 simulator.run()
                 if np.any(simulator.endPointCollisions):
                     logger.error(
@@ -1361,8 +1454,8 @@ def netflowRun_single(
 
         prob.solve()
 
-        #status = prob._prob.status  # or prob.getStatus() / prob.solverStatus, etc.
-        #print("Model status:", status)
+        # status = prob._prob.status  # or prob.getStatus() / prob.solverStatus, etc.
+        # print("Model status:", status)
 
         res = [{} for _ in range(min(nvisit, len(Telra)))]
         for k1, v1 in prob._vardict.items():
@@ -1399,6 +1492,7 @@ def netflowRun_nofibAssign(
         for_ppc,
     )
     return res, telescope, tgt_lst_netflow
+
 
 def netflowRun(
     _tb_tgt,
@@ -1490,7 +1584,7 @@ def netflowRun(
                 ppc_code_ = f"que_{_tb_tgt['resolution'][0]}_{datetime.now().strftime('%y%m%d')}_{int(i + 1)}_backup"
             else:
                 ppc_code_ = f"que_{_tb_tgt['resolution'][0]}_{datetime.now().strftime('%y%m%d')}_{int(i + 1)}"
-                
+
             ppc_lst.append(
                 [
                     ppc_code_,
@@ -1586,6 +1680,7 @@ def netflowRun4PPC(
 
     return tgt_assign_id_lst
 
+
 def netflowAssign(_tb_tgt, _tb_ppc):
     # check fiber assignment of targets
     if len(_tb_ppc) == 0:
@@ -1629,11 +1724,11 @@ def netflow_iter(
     if _tb_tgt.meta["PPC_origin"] == "usr":
         return _tb_ppc_netflow
 
-    #"""
+    # """
     FH_goal = _tb_tgt["allocated_time"].data[0]
     FH_done = sum(_tb_tgt["exptime_assign"]) / 3600.0
     print(f"FH_goal = {FH_goal}, FH_done = {FH_done}")
-    while FH_done > FH_goal and mode=="queue": # reduce Nppc only for queue modes
+    while FH_done > FH_goal and mode == "queue":  # reduce Nppc only for queue modes
         ppc_lst = [
             [0, tt["ppc_ra"], tt["ppc_dec"], tt["ppc_pa"], tt["ppc_fiber_usage_frac"]]
             for tt in _tb_ppc_netflow
@@ -1656,10 +1751,10 @@ def netflow_iter(
         FH_done = sum(_tb_tgt["exptime_assign"]) / 3600.0
 
         print(FH_done, np.mean(_tb_ppc_netflow_["ppc_fiber_usage_frac"]))
-        
+
         if FH_done > FH_goal * 0.95:
             _tb_ppc_netflow = _tb_ppc_netflow_
-    #"""
+    # """
 
     """ skip due to FH upper limit -24-02-07 NEED TO FIX
     #  select non-assigned targets --> PPC determination --> netflow --> if no fibre assigned: shift PPC
@@ -2084,9 +2179,9 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/", backup=False):
         ],
     )
 
-    #ppcList.write(
+    # ppcList.write(
     #    os.path.join(dirName, "ppcList.ecsv"), format="ascii.ecsv", overwrite=True
-    #)
+    # )
 
     ob_code = _tb_tgt_tot["ob_code"].data
     ob_obj_id = _tb_tgt_tot["obj_id"].data
@@ -2235,13 +2330,15 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/", backup=False):
         obList.write(
             os.path.join(dirName, "obList.ecsv"), format="ascii.ecsv", overwrite=True
         )
-    
+
         np.save(os.path.join(dirName, "obj_allo_tot.npy"), _tb_ppc_tot)
     else:
         obList.write(
-            os.path.join(dirName, "obList_backup.ecsv"), format="ascii.ecsv", overwrite=True
+            os.path.join(dirName, "obList_backup.ecsv"),
+            format="ascii.ecsv",
+            overwrite=True,
         )
-    
+
         np.save(os.path.join(dirName, "obj_allo_tot_backup.npy"), _tb_ppc_tot)
 
 
@@ -2354,25 +2451,27 @@ def run(
 
     today = date.today().strftime("%Y%m%d")
     if backup:
-        tb_queuedb.write(os.path.join(dirName, f"tgt_queueDB_{today}_backup.csv"), overwrite=True)
+        tb_queuedb.write(
+            os.path.join(dirName, f"tgt_queueDB_{today}_backup.csv"), overwrite=True
+        )
     else:
-        tb_queuedb.write(os.path.join(dirName, f"tgt_queueDB_{today}.csv"), overwrite=True)
+        tb_queuedb.write(
+            os.path.join(dirName, f"tgt_queueDB_{today}.csv"), overwrite=True
+        )
 
     randomseed = 2
 
     TraCollision = False
     multiProcess = True
 
-    #"""
+    # """
     # LR--------------------------------------------
-    #ppc_lst_l = PPP_centers(
+    # ppc_lst_l = PPP_centers(
     #    tb_tgt_l, nppc_l, [para_sci_l, para_exp_l, para_n_l], randomseed, multiProcess
-    #)
+    # )
 
-    ppc_lst_l, tb_ppcList_l = PPP_centers(
-        tb_tgt_l, nppc_l, backup=backup
-    )
-    
+    ppc_lst_l, tb_ppcList_l = PPP_centers(tb_tgt_l, nppc_l, backup=backup)
+
     tb_tgt_l1 = Table.copy(tb_tgt_l)
     tb_tgt_l1.meta["PPC"] = ppc_lst_l
 
@@ -2390,12 +2489,10 @@ def run(
     tb_tgt_l_fin = netflowAssign(tb_tgt_l1, tb_ppc_l)
 
     # MR--------------------------------------------
-    #ppc_lst_m = PPP_centers(
+    # ppc_lst_m = PPP_centers(
     #    tb_tgt_m, nppc_m, [para_sci_m, para_exp_m, para_n_m], randomseed, multiProcess
-    #)
-    ppc_lst_m, tb_ppcList_m = PPP_centers(
-        tb_tgt_m, nppc_m, backup=backup
-    )
+    # )
+    ppc_lst_m, tb_ppcList_m = PPP_centers(tb_tgt_m, nppc_m, backup=backup)
 
     tb_tgt_m1 = Table.copy(tb_tgt_m)
     tb_tgt_m1.meta["PPC"] = ppc_lst_m
@@ -2430,11 +2527,17 @@ def run(
                 logger.warning("no allocated time for LR")
         else:
             logger.error("Please specify n_pcc_l or n_pcc_m")
-    #"""
+    # """
 
     if not backup:
-        tb_ppc_tot.write(os.path.join(dirName, f"ppcList.ecsv"), format="ascii.ecsv", overwrite=True) 
+        tb_ppc_tot.write(
+            os.path.join(dirName, f"ppcList.ecsv"), format="ascii.ecsv", overwrite=True
+        )
     else:
-        tb_ppc_tot.write(os.path.join(dirName, f"ppcList_backup.ecsv"), format="ascii.ecsv", overwrite=True) 
-    
+        tb_ppc_tot.write(
+            os.path.join(dirName, f"ppcList_backup.ecsv"),
+            format="ascii.ecsv",
+            overwrite=True,
+        )
+
     output(tb_ppc_tot, tb_tgt_tot, dirName=dirName, backup=backup)
