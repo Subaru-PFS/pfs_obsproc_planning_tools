@@ -95,7 +95,7 @@ def visibility_checker(tb_tgt, obstimes, start_time_list, stop_time_list):
 
     tb_tgt["is_visible"] = False
 
-    for i in range(len(tb_tgt)):
+    for i in range(1):#len(tb_tgt)):
         target = entity.StaticTarget(
             name=tb_tgt["ob_code"][i],
             ra=tb_tgt["ra"][i],
@@ -107,9 +107,15 @@ def visibility_checker(tb_tgt, obstimes, start_time_list, stop_time_list):
         )  # SEC
 
         t_obs_ok = 0
+        today = date.today().strftime("%Y-%m-%d")
+        date_today = parser.parse(f"{today} 12:00 HST")
 
-        for date in obstimes:
-            date_t = parser.parse(f"{date} 12:00 HST")
+        for date_i in obstimes:
+            date_t = parser.parse(f"{date_i} 12:00 HST")
+            if date_today > date_t:
+                # skip past dates
+                continue
+            
             observer.set_date(date_t)
             default_start_time = observer.evening_twilight_18()
             default_stop_time = observer.morning_twilight_18()
@@ -119,38 +125,68 @@ def visibility_checker(tb_tgt, obstimes, start_time_list, stop_time_list):
 
             for item in start_time_list:
                 next_date = (
-                    datetime.strptime(date, "%Y-%m-%d") + timedelta(days=1)
+                    datetime.strptime(date_i, "%Y-%m-%d") + timedelta(days=1)
                 ).strftime("%Y-%m-%d")
-                if (date in item) and parser.parse(f"{item} HST") > default_start_time:
+                if (date_i in item) and parser.parse(f"{item} HST") >= default_start_time:
                     start_override = parser.parse(f"{item} HST")
+                    start_time_list.remove(item)
+                    break
+                elif (
+                    (date_i in item)
+                    and (parser.parse(f"{item} HST") < default_start_time)
+                    and (
+                        parser.parse(f"{item} HST")
+                        > default_start_time - timedelta(hours=1)
+                    )
+                ):
+                    start_override = default_start_time
+                    start_time_list.remove(item)
+                    break
                 elif (next_date in item) and parser.parse(
                     f"{item} HST"
-                ) < default_stop_time:
+                ) <= default_stop_time:
                     start_override = parser.parse(f"{item} HST")
-
+                    start_time_list.remove(item)
+                    break
+    
             for item in stop_time_list:
                 next_date = (
-                    datetime.strptime(date, "%Y-%m-%d") + timedelta(days=1)
+                    datetime.strptime(date_i, "%Y-%m-%d") + timedelta(days=1)
                 ).strftime("%Y-%m-%d")
-                if (date in item) and parser.parse(f"{item} HST") > default_start_time:
+                if (date_i in item) and parser.parse(f"{item} HST") >= default_start_time:
                     stop_override = parser.parse(f"{item} HST")
+                    stop_time_list.remove(item)
+                    break
                 elif (next_date in item) and parser.parse(
                     f"{item} HST"
-                ) < default_stop_time:
+                ) <= default_stop_time:
                     stop_override = parser.parse(f"{item} HST")
-
+                    stop_time_list.remove(item)
+                    break
+                elif (
+                    (next_date in item)
+                    and (parser.parse(f"{item} HST") > default_stop_time)
+                    and (
+                        parser.parse(f"{item} HST")
+                        <= default_stop_time + timedelta(hours=1)
+                    )
+                ):
+                    stop_override = default_stop_time
+                    stop_time_list.remove(item)
+                    break
+    
             if start_override is not None:
                 start_time = start_override
             else:
                 start_time = default_start_time
-
+    
             if stop_override is not None:
                 stop_time = stop_override
             else:
                 stop_time = default_stop_time
 
             if i == 0:
-                logger.info(f"date: {date}, start={start_time}, stop={stop_time}")
+                logger.info(f"date: {date_i}, start={start_time}, stop={stop_time}")
 
             key = target
             obs_ok, t_start, t_stop = eph_cache.observable(
@@ -194,8 +230,105 @@ def visibility_checker(tb_tgt, obstimes, start_time_list, stop_time_list):
 
     return tb_tgt
 
+def queryQueue(psl_id_list, DBPath_qDB, tb_queuedb_filename):
+    """
+    Query queue database for executed observations and exposure times per proposal.
 
-def readTarget(mode, para):
+    Parameters
+    ----------
+    psl_id_list : list[str]
+        List of proposal IDs to query (e.g., ["S25B-024QN", "S25A-043QF"]).
+    DBPath_qDB : str
+        Path to the QueueDB configuration file.
+    tb_queuedb_filename : str
+        Path to save/load the cached results table (ECSV).
+
+    Returns
+    -------
+    tb_queuedb : astropy.table.Table
+        Table containing exposure time information per observation.
+    """
+    # --- try reading cached result ---
+    if os.path.exists(tb_queuedb_filename):
+        try:
+            tb_queuedb = Table.read(tb_queuedb_filename)
+            logger.info(f"Loaded cached queue table: {tb_queuedb_filename}")
+            return tb_queuedb
+        except Exception as e:
+            logger.info("[S1] Querying the qdb (no cache found)")
+
+    qdb = q_db.QueueDatabase(logger_qplan) 
+    qdb.read_config(DBPath_qDB) 
+    qdb.connect() 
+    qa = q_db.QueueAdapter(qdb) 
+    qq = q_query.QueueQuery(qa, use_cache=False)
+
+    # --- collect results ---
+    results = []
+    counter = 0
+
+    for psl_id in psl_id_list:
+        logger.info(f"Querying qDB for {psl_id}")
+        ex_obs_list = qq.get_executed_obs_by_proposal(psl_id)
+        if not ex_obs_list:
+            continue
+
+        for ex_ob in ex_obs_list:
+            exps = qq.get_exposures(ex_ob)
+            ob = qq.get_ob(ex_ob.ob_key)
+            arm = ob.inscfg.qa_reference_arm
+
+            exptime_b = sum(exp.effective_exptime_b or 0 for exp in exps)
+            exptime_r = sum(exp.effective_exptime_r or 0 for exp in exps)
+            exptime_m = sum(exp.effective_exptime_m or 0 for exp in exps)
+            exptime_n = sum(exp.effective_exptime_n or 0 for exp in exps)
+
+            # select arm-specific exposure time
+            arm_map = {"b": exptime_b, "r": exptime_r, "m": exptime_m, "n": exptime_n}
+            exptime_selected = arm_map.get(arm, 0)
+
+            if exptime_selected >= 0:
+                counter += 1
+                results.append([
+                    counter,
+                    psl_id,
+                    ex_ob.ob_key[1],
+                    arm,
+                    exptime_selected,
+                    exptime_b,
+                    exptime_r,
+                    exptime_m,
+                    exptime_n,
+                    len(exps) * 450.0,  # nominal exposure time per OB
+                ])
+
+    if not results:
+        logger.warning("No executed observations found in any proposal.")
+        return Table()
+
+    # --- create and save table ---
+    tb_queuedb = Table(
+        np.array(results),
+        names=[
+            "N",
+            "psl_id",
+            "ob_code",
+            "ref_arm",
+            "eff_exptime_done_real",
+            "eff_exptime_done_real_b",
+            "eff_exptime_done_real_r",
+            "eff_exptime_done_real_m",
+            "eff_exptime_done_real_n",
+            "exptime_done_real",
+        ],
+    )
+
+    tb_queuedb.write(tb_queuedb_filename, overwrite=True)
+
+    return tb_queuedb
+
+
+def readTarget(mode, para, tb_queuedb):
     """Read target list including:
        'ob_code' 'ra' 'dec' 'priority' 'exptime' 'exptime_tac' 'resolution' 'proposal_id' 'rank' 'grade' 'allocated_time'
 
@@ -372,8 +505,6 @@ def readTarget(mode, para):
 
             if proposalId == "S25B-126QN":
                 tb_tgt = tb_tgt[tb_tgt["priority"] <= 3]
-            if proposalId == "S25B-071QN":
-                tb_tgt = tb_tgt[tb_tgt["ra"] <= 50]
 
             """
             for col in ["psf_flux_g","psf_flux_r", "psf_flux_i", "psf_flux_z", "psf_flux_y"]:
@@ -419,9 +550,9 @@ def readTarget(mode, para):
 
     # for grade c programs, set completion rate as 70% as upper limit: no need as tgt DB has updated allocated_time_tac
     """
-    proposalid = ["S25B-086QN", "S25B-056QN", "S25B-092QN", "S25B-134QN", "S25B-120QN", "S25B-047QN", "S25B-126QN", "S25B-125QN", "S25B-136QN", "S25B-048QN"]
+    proposalid = ["S25A-043QF", "S25A-119QF", "S25A-111QF", "S25A-116QF", "S25A-126QF", "S25A-017QF", "S25A-019QF", "S25A-112QF", "S25A-030QF", "S25A-034QF"]
     mask = np.isin(tb_tgt["proposal_id"], proposalid)
-    tb_tgt["allocated_time_tac"][mask] = tb_tgt["allocated_time_tac"][mask] * 0.7
+    tb_tgt["allocated_time_tac"][mask] = 5000.0
     #"""
 
     if len(set(tb_tgt["single_exptime"])) > 1:
@@ -439,110 +570,32 @@ def readTarget(mode, para):
     tb_tgt.meta["PPC_origin"] = "auto"
 
     if mode == "queue":
-        tb_tgt["allocated_time_done"] = 0
-        tb_tgt["allocated_time"] = 0
+        tb_tgt["allocated_time_done"] = 0.0
+        tb_tgt["allocated_time"] = 0.0
 
         # list of all psl_id
         psl_id = sorted(set(tb_tgt["proposal_id"]))
 
         # """
         # connect with queueDB
-        qdb = q_db.QueueDatabase(logger_qplan)
-        qdb.read_config(para["DBPath_qDB"])
-        qdb.connect()
-        qa = q_db.QueueAdapter(qdb)
-        qq = q_query.QueueQuery(qa, use_cache=False)
+        # join on the key columns
+        tb_tgt = join(tb_tgt, tb_queuedb,
+                        keys_left=["proposal_id", "ob_code"],
+                        keys_right=["psl_id", "ob_code"],
+                        join_type="left")
+        
+        exptime_usr = np.ma.filled(tb_tgt["exptime_usr"], 0.0)
+        exptime_done_real = np.ma.filled(tb_tgt["eff_exptime_done_real"], 0.0)
 
-        # determine observed exptime
+        exptime_usr = exptime_usr.astype(float)
+        exptime_done_real = exptime_done_real.astype(float)
+        
+        tb_tgt["exptime_done"] = np.minimum(exptime_usr, exptime_done_real)
+
+        tb_tgt.rename_column("ob_code_1", "ob_code")
+        cols_to_remove = [c for c in tb_tgt.colnames if c in tb_queuedb.colnames and "ob_code" not in c]
+        tb_tgt.remove_columns(cols_to_remove)
         # """
-        nn = 0
-        tt = []
-        for psl_id_ in psl_id:
-            ex_obs = qq.get_executed_obs_by_proposal(psl_id_)
-            if len(ex_obs) == 0:
-                continue
-            for ex_ob in ex_obs:
-                exps = qq.get_exposures(ex_ob)
-                ob = qq.get_ob(ex_ob.ob_key)
-                arm = ob.inscfg.qa_reference_arm
-
-                exptime_exe_b = sum(exp.effective_exptime_b or 0 for exp in exps)
-                exptime_exe_r = sum(exp.effective_exptime_r or 0 for exp in exps)
-                exptime_exe_m = sum(exp.effective_exptime_m or 0 for exp in exps)
-                exptime_exe_n = sum(exp.effective_exptime_n or 0 for exp in exps)
-
-                if arm == "r":
-                    exptime_exe = sum(exp.effective_exptime_r or 0 for exp in exps)
-                elif arm == "b":
-                    exptime_exe = sum(exp.effective_exptime_b or 0 for exp in exps)
-                elif arm == "n":
-                    exptime_exe = sum(exp.effective_exptime_n or 0 for exp in exps)
-                elif arm == "m":
-                    exptime_exe = sum(exp.effective_exptime_m or 0 for exp in exps)
-
-                msk = (tb_tgt["proposal_id"] == ex_ob.ob_key[0]) & (
-                    tb_tgt["ob_code"] == ex_ob.ob_key[1]
-                )
-
-                if len(tb_tgt[msk]) == 0:
-                    continue
-
-                exptime_usr = tb_tgt[msk]["exptime_usr"].data[0]
-                exptime_exe_fin = min(
-                    exptime_usr, exptime_exe
-                )  # ignore over-observation
-                if exptime_exe >= 0:
-                    nn += 1
-                    tt.append(
-                        [
-                            nn,
-                            psl_id_,
-                            ex_ob.ob_key[1],
-                            exptime_usr,
-                            arm,
-                            exptime_exe,
-                            exptime_exe_b,
-                            exptime_exe_r,
-                            exptime_exe_m,
-                            exptime_exe_n,
-                            exptime_exe_fin,
-                            len(exps) * 450,
-                        ]
-                    )
-                tb_tgt["exptime_done"][msk] = exptime_exe_fin
-
-        tb_queuedb = Table(
-            np.array(tt),
-            names=[
-                "N",
-                "psl_id",
-                "ob_code",
-                "exptime",
-                "ref_arm",
-                "eff_exptime_done_real",
-                "eff_exptime_done_real_b",
-                "eff_exptime_done_real_r",
-                "eff_exptime_done_real_m",
-                "eff_exptime_done_real_n",
-                "eff_exptime_done_rec",
-                "exptime_done_real",
-            ],
-        )
-        # """
-
-        """
-        tb_queuedb = Table.read("/home/wanqqq/workDir_pfs/run_2506/S25A-queue/output_20250622/ppp/tgt_queueDB_20250622_backup.csv")
-
-        for tb_i in tb_queuedb:
-            msk = (tb_tgt["proposal_id"] == tb_i["psl_id"]) & (tb_tgt["ob_code"] == tb_i["ob_code"])
-            if len(tb_tgt[msk])==0:continue
-            exptime_usr = tb_tgt["exptime_usr"][msk].data[0]
-            exptime_exe = tb_i["eff_exptime_done_rec"]
-            exptime_exe_fin = min(
-                exptime_usr, exptime_exe
-            )  # ignore over-observation
-            tb_tgt["exptime_done"][msk] = exptime_exe_fin
-        #"""
 
         tb_tgt["exptime"] = tb_tgt["exptime_usr"] - tb_tgt["exptime_done"]
 
@@ -605,6 +658,9 @@ def readTarget(mode, para):
         )
 
         # only for 064 since too huge list, FIX needed
+        #msk = np.in1d(tb_tgt["proposal_id"], ["S25B-049QN"]) * (tb_tgt["ra"] > 100)
+        #tb_tgt = tb_tgt[~msk]
+
         """
         if proposalId == 'S25B-126QN':
             tb_tgt = tb_tgt[tb_tgt["priority"]<=3]
@@ -700,22 +756,17 @@ def sciRank_pri(_tb_tgt):
 
     _tb_tgt["rank_fin"] = np.exp(SciUsr_Ranktot)
 
-    weight_max = max(_tb_tgt["rank_fin"])
-    _tb_tgt["rank_fin"][
-        (_tb_tgt["exptime_done"] > 0) | (_tb_tgt["exptime_PPP"] < _tb_tgt["exptime"])
-    ] += weight_max
-
     return _tb_tgt
 
 
-"""
+#"""
 def weight(_tb_tgt, para_sci, para_exp, para_n):
     # calculate weights of targets (higher weights mean more important)
     if len(_tb_tgt) == 0:
         return _tb_tgt
 
     weight_t = (
-        pow(para_sci, _tb_tgt["rank_fin"])
+        pow(_tb_tgt["rank_fin"], para_sci)
         * pow(_tb_tgt["exptime_PPP"] / _tb_tgt.meta["single_exptime"], para_exp)
         * pow(_tb_tgt["local_count"], para_n)
     )
@@ -725,6 +776,11 @@ def weight(_tb_tgt, para_sci, para_exp, para_n):
 
     weight_max = max(_tb_tgt["weight"])
     _tb_tgt["weight"][
+        (_tb_tgt["exptime_done"] > 0) | (_tb_tgt["exptime_PPP"] < _tb_tgt["exptime"])
+    ] += weight_max
+
+    weight_max = max(_tb_tgt["rank_fin"])
+    _tb_tgt["rank_fin"][
         (_tb_tgt["exptime_done"] > 0) | (_tb_tgt["exptime_PPP"] < _tb_tgt["exptime"])
     ] += weight_max
 
@@ -768,8 +824,9 @@ def target_DBSCAN(_tb_tgt, sep=1.38):
     for ii in np.array(tgt_pri_ord)[:, 0]:
         tgt_t = _tb_tgt[labels == ii]
         tgt_group.append(tgt_t)
+        psl_ids_str = ", ".join(map(str, set(tgt_t["proposal_id"])))
         print(
-            f'({tgt_t["ra"][0]}, {tgt_t["dec"][0]}): {set(tgt_t["proposal_id"])}, {sum(tgt_t["rank_fin"])}'
+            f'(RA = {tgt_t["ra"][0]}, DEC = {tgt_t["dec"][0]}): {psl_ids_str}, {sum(tgt_t["rank_fin"])}'
         )
 
     return tgt_group
@@ -801,6 +858,88 @@ def PFS_FoV(ppc_ra, ppc_dec, PA, _tb_tgt):
     index_ = np.where(polygon.contains_points(tgt_lst))[0]
 
     return index_
+
+def KDE_xy(_tb_tgt, X, Y):
+    # calculate a single KDE
+    tgt_values = np.vstack((np.deg2rad(_tb_tgt["dec"]), np.deg2rad(_tb_tgt["ra"])))
+    kde = KernelDensity(
+        bandwidth=np.deg2rad(1.38 / 2.0),
+        kernel="linear",
+        algorithm="ball_tree",
+        metric="haversine",
+    )
+    kde.fit(tgt_values.T, sample_weight=_tb_tgt["weight"])
+
+    X1 = np.deg2rad(X)
+    Y1 = np.deg2rad(Y)
+    positions = np.vstack([Y1.ravel(), X1.ravel()])
+    Z = np.reshape(np.exp(kde.score_samples(positions.T)), Y.shape)
+
+    return Z
+
+
+def KDE(_tb_tgt, multiProcesing):
+    # define binning and calculate KDE
+    if len(_tb_tgt) == 1:
+        # if only one target, set it as the peak
+        return (
+            _tb_tgt["ra"].data[0],
+            _tb_tgt["dec"].data[0],
+            np.nan,
+            _tb_tgt["ra"].data[0],
+            _tb_tgt["dec"].data[0],
+        )
+    else:
+        # determine the binning for the KDE cal.
+        # set a bin width of 0.5 deg in ra&dec if the sample spans over a wide area (>50 degree)
+        # give some blank spaces in binning, otherwide KDE will be wrongly calculated
+        ra_low = min(min(_tb_tgt["ra"]) * 0.9, min(_tb_tgt["ra"]) - 1)
+        ra_up = max(max(_tb_tgt["ra"]) * 1.1, max(_tb_tgt["ra"]) + 1)
+        dec_up = max(max(_tb_tgt["dec"]) * 1.1, max(_tb_tgt["dec"]) + 1)
+        dec_low = min(min(_tb_tgt["dec"]) * 0.9, min(_tb_tgt["dec"]) - 1)
+
+        if (max(_tb_tgt["ra"]) - min(_tb_tgt["ra"])) / 100 < 0.5 and (
+            max(_tb_tgt["dec"]) - min(_tb_tgt["dec"])
+        ) / 100 < 0.5:
+            X_, Y_ = np.mgrid[ra_low:ra_up:101j, dec_low:dec_up:101j]
+        elif (max(_tb_tgt["dec"]) - min(_tb_tgt["dec"])) / 100 < 0.5:
+            X_, Y_ = np.mgrid[0:360:721j, dec_low:dec_up:101j]
+        elif (max(_tb_tgt["ra"]) - min(_tb_tgt["ra"])) / 100 < 0.5:
+            X_, Y_ = np.mgrid[ra_low:ra_up:101j, -40:90:261j]
+        else:
+            X_, Y_ = np.mgrid[0:360:721j, -40:90:261j]
+        positions1 = np.vstack([Y_.ravel(), X_.ravel()])
+
+        if multiProcesing:
+            threads_count = 4  # round(multiprocessing.cpu_count() / 2)
+            thread_n = min(
+                threads_count, round(len(_tb_tgt) * 0.5)
+            )  # threads_count=10 in this machine
+
+            with multiprocessing.Pool(thread_n) as p:
+                dMap_ = p.map(
+                    partial(KDE_xy, X=X_, Y=Y_), np.array_split(_tb_tgt, thread_n)
+                )
+
+            Z = sum(dMap_)
+
+        else:
+            Z = KDE_xy(_tb_tgt, X_, Y_)
+
+        # calculate significance level of KDE
+        obj_dis_sig_ = (Z - np.mean(Z)) / np.std(Z)
+        peak_pos = np.where(obj_dis_sig_ == obj_dis_sig_.max())
+
+        if len(peak_pos[0]) == 0 or len(peak_pos[1]) == 0:
+            peak_x = _tb_tgt["ra"].data[0]
+            peak_y = _tb_tgt["dec"].data[0]
+        else:
+            peak_y = positions1[0, peak_pos[1][round(len(peak_pos[1]) * 0.5)]]
+            peak_x = sorted(set(positions1[1, :]))[
+                peak_pos[0][round(len(peak_pos[0]) * 0.5)]
+            ]
+
+        return X_, Y_, obj_dis_sig_, peak_x, peak_y
 
 
 def objective1(params, _tb_tgt):
@@ -864,7 +1003,7 @@ def objective1(params, _tb_tgt):
 
 
 def PPP_centers(
-    _tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=True, backup=False
+    _tb_tgt, nPPC, weight_para=[3, 0, 0], randomseed=0, mutiPro=True, backup=False
 ):
     # determine pointing centers
     time_start = time.time()
@@ -877,6 +1016,9 @@ def PPP_centers(
         return np.array(ppc_lst), Table()
 
     _tb_tgt = sciRank_pri(_tb_tgt)
+    _tb_tgt = count_N(_tb_tgt)
+    para_sci, para_exp, para_n = weight_para
+    _tb_tgt = weight(_tb_tgt, para_sci, para_exp, para_n)
 
     single_exptime_ = _tb_tgt.meta["single_exptime"]
 
@@ -909,7 +1051,12 @@ def PPP_centers(
                 ]
             )
         )
-        print(f"The non-complete proposals: {psl_id_undone}")
+        if psl_id_undone:
+            undone_str = ", ".join(map(str, psl_id_undone))
+            print("-----------------------------------------")
+            print(f"The non-complete proposals: {undone_str}")
+        else:
+            print("All proposals complete.")
 
         _tb_tgt_ = _tb_tgt_[
             (_tb_tgt_["exptime_PPP"] > 0)
@@ -921,14 +1068,18 @@ def PPP_centers(
 
         _tb_tgt_t_ = tb_tgt_t_group[0]
 
-        """
+        #"""
         _df_tgt_t = Table.to_pandas(_tb_tgt_t_)
         n_tgt = min(200, len(_tb_tgt_t_))
         _df_tgt_t = _df_tgt_t.sample(n_tgt, ignore_index=True, random_state=1)
         _tb_tgt_t_1 = Table.from_pandas(_df_tgt_t)  
+
+        _, _, _, peak_x, peak_y = KDE(_tb_tgt_t_1, False)
+
         #"""
 
-        initial_guess = [_tb_tgt_t_["ra"][0], _tb_tgt_t_["dec"][0]]
+        #initial_guess = [_tb_tgt_t_["ra"][0], _tb_tgt_t_["dec"][0]]
+        initial_guess = [peak_x, peak_y]
         result = minimize(
             objective1,
             initial_guess,
@@ -936,7 +1087,7 @@ def PPP_centers(
             method="Nelder-Mead",
             options={"xatol": 0.01, "fatol": 0.001},
         )
-        print(result.x)
+        print(f"The optimal PPC center: {result.x}")
         ppc_ra_, ppc_dec_ = result.x[0], result.x[1]
         ppc_pa_ = 0.0
 
@@ -1032,6 +1183,10 @@ def PPP_centers(
     # write
     nPPC = len(ppc_lst_fin)
     resol = _tb_tgt["resolution"][0]
+
+    #if resol == "M":
+    #    weight_for_qplan = np.linspace(2.0, 10.0, nPPC) # FIX needed!!
+
     if backup:
         ppc_code = [
             f"que_{resol}_{datetime.now().strftime('%y%m%d')}_{int(nn + 1)}_backup"
@@ -2441,23 +2596,19 @@ def run(
     fiberNonAllocationCost=0.0,
     show_plots=False,
     backup=False,
+    conf=None,
 ):
     global bench
     bench = bench_info
 
-    tb_tgt, tb_tgt_l, tb_tgt_m, tb_queuedb, tb_queuedb = readTarget(
-        readtgt_con["mode_readtgt"], readtgt_con["para_readtgt"]
-    )
-
     today = date.today().strftime("%Y%m%d")
-    if backup:
-        tb_queuedb.write(
-            os.path.join(dirName, f"tgt_queueDB_{today}_backup.csv"), overwrite=True
-        )
-    else:
-        tb_queuedb.write(
-            os.path.join(dirName, f"tgt_queueDB_{today}.csv"), overwrite=True
-        )
+    tb_queuedb_filename = os.path.join(dirName, f"tgt_queueDB_{today}.csv")
+    psl_id = conf["ppp"]["proposalIds"] + conf["ppp"]["proposalIds_backup"]
+    tb_queuedb = queryQueue(psl_id, conf["queuedb"]["filepath"], tb_queuedb_filename)
+
+    tb_tgt, tb_tgt_l, tb_tgt_m, tb_queuedb, tb_queuedb = readTarget(
+        readtgt_con["mode_readtgt"], readtgt_con["para_readtgt"], tb_queuedb
+    )
 
     randomseed = 2
 

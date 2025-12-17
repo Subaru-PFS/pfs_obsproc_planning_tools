@@ -1,6 +1,15 @@
+"""Plot utilities for PFS designs.
+
+This module provides plotting helpers to visualize a PFS design (fiber
+positions, guide stars, flux standards, sky fibers, histograms, and AG
+counts). The focus is readability: add docstrings, small helpers, and
+clear inline comments while preserving original behavior.
+"""
+
 # import os,sys,re
 # import math as mt
 import numpy as np
+import re
 
 # from scipy import ndimage
 # from scipy.optimize import curve_fit
@@ -30,6 +39,324 @@ from pfs.utils.fiberids import FiberIds
     TargetType.UNASSIGNED: 4
  """
 
+
+def get_ag_counts(df_ag, threshold=19, radius=245.0):
+    """Compute guide-star counts per camera and positions for annotation.
+
+    This helper returns a tuple (agnum_table, ag_positions) where:
+      - agnum_table is [[total_cam1, total_cam2, ...], [bright_cam1, bright_cam2, ...]]
+      - ag_positions is list of tuples (count, (xpos, ypos)) for annotation in plotting order
+
+    Parameters
+    ----------
+    df_ag : pandas.DataFrame
+        Guide-star table with 'camId' and 'agMag' and 'ag_pfi_x', 'ag_pfi_y' columns.
+    threshold : float
+        Magnitude threshold for considering a guide star 'bright'.
+    radius : float
+        Radial distance from the center where camera labels are placed.
+
+    Returns
+    -------
+    (agnum_table, ag_positions)
+    """
+    agnum_table = []
+    ag_positions = []
+
+    # iterate cameras 0..5 and compute counts and simple label positions
+    for i in range(1, 7):
+        cam_idx = i - 1
+        ang = np.deg2rad(-60 * cam_idx - 9)
+        total = int((df_ag.camId == cam_idx).sum())
+        bright = int(((df_ag.camId == cam_idx) & (df_ag.agMag <= threshold)).sum())
+        agnum_table.append([total, bright])
+        # label positions at circle radius with angle same as original code
+        xpos = radius * np.cos(ang)
+        ypos = radius * np.sin(ang)
+        ag_positions.append((total, (xpos, ypos)))
+
+    return agnum_table, ag_positions
+
+
+# ---------------------- Drawing helpers ----------------------
+def _draw_fov_points(ax, df_fib, df_ag, unfib_bright, c, alpha, s):
+    """Draw scatter points on the FoV axes (unassigned, sky, std, sci, AGs).
+
+    This consolidates the multiple consecutive scatter() calls into a single
+   , well-named helper for readability.
+    """
+    # unassigned (targetType == 4)
+    ax.scatter(
+        df_fib[df_fib.targetType == 4].pfi_x,
+        df_fib[df_fib.targetType == 4].pfi_y,
+        c=c["un"],
+        marker="x",
+        s=s * 1.3,
+        alpha=alpha,
+        lw=1,
+        label=f"UNASSIGNED ({len(df_fib[df_fib.targetType==4].pfi_y)})",
+    )
+
+    # highlight unassigned near bright stars
+    if len(unfib_bright) > 0:
+        ax.scatter(
+            df_fib[df_fib.fiberId.isin(unfib_bright)].pfi_x,
+            df_fib[df_fib.fiberId.isin(unfib_bright)].pfi_y,
+            facecolor="none",
+            edgecolor=c["un_brt"],
+            marker="s",
+            s=s * 2.6,
+            alpha=alpha,
+            lw=1,
+            label=f"nearby bright star ({len(unfib_bright)})",
+        )
+
+    # black spots
+    ax.scatter(
+        df_fib[df_fib.targetType == 10].pfi_x,
+        df_fib[df_fib.targetType == 10].pfi_y,
+        c=c["dot"],
+        marker="o",
+        s=s,
+        alpha=alpha,
+        lw=0,
+        label=f"BLACKSPOT ({len(df_fib[df_fib.targetType==10].pfi_y)})",
+    )
+
+    # sky, fluxstd, science
+    ax.scatter(
+        df_fib[df_fib.targetType == 2].pfi_x,
+        df_fib[df_fib.targetType == 2].pfi_y,
+        c=c["sky"],
+        marker="o",
+        s=s,
+        alpha=alpha,
+        lw=0,
+        label=f"SKY ({len(df_fib[df_fib.targetType==2].pfi_y)})",
+    )
+
+    ax.scatter(
+        df_fib[df_fib.targetType == 3].pfi_x,
+        df_fib[df_fib.targetType == 3].pfi_y,
+        c=c["fstar"],
+        marker="o",
+        s=s * 2.0,
+        alpha=alpha,
+        lw=0,
+        label=f"FLUXSTD ({len(df_fib[df_fib.targetType==3].pfi_y)})",
+    )
+
+    ax.scatter(
+        df_fib[df_fib.targetType == 1].pfi_x,
+        df_fib[df_fib.targetType == 1].pfi_y,
+        c=c["sci"],
+        marker="o",
+        s=s,
+        alpha=alpha,
+        lw=0,
+        label=f"SCIENCE ({len(df_fib[df_fib.targetType==1].pfi_y)})",
+    )
+
+    # special highlight (kept for backward compatibility)
+    mask_special = df_fib.obCode == "M31_30410_R31_02730_v2"
+    if mask_special.any():
+        ax.scatter(
+            df_fib[mask_special].pfi_x,
+            df_fib[mask_special].pfi_y,
+            c="red",
+            marker="o",
+            s=s,
+            alpha=alpha,
+            lw=0,
+        )
+
+    # guide stars
+    ax.scatter(
+        df_ag.ag_pfi_x,
+        df_ag.ag_pfi_y,
+        c=c["ag"],
+        marker="s",
+        s=s,
+        alpha=alpha,
+        lw=0,
+        label="guidestar",
+    )
+
+
+def _draw_sector_lines(ax):
+    """Draw circular section borders and radial sector lines on the FoV plot."""
+    r = 235
+    rs1 = 50
+    rs2 = 132.5
+
+    for rs in [rs1, rs2]:
+        circle = patches.Circle((0, 0), radius=rs, color="navy", fill=False, lw=0.5)
+        ax.add_patch(circle)
+
+    phis = np.radians(np.linspace(0, 360, 6, endpoint=False) + 15 + 90)
+    phis = phis - np.radians(360 / 60.0 / 2.0)
+    for phi in phis:
+        xx1, yy1 = rs1 * np.cos(phi), rs1 * np.sin(phi)
+        xx2, yy2 = rs2 * np.cos(phi), rs2 * np.sin(phi)
+        line = patches.FancyArrow(
+            xx1, yy1, (xx2 - xx1), (yy2 - yy1), head_width=0, color="navy", lw=0.5
+        )
+        ax.add_patch(line)
+
+    phis = np.radians(np.linspace(0, 360, 13, endpoint=False) - 20 + 90)
+    phis = phis - np.radians(360 / 13.0 / 2.0)
+    for phi in phis:
+        xx1, yy1 = rs2 * np.cos(phi), rs2 * np.sin(phi)
+        xx2, yy2 = r * np.cos(phi), r * np.sin(phi)
+        line = patches.FancyArrow(
+            xx1, yy1, (xx2 - xx1), (yy2 - yy1), head_width=0, color="navy", lw=0.5
+        )
+        ax.add_patch(line)
+
+
+def _draw_ne_arrows(ax, pa):
+    """Draw North and East arrows and annotate them on the FoV plot."""
+    de, dn = calc_nedirection(pa)
+    dl = 20.0
+    posne = np.array([200, -200])
+    arr_e = patches.FancyArrow(
+        posne[0], posne[1], dl * de[0], dl * de[1], color="dimgrey", width=3.0
+    )
+    arr_n = patches.FancyArrow(
+        posne[0], posne[1], dl * dn[0], dl * dn[1], color="dimgrey", width=3.0
+    )
+    ax.add_patch(arr_e)
+    ax.add_patch(arr_n)
+    ax.text(
+        posne[0] + dl * 2.5 * de[0],
+        posne[1] + dl * 2.5 * de[1],
+        f"E",
+        ha="center",
+        va="center",
+        fontsize=10,
+        color="dimgrey",
+    )
+    ax.text(
+        posne[0] + dl * 2.5 * dn[0],
+        posne[1] + dl * 2.5 * dn[1],
+        f"N",
+        ha="center",
+        va="center",
+        fontsize=10,
+        color="dimgrey",
+    )
+
+
+def _draw_histograms(ax2, ax3, df_fib, df_ag, conf):
+    """Plot histograms for std stars and AG magnitudes.
+
+    Maintains behavior of the original code but is more readable.
+    """
+    # mag bins
+    bins = 10
+    mmin = 13
+    mmax = 25
+    bins = int((mmax - mmin) * 2)
+
+    c = {
+        "fstar": "green",
+        "ag": "blueviolet",
+    }
+
+    # Flux standard histogram
+    filtername_std = df_fib[df_fib.targetType == 3].pfsflux_plot_filter.values[0]
+    ax2.hist(
+        df_fib[df_fib.targetType == 3]["pfsMag_plot"],
+        bins=bins,
+        range=(mmin, mmax),
+        color=c["fstar"],
+        lw=0,
+        alpha=0.4,
+        label=f"Std star ({filtername_std}, {len(df_fib[df_fib.targetType==3]['pfsMag_plot'])})",
+    )
+
+    # stacked histogram per proposal/filter
+    df_mags = df_fib[["proposalId", "pfsMag_plot", "pfsflux_plot_filter"]].groupby(by=["proposalId", "pfsflux_plot_filter"], as_index=False)
+    c_list = it.cycle(["salmon", "royalblue", "orange", "limegreen", "violet"])
+    c_sci = []
+    mag_per_prog = np.zeros(df_fib.shape[0])
+    label_per_prog = []
+
+    for k, v in df_mags.groups.items():
+        if k[0] == "N/A":
+            continue
+        mags = df_fib.pfsMag_plot[v].values
+        n_mags = len(mags)
+        n_too_bright = sum(mags < 13)
+        for j in range((df_fib.shape[0] - n_mags)):
+            mags = np.append(mags, np.nan)
+        mag_per_prog = np.vstack((mag_per_prog, mags))
+        label_per_prog.append(f"{p} ({n_mags}; {n_too_bright}<13mag)")
+    """
+    for k, v in df_mags.groups.items():
+        if k[0] == 'N/A': continue
+        mags = df_fib.pfsMag_plot[v].values
+        n_mags = len(mags)
+        n_too_bright = sum(mags<13)
+        for j in range((df_fib.shape[0] - n_mags)):
+            mags = np.append(mags, np.nan)
+        #print(mag_per_prog.shape, mags.shape)
+        mag_per_prog = np.vstack((mag_per_prog, mags))
+        if conf["ppp"]["mode"] == "classic":
+            if k[0] in conf["sfa"]["proposalIds_obsFiller"]:
+                label_per_prog.append(f"obs. filler ({n_mags}; {n_too_bright}<13mag)")
+            elif k[0] in conf["ppp"]["proposalIds"]:
+                label_per_prog.append(f"{k[0]} ({n_mags}; {n_too_bright}<13mag)")
+            else:
+                label_per_prog.append(f"usr filler ({n_mags}; {n_too_bright}<13mag)")
+        else:
+            label_per_prog.append(f"{k[0]} ({k[1]}, {n_mags}; {n_too_bright}<13mag)")
+        c_sci.append(next(c_list))
+
+    mag_per_prog = mag_per_prog[1:]
+    ax2.hist(
+        mag_per_prog.T,
+        bins=bins,
+        range=(mmin, mmax),
+        histtype="barstacked",
+        color=c_sci,
+        lw=0,
+        alpha=0.4,
+        label=label_per_prog,
+        stacked=True,
+    )
+    ax2.legend(fontsize=8, loc='upper left', bbox_to_anchor=(0.2, 1.2), ncol=2)
+    ax2.set_xlabel("mag", fontsize=12)
+    ax2.set_ylabel("N (target or STD)", fontsize=12)
+
+    # AG histogram
+    ax3.hist(df_ag["agMag"], bins=bins, range=(mmin, mmax), color=c["ag"], lw=0, alpha=0.4)
+    ax3.set_ylabel("N (AG)", fontsize=12)
+    ax3.set_xlabel("mag", fontsize=12)
+
+
+def _draw_ag_table(ax4, agnum_table, agnum_threshold):
+    """Draw the AG count table (2 rows: total and bright<=threshold)"""
+    ax4.table(
+        agnum_table,
+        loc='center',
+        colLabels=['AG1', 'AG2', 'AG3', 'AG4', 'AG5', 'AG6'],
+        rowLabels=['Total', f"<={agnum_threshold} mag"],
+        colWidths=[0.1] * 6,
+    )
+    ax4.tick_params(
+        axis='both',
+        bottom=False,
+        top=False,
+        left=False,
+        right=False,
+        labelbottom=False,
+        labeltop=False,
+        labelleft=False,
+        labelright=False,
+        labelsize=7,
+    )
+    ax4.set_frame_on(False)
 
 def get_pfs_utils_path():
     try:
@@ -77,8 +404,30 @@ def plot_FoV(
     show=True,
     pa=0.0,
     conf=None,
-    unfib_bright=[],
+    unfib_bright=None,
 ):
+    """Create a multi-panel figure summarizing a PFS design FoV.
+
+    Parameters
+    ----------
+    df_fib : pandas.DataFrame
+        Fiber table with fields like 'targetType', 'pfi_x', 'pfi_y', 'spec', 'fh', 'pfsFlux', 'proposalId'
+    df_ag : pandas.DataFrame
+        Guide-star table with fields like 'agx', 'agy', 'agMag', 'camId', 'ag_pfi_x', 'ag_pfi_y'
+    unfib_bright : list, optional
+        FiberIds of unassigned fibers near bright stars; used to highlight them in the plot.
+
+    Returns
+    -------
+    fig.tight_layout() result
+    """
+    # Avoid mutable default
+    if unfib_bright is None:
+        unfib_bright = []
+
+    # Ensure common expected columns exist (light defensive typing/formatting)
+    df_fib = df_fib.copy()
+    df_ag = df_ag.copy()
     """
     df_fib: pandas dataframe with
            'targetType', 'pfi_x', 'pfi_y', 'spec', 'fh', 'pfsFlux', 'proposalId'
@@ -144,258 +493,42 @@ def plot_FoV(
     }
     c_list = it.cycle(["salmon", "royalblue", "orange", "limegreen", "violet"])
 
+    # point marker size
     s = 10.0
-    ax1.scatter(
-        df_fib[df_fib.targetType == 4].pfi_x,
-        df_fib[df_fib.targetType == 4].pfi_y,
-        c=c["un"],
-        marker="x",
-        s=s * 1.3,
-        alpha=alpha,
-        lw=1,
-        label=f"UNASSIGNED ({len(df_fib[df_fib.targetType==4].pfi_y)})",
-    )
-    ax1.scatter(
-        df_fib[df_fib.fiberId.isin(unfib_bright)].pfi_x,
-        df_fib[df_fib.fiberId.isin(unfib_bright)].pfi_y,
-        facecolor="none",
-        edgecolor=c["un_brt"],
-        marker="s",
-        s=s * 2.6,
-        alpha=alpha,
-        lw=1,
-        label=f"neaby bright star ({len(unfib_bright)})",
-    )
-    ax1.scatter(
-        df_fib[df_fib.targetType == 10].pfi_x,
-        df_fib[df_fib.targetType == 10].pfi_y,
-        c=c["dot"],
-        marker="o",
-        s=s,
-        alpha=alpha,
-        lw=0,
-        label=f"BLACKSPOT ({len(df_fib[df_fib.targetType==10].pfi_y)})",
-    )
-    ax1.scatter(
-        df_fib[df_fib.targetType == 2].pfi_x,
-        df_fib[df_fib.targetType == 2].pfi_y,
-        c=c["sky"],
-        marker="o",
-        s=s,
-        alpha=alpha,
-        lw=0,
-        label=f"SKY ({len(df_fib[df_fib.targetType==2].pfi_y)})",
-    )
-    ax1.scatter(
-        df_fib[df_fib.targetType == 3].pfi_x,
-        df_fib[df_fib.targetType == 3].pfi_y,
-        c=c["fstar"],
-        marker="o",
-        s=s * 2.0,
-        alpha=alpha,
-        lw=0,
-        label=f"FLUXSTD ({len(df_fib[df_fib.targetType==3].pfi_y)})",
-    )
-    ax1.scatter(
-        df_fib[df_fib.targetType == 1].pfi_x,
-        df_fib[df_fib.targetType == 1].pfi_y,
-        c=c["sci"],
-        marker="o",
-        s=s,
-        alpha=alpha,
-        lw=0,
-        label=f"SCIENCE ({len(df_fib[df_fib.targetType==1].pfi_y)})",
-    )
-    # plot top-rank target in cla program 25b-116
-    ax1.scatter(
-        df_fib[df_fib.obCode == "M31_30410_R31_02730_v2"].pfi_x,
-        df_fib[df_fib.obCode == "M31_30410_R31_02730_v2"].pfi_y,
-        c="red",
-        marker="o",
-        s=s,
-        alpha=alpha,
-        lw=0,
-        # label=f"SCIENCE ({len(df_fib[df_fib.targetType==1].pfi_y)})",
-    )
-    ax1.scatter(
-        df_ag.ag_pfi_x,
-        df_ag.ag_pfi_y,
-        c=c["ag"],
-        marker="s",
-        s=s,
-        alpha=alpha,
-        lw=0,
-        label="guidestar",
-    )
 
-    # store the number of the guide star candidates at the same time
-    agnum_table=[]
-    agnum_threshold=19
-    for i in range(1, 7):
-        ang = np.deg2rad(-60 * (i - 1) - 9)
-        agn = len(df_ag[df_ag.camId == (i - 1)].ag_pfi_x)
-        agn_bright=len(df_ag[(df_ag.camId==(i-1))&(df_ag.agMag<=agnum_threshold)].ag_pfi_x)
-        agnum_table.append([agn, agn_bright])
-        ax1.text(
-            245 * np.cos(ang),
-            245 * np.sin(ang),
-            f"{i} ({agn})",
-            ha="center",
-            fontsize=10,
-        )
-    agnum_table=[list(i) for i in zip(*agnum_table)]
+    # draw scatter points and guide stars on the main FoV axes (delegated)
+    _draw_fov_points(ax1, df_fib, df_ag, unfib_bright, c, alpha, s)
 
-    ax1.legend(fontsize="x-small", loc='upper left',bbox_to_anchor=(0.2, 1.2), ncol=3)
+    # store AG counts and annotation positions
+    agnum_threshold = 19
+    agnum_table, ag_positions = get_ag_counts(df_ag, threshold=agnum_threshold)
+
+    # Annotate camera positions with counts
+    for cam_index, (count, (xpos, ypos)) in enumerate(ag_positions, start=1):
+        ax1.text(xpos, ypos, f"{cam_index} ({count})", ha="center", fontsize=10)
+
+    # transpose table for the Axes.table layout (rows: total, bright<=threshold)
+    agnum_table = [list(i) for i in zip(*agnum_table)]
+
+    ax1.legend(fontsize="x-small", loc='upper left', bbox_to_anchor=(0.2, 1.2), ncol=3)
     ax1.set_xlim(xmin=-255, xmax=255)
     ax1.set_ylim(ymin=-255, ymax=255)
 
-    xlname = "PFI X [mm]"
-    ylname = "PFI Y [mm]"
+    # axis labels for clarity
+    ax1.set_xlabel("PFI X [mm]", fontsize=12)
+    ax1.set_ylabel("PFI Y [mm]", fontsize=12)
 
-    ax1.set_xlabel(xlname, fontsize=12)
-    ax1.set_ylabel(ylname, fontsize=12)
+    # border sectors
+    _draw_sector_lines(ax1)
 
-    # Border of sections
-    r = 235
-    rs1 = 50
-    rs2 = 132.5
-    for rs in [rs1, rs2]:
-        circle = patches.Circle((0, 0), radius=rs, color="navy", fill=False, lw=0.5)
-        ax1.add_patch(circle)
-    phis = np.radians(np.linspace(0, 360, 6, endpoint=False) + 15 + 90)
-    phis = phis - np.radians(360 / 60.0 / 2.0)
-    for phi in phis:
-        xx1, yy1 = rs1 * np.cos(phi), rs1 * np.sin(phi)
-        xx2, yy2 = rs2 * np.cos(phi), rs2 * np.sin(phi)
-        line = patches.FancyArrow(
-            xx1, yy1, (xx2 - xx1), (yy2 - yy1), head_width=0, color="navy", lw=0.5
-        )
-        ax1.add_patch(line)
-    phis = np.radians(np.linspace(0, 360, 13, endpoint=False) - 20 + 90)
-    phis = phis - np.radians(360 / 13.0 / 2.0)
-    for phi in phis:
-        xx1, yy1 = rs2 * np.cos(phi), rs2 * np.sin(phi)
-        xx2, yy2 = r * np.cos(phi), r * np.sin(phi)
-        line = patches.FancyArrow(
-            xx1, yy1, (xx2 - xx1), (yy2 - yy1), head_width=0, color="navy", lw=0.5
-        )
-        ax1.add_patch(line)
+    # north/east markers
+    _draw_ne_arrows(ax1, pa)
 
-    # show North/East
-    de, dn = calc_nedirection(pa)
-    dl = 20.0
-    posne = np.array([200, -200])
-    arr_e = patches.FancyArrow(
-        posne[0], posne[1], dl * de[0], dl * de[1], color="dimgrey", width=3.0
-    )
-    arr_n = patches.FancyArrow(
-        posne[0], posne[1], dl * dn[0], dl * dn[1], color="dimgrey", width=3.0
-    )
+    # plot histograms for flux standards, stacked proposals, and AG magnitudes
+    _draw_histograms(ax2, ax3, df_fib, df_ag, conf)
 
-    ax1.add_patch(arr_e)
-    ax1.add_patch(arr_n)
-    ax1.text(
-        posne[0] + dl * 2.5 * de[0],
-        posne[1] + dl * 2.5 * de[1],
-        f"E",
-        ha="center",
-        va="center",
-        fontsize=10,
-        color="dimgrey",
-    )
-    ax1.text(
-        posne[0] + dl * 2.5 * dn[0],
-        posne[1] + dl * 2.5 * dn[1],
-        f"N",
-        ha="center",
-        va="center",
-        fontsize=10,
-        color="dimgrey",
-    )
-
-    ## split flux per proposal and filter
-    df_mags = df_fib[['proposalId', 'pfsMag_plot', 'pfsflux_plot_filter']].groupby(by=['proposalId', 'pfsflux_plot_filter'], as_index=False)
-
-    c_sci = []
-    bins = 10
-    mmin = 13
-    mmax = 25
-    bins = int((mmax - mmin) * 2)
-    mag_per_prog = np.zeros(df_fib.shape[0])
-    label_per_prog = []
-    filtername_std = df_fib[df_fib.targetType==3].pfsflux_plot_filter.values[0]
-    ax2.hist(
-        df_fib[df_fib.targetType == 3]["pfsMag_plot"],
-        bins=bins,
-        range=(mmin, mmax),
-        color=c["fstar"],
-        lw=0,
-        alpha=0.4,
-        label=f"Std star ({filtername_std}, {len(df_fib[df_fib.targetType==3]['pfsMag_plot'])})",
-    )
-    """
-    for i, p in enumerate(proposals):
-        mags = df_fib[(df_fib.targetType == 1) & (df_fib.proposalId == p)][
-            "totalMag"
-        ].values
-        n_mags = len(mags)
-        if n_mags == 0:
-            mags = df_fib[(df_fib.targetType == 1) & (df_fib.proposalId == p)][
-                "psfMag"
-            ].values
-            n_mags = len(mags)
-        n_too_bright = sum(mags < 13)
-        for j in range((df_fib.shape[0] - n_mags)):
-            mags = np.append(mags, np.nan)
-        # print(mag_per_prog.shape, mags.shape)
-        mag_per_prog = np.vstack((mag_per_prog, mags))
-        label_per_prog.append(f"{p} ({n_mags}; {n_too_bright}<13mag)")
-    """
-    for k, v in df_mags.groups.items():
-        if k[0] == 'N/A': continue
-        mags = df_fib.pfsMag_plot[v].values
-        n_mags = len(mags)
-        n_too_bright = sum(mags<13)
-        for j in range((df_fib.shape[0] - n_mags)):
-            mags = np.append(mags, np.nan)
-        #print(mag_per_prog.shape, mags.shape)
-        mag_per_prog = np.vstack((mag_per_prog, mags))
-        if conf["ppp"]["mode"] == "classic":
-            if k[0] in conf["sfa"]["proposalIds_obsFiller"]:
-                label_per_prog.append(f"obs. filler ({n_mags}; {n_too_bright}<13mag)")
-            elif k[0] in conf["ppp"]["proposalIds"]:
-                label_per_prog.append(f"{k[0]} ({n_mags}; {n_too_bright}<13mag)")
-            else:
-                label_per_prog.append(f"usr filler ({n_mags}; {n_too_bright}<13mag)")
-        else:
-            label_per_prog.append(f"{k[0]} ({k[1]}, {n_mags}; {n_too_bright}<13mag)")
-        c_sci.append(next(c_list))
-
-    mag_per_prog = mag_per_prog[1:]
-    # print(mag_per_prog.shape, mag_per_prog)
-    ax2.hist(
-        mag_per_prog.T,
-        bins=bins,
-        range=(mmin, mmax),
-        histtype="barstacked",
-        color=c_sci,
-        lw=0,
-        alpha=0.4,
-        label=label_per_prog,
-        stacked=True,
-    )
-    # ax2.hist(df_fib[df_fib['targetType']==1]['psfMag'], bins=bins, range=(mmin, mmax),
-    #         color=c['sci'], lw=0, alpha=0.4, label='Target')
-
-    ax2.legend(fontsize='x-small', loc='upper left',bbox_to_anchor=(0.2, 1.2), ncol=2)
-    ax2.set_xlabel("mag", fontsize=12)
-    ax2.set_ylabel("N (target or STD)", fontsize=12)
-
-    ax3.hist(
-        df_ag["agMag"], bins=bins, range=(mmin, mmax), color=c["ag"], lw=0, alpha=0.4
-    )
-    ax3.set_ylabel("N (AG)", fontsize=12)
-    ax3.set_xlabel("mag", fontsize=12)
+    # draw AG summary table in the reserved axis
+    _draw_ag_table(ax4, agnum_table, agnum_threshold)
 
     # AG magnitude table
     ax4.table(agnum_table, loc='center',
@@ -421,55 +554,66 @@ warning = "hotpink"  # colour for warning
 
 
 def colour_background_warning_sky_tot(val):
-    colour = warning if val < 400 else ""
+    """Return table cell background CSS when total sky is too low."""
+    colour = warning if float(val) < 400 else ""
 
     return f"background-color: {colour}"
 
 
 def colour_background_warning_std_tot(val):
-    colour = warning if val < 40 else ""
+    """Return table cell background CSS when total standards are too low."""
+    colour = warning if float(val) < 40 else ""
 
     return f"background-color: {colour}"
 
 
 def colour_background_warning_sky_min(val):
-    colour = warning if val < 12 else ""
+    """Return table cell background CSS when minimum per-sector sky is too low."""
+    colour = warning if float(val) < 12 else ""
 
     return f"background-color: {colour}"
 
 
 def colour_background_warning_std_min(val):
-    colour = warning if val < 3 else ""
+    """Return table cell background CSS when minimum per-sector std is too low."""
+    colour = warning if float(val) < 3 else ""
 
     return f"background-color: {colour}"
 
 
 def colour_background_warning_ag_tot(val):
-    colour = warning if val < 10 else ""
+    # extract numbers: e.g. '3 (1)' -> ['3', '1']
+    nums = list(map(int, re.findall(r"\d+", str(val))))
+    i = nums[0] if nums else 0
+    j = nums[1] if len(nums) > 1 else 0
+    colour = warning if (i < 10 or j > 0) else ""
 
     return f"background-color: {colour}"
 
 
 def colour_background_warning_ag_min(val):
-    colour = warning if val < 2 else ""
+    # extract numbers: e.g. '3 (1)' -> ['3', '1']
+    nums = list(map(int, re.findall(r"\d+", str(val))))
+    i = nums[0] if nums else 0
+    j = nums[1] if len(nums) > 1 else 0
+    colour = warning if (i < 2 or j > 0) else ""
 
     return f"background-color: {colour}"
 
-
 def colour_background_warning_inr(val):
-    colour = warning if (val < -174) or (val > 174) else ""
+    colour = warning if (float(val) < -174) or (float(val) > 174) else ""
 
     return f"background-color: {colour}"
 
 
 def colour_background_warning_el(val):
-    colour = warning if (val < 32) or (val > 75) else ""
+    colour = warning if (float(val) < 32) or (float(val) > 75) else ""
 
     return f"background-color: {colour}"
 
 
 def colour_background_warning_unfib(val):
-    colour = warning if val > 0 else ""
+    colour = warning if float(val) > 0 else ""
 
     return f"background-color: {colour}"
 
@@ -504,37 +648,32 @@ def init_check_design():
             "ag6",
             "ag_sum",
             "designId",
+            "ppc_code",
             "unfib_bright",
         ],
     )
     return df
 
 
-def check_design(designId, df_fib, df_ag, n_unfib_bright=0):
+def check_design(designId, df_fib, df_ag, df_guidestars_toobright):
+    a, a_ = check_ags(df_ag, df_guidestars_toobright)
+    ag_cols = [
+        f"{ai} ({aj})" if aj > 0 else f"{ai}"
+        for ai, aj in zip(a, a_)
+    ]
+    
+    vals = check_fibers(df_fib)
+
     df_ch = pd.DataFrame(
-        data=np.append(check_fibers(df_fib), check_ags(df_ag)).reshape(1, 17),
+        data=np.append(vals, ag_cols).reshape(1, len(vals) + len(ag_cols)),
         columns=[
-            "sky_mean",
-            "sky_std",
-            "sky_min",
-            "sky_max",
-            "sky_sum",
-            "std_mean",
-            "std_std",
-            "std_min",
-            "std_max",
-            "std_sum",
-            "ag1",
-            "ag2",
-            "ag3",
-            "ag4",
-            "ag5",
-            "ag6",
-            "ag_sum",
-        ],
+                "sky_mean", "sky_std", "sky_min", "sky_max", "sky_sum",
+                "std_mean", "std_std", "std_min", "std_max", "std_sum",
+                "ag1", "ag2", "ag3", "ag4", "ag5", "ag6", "ag_sum",
+            ],
     )
+
     df_ch["designId"] = f"0x{designId:016x}"
-    df_ch["unfib_bright"] = n_unfib_bright
     # df_ch.style.applymap(colour_background_warning_sky_min, subset=['sky_min'])
 
     return df_ch
@@ -578,19 +717,23 @@ def check_fibers(df_fib):
     return np.array(f)
 
 
-def check_ags(df_ag):
+def check_ags(df_ag, df_guidestars_toobright):
     """
     df_ag: pandas dataframe with
            'agx', 'agy', 'agMag', 'camId', 'ag_pfi_x', 'ag_pfi_y'
     """
 
     cam = df_ag["camId"].values
+    cam_ = df_guidestars_toobright["agId"].values
     a = []
+    a_ = []
     for i in range(0, 6):
         a.append(np.sum(cam == i))
+        a_.append(np.sum(cam_ == i))
 
     a.append(np.sum(a))
-    return np.array(a)
+    a_.append(np.sum(a_))
+    return np.array(a), np.array(a_)
 
 
 def get_field_sector(df_fib):

@@ -221,6 +221,7 @@ def run(
                 transparency=0.0,
                 lower_time_limit=start_time_too,
                 upper_time_limit=stop_time_too,
+                moon_sep=30.0,
             ),
             # total_time should really include instrument overheads
             # acct_time is time we charge to the PI
@@ -362,14 +363,15 @@ def run(
         if start_time == default_start_time and stop_time == default_stop_time:
             # Calculate refocus start time as datetime
             time_refocus_start = default_start_time + timedelta(
-                minutes=(23.0 + float(conf["qplan"]["overhead"])) * 2
+                minutes=(22.5 + float(conf["qplan"]["overhead"])) * 5
             )
 
             # Then compute stop time based on start time
-            time_refocus_stop = time_refocus_start + timedelta(minutes=10.0)
+            time_refocus_stop = time_refocus_start + timedelta(minutes=3.0)
 
             print(time_refocus_start, time_refocus_stop)
 
+            """
             rec.append(
                 Bunch(
                     date=date_,  # date HST
@@ -389,6 +391,18 @@ def run(
                     starttime=parser.parse(
                         f"{time_refocus_stop.strftime('%Y-%m-%d %H:%M:%S')} HST"
                     ),  # time HST
+                    stoptime=stop_time,  # time HST
+                    categories=["open"],
+                    skip=False,
+                    note="",
+                    data=cur_data,
+                )
+            )
+            #"""
+            rec.append(
+                Bunch(
+                    date=date_,  # date HST
+                    starttime=start_time,  # time HST
                     stoptime=stop_time,  # time HST
                     categories=["open"],
                     skip=False,

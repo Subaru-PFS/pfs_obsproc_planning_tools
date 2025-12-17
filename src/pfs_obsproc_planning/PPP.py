@@ -740,6 +740,9 @@ def readTarget(mode, para):
         if list(set(tb_tgt["proposal_id"])) == ["S25A-UH041-A"]:
             tb_tgt["exptime_PPP"] = 900
 
+        if list(set(tb_tgt["proposal_id"])) == ["S25B-TE421-K"]:
+            tb_tgt["exptime_PPP"] = 900
+
         # separete the sample by 'resolution' (L=false/M=true)
         tb_tgt_l = tb_tgt[tb_tgt["resolution"] == "L"]
         tb_tgt_m = tb_tgt[tb_tgt["resolution"] == "M"]
@@ -1212,21 +1215,23 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
             _df_tgt_t = _df_tgt_t.sample(n_tgt, ignore_index=True, random_state=1)
             _tb_tgt_t_1 = Table.from_pandas(_df_tgt_t)
 
+            peak_pa = 120.0
+
             X_, Y_, obj_dis_sig_, peak_x, peak_y = KDE(_tb_tgt_t_1, mutiPro)
 
             index_ = PFS_FoV(
-                peak_x, peak_y, 90, _tb_tgt_t_
+                peak_x, peak_y, peak_pa, _tb_tgt_t_
             )  # all PA set to be 0 for simplicity
 
             iter_tem = 0
             while len(index_) == 0 and iter_tem < 2:
                 peak_x += np.random.uniform(-0.15, 0.15, 1)[0]
                 peak_y += np.random.uniform(-0.15, 0.15, 1)[0]
-                index_ = PFS_FoV(peak_x, peak_y, 0, _tb_tgt_t_)
+                index_ = PFS_FoV(peak_x, peak_y, peak_pa, _tb_tgt_t_)
                 iter_tem += 1
 
             lst_tgtID_assign = netflowRun4PPC(
-                _tb_tgt_t_[list(index_)], peak_x, peak_y, 0
+                _tb_tgt_t_[list(index_)], peak_x, peak_y, peak_pa,
             )
             iter_tem = 0
             while len(lst_tgtID_assign) == 0 and iter_tem < 2:
@@ -1236,6 +1241,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
                     _tb_tgt_t_[list(index_)],
                     peak_x,
                     peak_y,
+                    peak_pa,
                     otime="2025-04-10T08:00:00Z",
                 )
                 iter_tem += 1
@@ -1253,7 +1259,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
                 [
                     peak_x,
                     peak_y,
-                    0,
+                    peak_pa,
                     weight_tem_tot,
                     pslID_n,
                     lst_tgtID_assign,
@@ -1316,7 +1322,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
     return ppc_lst_fin
 
 
-def PPC_centers_single(_tb_tgt, nPPC):
+def PPC_centers_single(_tb_tgt, nPPC, weight_para):
     def objective1(params, _tb_tgt):
         """
         Objective function to optimize the PPC parameters.
@@ -1417,7 +1423,10 @@ def PPC_centers_single(_tb_tgt, nPPC):
 
     ppc_lst = []
 
+    para_sci, para_exp, para_n = weight_para
     _tb_tgt = sciRank_pri(_tb_tgt)
+    _tb_tgt = count_N(_tb_tgt)
+    _tb_tgt = weight(_tb_tgt, para_sci, para_exp, para_n)
     single_exptime_ = _tb_tgt.meta["single_exptime"]
 
     _tb_tgt_ = _tb_tgt[_tb_tgt["exptime_PPP"] > 0]
@@ -1459,13 +1468,20 @@ def PPC_centers_single(_tb_tgt, nPPC):
 
             _tb_tgt_t = tb_tgt_t_group[0]
 
-            initial_guess = [_tb_tgt_t["ra"][0], _tb_tgt_t["dec"][0]]  # , 0]
+            _df_tgt_t = Table.to_pandas(_tb_tgt_t)
+            n_tgt = min(200, len(_tb_tgt_t))
+            _df_tgt_t = _df_tgt_t.sample(n_tgt, ignore_index=True, random_state=1)
+            _tb_tgt_t_1 = Table.from_pandas(_df_tgt_t)
+
+            X_, Y_, obj_dis_sig_, peak_x, peak_y = KDE(_tb_tgt_t_1, False)
+
+            initial_guess = [peak_x, peak_y]  # , 0]
             result = minimize(
                 objective1,
                 initial_guess,
                 args=(_tb_tgt_t,),
                 method="Nelder-Mead",
-                options={"xatol": 0.1, "fatol": 1.5},
+                options={"xatol": 0.01, "fatol": 0.001},
             )
             print(result.x)
             ra, dec = result.x[0], result.x[1]
@@ -1474,17 +1490,15 @@ def PPC_centers_single(_tb_tgt, nPPC):
         lst_tgtID_assign = netflowRun4PPC(_tb_tgt_, ra, dec, pa)
 
         ppc_lst.append(
-            np.array(
-                [
-                    len(ppc_lst),
-                    ra,
-                    dec,
-                    pa,
-                    0,
-                    lst_tgtID_assign,
-                    len(lst_tgtID_assign) / 2394.0 * 100.0,
-                ]
-            )
+            np.array([
+                len(ppc_lst),
+                ra,
+                dec,
+                pa,
+                0,
+                lst_tgtID_assign,
+                len(lst_tgtID_assign) / 2394.0 * 100.0,
+            ], dtype=object)
         )
 
         index_assign = np.in1d(_tb_tgt_["identify_code"], lst_tgtID_assign)
@@ -2766,7 +2780,7 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
     )
 
     ppcList.write(
-        os.path.join(dirName, "ppcList.ecsv"), format="ascii.ecsv", overwrite=True
+        os.path.join(dirName, "ppcList_all.ecsv"), format="ascii.ecsv", overwrite=True
     )
 
     ob_code = _tb_tgt_tot["ob_code"].data
@@ -3020,6 +3034,8 @@ def run(
         readtgt_con["mode_readtgt"], readtgt_con["para_readtgt"]
     )
 
+    para_sci_l, para_exp_l, para_n_l = [1.5, 0, 0]
+    para_sci_m, para_exp_m, para_n_m = [1.5, 0, 0]
     randomseed = 2
 
     TraCollision = False
@@ -3066,10 +3082,50 @@ def run(
         output(tb_ppc_tot, tb_tgt_tot, dirName=dirName)
         return None
 
+    if list(set(tb_tgt["proposal_id"])) == ["S25B-TE421-K"]:
+        # MR--------------------------------------------
+        ppc_lst_m = PPC_centers_single(tb_sel_m, nppc_m, [para_sci_m, para_exp_m, para_n_m])
+
+        tb_tgt_m1 = Table.copy(tb_tgt_m)
+        tb_tgt_m1.meta["PPC"] = ppc_lst_m
+
+        tb_tgt_m1 = sciRank_pri(tb_tgt_m1)
+        tb_tgt_m1 = count_N(tb_tgt_m1)
+        tb_tgt_m1 = weight(tb_tgt_m1, 1, 0, 0)
+
+        tb_ppc_m = netflowRun(
+            tb_tgt_m1,
+            randomseed,
+            TraCollision,
+            numReservedFibers,
+            fiberNonAllocationCost,
+        )
+
+        tb_tgt_m1 = netflowAssign(tb_tgt_m1, tb_ppc_m)
+
+        tb_ppc_m_fin = netflow_iter(
+            tb_tgt_m1,
+            tb_ppc_m,
+            [1, 0, 0],
+            nppc_m,
+            randomseed,
+            TraCollision,
+            numReservedFibers,
+            fiberNonAllocationCost,
+            readtgt_con["mode_readtgt"],
+        )
+        tb_tgt_m_fin = netflowAssign(tb_tgt_m1, tb_ppc_m_fin)
+
+        if nppc_m > 0:
+            tb_ppc_tot = tb_ppc_m_fin.copy()
+            tb_tgt_tot = tb_tgt_m_fin.copy()
+
+        output(tb_ppc_tot, tb_tgt_tot, dirName=dirName)
+        return None
+
     crMode = "compOFpsl_n"
 
-    para_sci_l, para_exp_l, para_n_l = [1.5, 0, 0]
-    para_sci_m, para_exp_m, para_n_m = [1.5, 0, 0]
+
 
     """ optimize
     if len(readtgt_con["para_readtgt"]["localPath_ppc"]) == 0:
@@ -3089,9 +3145,9 @@ def run(
         tb_sel_l, nppc_l, [para_sci_l, para_exp_l, para_n_l], randomseed, multiProcess
     )
 
-    # ppc_lst_l = PPC_centers_single(
+    #ppc_lst_l = PPC_centers_single(
     #    tb_sel_l, nppc_l
-    # )
+    #)
 
     tb_tgt_l1 = Table.copy(tb_tgt_l)
     tb_tgt_l1.meta["PPC"] = ppc_lst_l
@@ -3127,9 +3183,9 @@ def run(
     ppc_lst_m = PPP_centers(
         tb_sel_m, nppc_m, [para_sci_m, para_exp_m, para_n_m], randomseed, multiProcess
     )
-    # ppc_lst_m = PPC_centers_single(
+    #ppc_lst_m = PPC_centers_single(
     #    tb_sel_m, nppc_m
-    # )
+    #)
 
     tb_tgt_m1 = Table.copy(tb_tgt_m)
     tb_tgt_m1.meta["PPC"] = ppc_lst_m
