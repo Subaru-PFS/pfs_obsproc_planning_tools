@@ -116,6 +116,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
 
     # This routine just combines a few cells in "trial" section
     df_ch = pldes.init_check_design()
+    df_unassigned_toobright = pd.DataFrame()
     count = 0
     for designId in pfsDesignIds:
         pfsDesign0 = PfsDesign.read(designId, dirName=pfsDesignDir)
@@ -151,7 +152,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
             telescope_elevation=None,
             conf=conf,
             guidestar_mag_min=0,
-            guidestar_mag_max=12,
+            guidestar_mag_max=10,
             guidestar_neighbor_mag_min=21.0,
             guidestar_minsep_deg=0.0002778,
         )
@@ -190,11 +191,10 @@ def validation(parentPath, figpath, save, show, ssp, conf):
         unassigened_fibers = pfsDesign0[
             pfsDesign0.targetType == 4
         ].fiberId # TargetType.UNASSIGNED=4
-        df_unassigned_toobright = pd.DataFrame()
         for unfib in unassigened_fibers:
             if (
                 pfsDesign0[pfsDesign0.fiberId == unfib].fiberStatus
-                != FiberStatus.BROKENFIBER
+                != 6 #FiberStatus.BROKENFIBER
             ):  # check if fiber pass the light
                 cidx = fibId.fiberIdToCobraId(unfib) - 1
                 ccenter = bench.cobras.centers[cidx]
@@ -219,6 +219,8 @@ def validation(parentPath, figpath, save, show, ssp, conf):
                 if not df_gaia_toobright.empty:
                     df_tmp = pd.DataFrame(
                         {
+                            "design_id": [f"0x{designId:016x}"] * len(df_gaia_toobright),
+                            "ppc_code": [pfsDesign0.designName] * len(df_gaia_toobright),
                             "fiber_id": [unfib] * len(df_gaia_toobright),
                             "fiber_ra": [un_ra] * len(df_gaia_toobright),
                             "fiber_dec": [un_dec] * len(df_gaia_toobright),
@@ -236,16 +238,8 @@ def validation(parentPath, figpath, save, show, ssp, conf):
                         )
 
                     logger.warning(
-                        f"[Validation of output] There are {len(df_gaia_toobright)} bright stars nearby fiber {unfib}: {df_tmp}"
+                        f"[Validation of output] ({pfsDesign0.designName}) There are {len(df_gaia_toobright)} bright stars nearby fiber {unfib}: {df_tmp}"
                     )
-
-        # write to csv
-        if (
-            conf["validation"]["save_unassign_toobright"]
-            and not df_unassigned_toobright.empty
-        ):
-            out_path = os.path.join(figpath, "df_unassign_bright_nearby.csv")
-            df_unassigned_toobright.to_csv(out_path, index=False)
 
         # check magnitudes
         pfsflux = np.array([a[0] if len(a) > 0 else np.nan for a in pfsDesign0.psfFlux])
@@ -316,12 +310,19 @@ def validation(parentPath, figpath, save, show, ssp, conf):
         df_ag["ag_pfi_y"] = np.array(pfiy)
 
         if not df_unassigned_toobright.empty:
-            unfib_bright = df_unassigned_toobright["fiber_id"].unique().tolist()
+            mask = df_unassigned_toobright["design_id"] == f"0x{designId:016x}"
+            if mask.any():
+                unfib_bright = df_unassigned_toobright.loc[mask, "fiber_id"].unique().tolist()
+            else:
+                unfib_bright = []
         else:
             unfib_bright = []
+            
         df = pldes.check_design(
-            designId, df_fib, df_ag, n_unfib_bright=len(unfib_bright)
+            designId, df_fib, df_ag, df_guidestars_toobright
         )
+        df["ppc_code"] = pfsDesign0.designName
+        df["unfib_bright"] = len(unfib_bright)
         df_ch = pd.concat([df_ch, df], ignore_index=True)
         title = f"designId=0x{designId:016x} ({pfsDesign0.raBoresight:.2f},{pfsDesign0.decBoresight:.2f},PA={pfsDesign0.posAng:.1f})\n{pfsDesign0.designName}"
         fname = f"{figpath}/check_0x{designId:016x}"
@@ -368,3 +369,11 @@ def validation(parentPath, figpath, save, show, ssp, conf):
     with open(os.path.join(figpath, "validation_report.html"), "w") as f:
         f.write(html_str)
         f.close()
+
+    # write to csv
+    if (
+        conf["validation"]["save_unassign_toobright"]
+        and not df_unassigned_toobright.empty
+    ):
+        out_path = os.path.join(figpath, "df_unassign_bright_nearby.csv")
+        df_unassigned_toobright.to_csv(out_path, index=False)
