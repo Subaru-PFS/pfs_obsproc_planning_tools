@@ -194,8 +194,105 @@ def visibility_checker(tb_tgt, obstimes, start_time_list, stop_time_list):
 
     return tb_tgt
 
+def queryQueue(psl_id_list, DBPath_qDB, tb_queuedb_filename):
+    """
+    Query queue database for executed observations and exposure times per proposal.
 
-def readTarget(mode, para):
+    Parameters
+    ----------
+    psl_id_list : list[str]
+        List of proposal IDs to query (e.g., ["S25B-024QN", "S25A-043QF"]).
+    DBPath_qDB : str
+        Path to the QueueDB configuration file.
+    tb_queuedb_filename : str
+        Path to save/load the cached results table (ECSV).
+
+    Returns
+    -------
+    tb_queuedb : astropy.table.Table
+        Table containing exposure time information per observation.
+    """
+    # --- try reading cached result ---
+    if os.path.exists(tb_queuedb_filename):
+        try:
+            tb_queuedb = Table.read(tb_queuedb_filename)
+            logger.info(f"Loaded cached queue table: {tb_queuedb_filename}")
+            return tb_queuedb
+        except Exception as e:
+            logger.info("[S1] Querying the qdb (no cache found)")
+
+    qdb = q_db.QueueDatabase(logger_qplan) 
+    qdb.read_config(DBPath_qDB) 
+    qdb.connect() 
+    qa = q_db.QueueAdapter(qdb) 
+    qq = q_query.QueueQuery(qa, use_cache=False)
+
+    # --- collect results ---
+    results = []
+    counter = 0
+
+    for psl_id in psl_id_list:
+        logger.info(f"Querying qDB for {psl_id}")
+        ex_obs_list = qq.get_executed_obs_by_proposal(psl_id)
+        if not ex_obs_list:
+            continue
+
+        for ex_ob in ex_obs_list:
+            exps = qq.get_exposures(ex_ob)
+            ob = qq.get_ob(ex_ob.ob_key)
+            arm = ob.inscfg.qa_reference_arm
+
+            exptime_b = sum(exp.effective_exptime_b or 0 for exp in exps)
+            exptime_r = sum(exp.effective_exptime_r or 0 for exp in exps)
+            exptime_m = sum(exp.effective_exptime_m or 0 for exp in exps)
+            exptime_n = sum(exp.effective_exptime_n or 0 for exp in exps)
+
+            # select arm-specific exposure time
+            arm_map = {"b": exptime_b, "r": exptime_r, "m": exptime_m, "n": exptime_n}
+            exptime_selected = arm_map.get(arm, 0)
+
+            if exptime_selected >= 0:
+                counter += 1
+                results.append([
+                    counter,
+                    psl_id,
+                    ex_ob.ob_key[1],
+                    arm,
+                    exptime_selected,
+                    exptime_b,
+                    exptime_r,
+                    exptime_m,
+                    exptime_n,
+                    len(exps) * 450.0,  # nominal exposure time per OB
+                ])
+
+    if not results:
+        logger.warning("No executed observations found in any proposal.")
+        return Table()
+
+    # --- create and save table ---
+    tb_queuedb = Table(
+        np.array(results),
+        names=[
+            "N",
+            "psl_id",
+            "ob_code",
+            "ref_arm",
+            "eff_exptime_done_real",
+            "eff_exptime_done_real_b",
+            "eff_exptime_done_real_r",
+            "eff_exptime_done_real_m",
+            "eff_exptime_done_real_n",
+            "exptime_done_real",
+        ],
+    )
+
+    tb_queuedb.write(tb_queuedb_filename, overwrite=True)
+
+    return tb_queuedb
+
+
+def readTarget(mode, para, tb_queuedb):
     """Read target list including:
        'ob_code' 'ra' 'dec' 'priority' 'exptime' 'exptime_tac' 'resolution' 'proposal_id' 'rank' 'grade' 'allocated_time'
 
@@ -372,8 +469,6 @@ def readTarget(mode, para):
 
             if proposalId == "S25B-126QN":
                 tb_tgt = tb_tgt[tb_tgt["priority"] <= 3]
-            if proposalId == "S25B-071QN":
-                tb_tgt = tb_tgt[tb_tgt["ra"] <= 50]
 
             """
             for col in ["psf_flux_g","psf_flux_r", "psf_flux_i", "psf_flux_z", "psf_flux_y"]:
@@ -447,102 +542,24 @@ def readTarget(mode, para):
 
         # """
         # connect with queueDB
-        qdb = q_db.QueueDatabase(logger_qplan)
-        qdb.read_config(para["DBPath_qDB"])
-        qdb.connect()
-        qa = q_db.QueueAdapter(qdb)
-        qq = q_query.QueueQuery(qa, use_cache=False)
+        # join on the key columns
+        tb_tgt = join(tb_tgt, tb_queuedb,
+                        keys_left=["proposal_id", "ob_code"],
+                        keys_right=["psl_id", "ob_code"],
+                        join_type="left")
+        
+        exptime_usr = np.ma.filled(tb_tgt["exptime_usr"], 0.0)
+        exptime_done_real = np.ma.filled(tb_tgt["eff_exptime_done_real"], 0.0)
 
-        # determine observed exptime
+        exptime_usr = exptime_usr.astype(float)
+        exptime_done_real = exptime_done_real.astype(float)
+        
+        tb_tgt["exptime_done"] = np.minimum(exptime_usr, exptime_done_real)
+
+        tb_tgt.rename_column("ob_code_1", "ob_code")
+        cols_to_remove = [c for c in tb_tgt.colnames if c in tb_queuedb.colnames and "ob_code" not in c]
+        tb_tgt.remove_columns(cols_to_remove)
         # """
-        nn = 0
-        tt = []
-        for psl_id_ in psl_id:
-            ex_obs = qq.get_executed_obs_by_proposal(psl_id_)
-            if len(ex_obs) == 0:
-                continue
-            for ex_ob in ex_obs:
-                exps = qq.get_exposures(ex_ob)
-                ob = qq.get_ob(ex_ob.ob_key)
-                arm = ob.inscfg.qa_reference_arm
-
-                exptime_exe_b = sum(exp.effective_exptime_b or 0 for exp in exps)
-                exptime_exe_r = sum(exp.effective_exptime_r or 0 for exp in exps)
-                exptime_exe_m = sum(exp.effective_exptime_m or 0 for exp in exps)
-                exptime_exe_n = sum(exp.effective_exptime_n or 0 for exp in exps)
-
-                if arm == "r":
-                    exptime_exe = sum(exp.effective_exptime_r or 0 for exp in exps)
-                elif arm == "b":
-                    exptime_exe = sum(exp.effective_exptime_b or 0 for exp in exps)
-                elif arm == "n":
-                    exptime_exe = sum(exp.effective_exptime_n or 0 for exp in exps)
-                elif arm == "m":
-                    exptime_exe = sum(exp.effective_exptime_m or 0 for exp in exps)
-
-                msk = (tb_tgt["proposal_id"] == ex_ob.ob_key[0]) & (
-                    tb_tgt["ob_code"] == ex_ob.ob_key[1]
-                )
-
-                if len(tb_tgt[msk]) == 0:
-                    continue
-
-                exptime_usr = tb_tgt[msk]["exptime_usr"].data[0]
-                exptime_exe_fin = min(
-                    exptime_usr, exptime_exe
-                )  # ignore over-observation
-                if exptime_exe >= 0:
-                    nn += 1
-                    tt.append(
-                        [
-                            nn,
-                            psl_id_,
-                            ex_ob.ob_key[1],
-                            exptime_usr,
-                            arm,
-                            exptime_exe,
-                            exptime_exe_b,
-                            exptime_exe_r,
-                            exptime_exe_m,
-                            exptime_exe_n,
-                            exptime_exe_fin,
-                            len(exps) * 450,
-                        ]
-                    )
-                tb_tgt["exptime_done"][msk] = exptime_exe_fin
-
-        tb_queuedb = Table(
-            np.array(tt),
-            names=[
-                "N",
-                "psl_id",
-                "ob_code",
-                "exptime",
-                "ref_arm",
-                "eff_exptime_done_real",
-                "eff_exptime_done_real_b",
-                "eff_exptime_done_real_r",
-                "eff_exptime_done_real_m",
-                "eff_exptime_done_real_n",
-                "eff_exptime_done_rec",
-                "exptime_done_real",
-            ],
-        )
-        # """
-
-        """
-        tb_queuedb = Table.read("/home/wanqqq/workDir_pfs/run_2506/S25A-queue/output_20250622/ppp/tgt_queueDB_20250622_backup.csv")
-
-        for tb_i in tb_queuedb:
-            msk = (tb_tgt["proposal_id"] == tb_i["psl_id"]) & (tb_tgt["ob_code"] == tb_i["ob_code"])
-            if len(tb_tgt[msk])==0:continue
-            exptime_usr = tb_tgt["exptime_usr"][msk].data[0]
-            exptime_exe = tb_i["eff_exptime_done_rec"]
-            exptime_exe_fin = min(
-                exptime_usr, exptime_exe
-            )  # ignore over-observation
-            tb_tgt["exptime_done"][msk] = exptime_exe_fin
-        #"""
 
         tb_tgt["exptime"] = tb_tgt["exptime_usr"] - tb_tgt["exptime_done"]
 
@@ -605,6 +622,9 @@ def readTarget(mode, para):
         )
 
         # only for 064 since too huge list, FIX needed
+        #msk = np.in1d(tb_tgt["proposal_id"], ["S25B-049QN"]) * (tb_tgt["ra"] > 100)
+        #tb_tgt = tb_tgt[~msk]
+
         """
         if proposalId == 'S25B-126QN':
             tb_tgt = tb_tgt[tb_tgt["priority"]<=3]
@@ -2441,23 +2461,19 @@ def run(
     fiberNonAllocationCost=0.0,
     show_plots=False,
     backup=False,
+    conf=None,
 ):
     global bench
     bench = bench_info
 
-    tb_tgt, tb_tgt_l, tb_tgt_m, tb_queuedb, tb_queuedb = readTarget(
-        readtgt_con["mode_readtgt"], readtgt_con["para_readtgt"]
-    )
-
     today = date.today().strftime("%Y%m%d")
-    if backup:
-        tb_queuedb.write(
-            os.path.join(dirName, f"tgt_queueDB_{today}_backup.csv"), overwrite=True
-        )
-    else:
-        tb_queuedb.write(
-            os.path.join(dirName, f"tgt_queueDB_{today}.csv"), overwrite=True
-        )
+    tb_queuedb_filename = os.path.join(dirName, f"tgt_queueDB_{today}.csv")
+    psl_id = conf["ppp"]["proposalIds"] + conf["ppp"]["proposalIds_backup"]
+    tb_queuedb = queryQueue(psl_id, conf["queuedb"]["filepath"], tb_queuedb_filename)
+
+    tb_tgt, tb_tgt_l, tb_tgt_m, tb_queuedb, tb_queuedb = readTarget(
+        readtgt_con["mode_readtgt"], readtgt_con["para_readtgt"], tb_queuedb
+    )
 
     randomseed = 2
 
