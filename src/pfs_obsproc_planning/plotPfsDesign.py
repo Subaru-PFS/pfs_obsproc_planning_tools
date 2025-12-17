@@ -291,6 +291,17 @@ def _draw_histograms(ax2, ax3, df_fib, df_ag, conf):
         for j in range((df_fib.shape[0] - n_mags)):
             mags = np.append(mags, np.nan)
         mag_per_prog = np.vstack((mag_per_prog, mags))
+        label_per_prog.append(f"{p} ({n_mags}; {n_too_bright}<13mag)")
+    """
+    for k, v in df_mags.groups.items():
+        if k[0] == 'N/A': continue
+        mags = df_fib.pfsMag_plot[v].values
+        n_mags = len(mags)
+        n_too_bright = sum(mags<13)
+        for j in range((df_fib.shape[0] - n_mags)):
+            mags = np.append(mags, np.nan)
+        #print(mag_per_prog.shape, mags.shape)
+        mag_per_prog = np.vstack((mag_per_prog, mags))
         if conf["ppp"]["mode"] == "classic":
             if k[0] in conf["sfa"]["proposalIds_obsFiller"]:
                 label_per_prog.append(f"obs. filler ({n_mags}; {n_too_bright}<13mag)")
