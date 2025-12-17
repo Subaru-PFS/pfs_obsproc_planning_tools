@@ -550,9 +550,9 @@ def readTarget(mode, para, tb_queuedb):
 
     # for grade c programs, set completion rate as 70% as upper limit: no need as tgt DB has updated allocated_time_tac
     """
-    proposalid = ["S25B-086QN", "S25B-056QN", "S25B-092QN", "S25B-134QN", "S25B-120QN", "S25B-047QN", "S25B-126QN", "S25B-125QN", "S25B-136QN", "S25B-048QN"]
+    proposalid = ["S25A-043QF", "S25A-119QF", "S25A-111QF", "S25A-116QF", "S25A-126QF", "S25A-017QF", "S25A-019QF", "S25A-112QF", "S25A-030QF", "S25A-034QF"]
     mask = np.isin(tb_tgt["proposal_id"], proposalid)
-    tb_tgt["allocated_time_tac"][mask] = tb_tgt["allocated_time_tac"][mask] * 0.7
+    tb_tgt["allocated_time_tac"][mask] = 5000.0
     #"""
 
     if len(set(tb_tgt["single_exptime"])) > 1:
@@ -570,8 +570,8 @@ def readTarget(mode, para, tb_queuedb):
     tb_tgt.meta["PPC_origin"] = "auto"
 
     if mode == "queue":
-        tb_tgt["allocated_time_done"] = 0
-        tb_tgt["allocated_time"] = 0
+        tb_tgt["allocated_time_done"] = 0.0
+        tb_tgt["allocated_time"] = 0.0
 
         # list of all psl_id
         psl_id = sorted(set(tb_tgt["proposal_id"]))
@@ -756,22 +756,17 @@ def sciRank_pri(_tb_tgt):
 
     _tb_tgt["rank_fin"] = np.exp(SciUsr_Ranktot)
 
-    weight_max = max(_tb_tgt["rank_fin"])
-    _tb_tgt["rank_fin"][
-        (_tb_tgt["exptime_done"] > 0) | (_tb_tgt["exptime_PPP"] < _tb_tgt["exptime"])
-    ] += weight_max
-
     return _tb_tgt
 
 
-"""
+#"""
 def weight(_tb_tgt, para_sci, para_exp, para_n):
     # calculate weights of targets (higher weights mean more important)
     if len(_tb_tgt) == 0:
         return _tb_tgt
 
     weight_t = (
-        pow(para_sci, _tb_tgt["rank_fin"])
+        pow(_tb_tgt["rank_fin"], para_sci)
         * pow(_tb_tgt["exptime_PPP"] / _tb_tgt.meta["single_exptime"], para_exp)
         * pow(_tb_tgt["local_count"], para_n)
     )
@@ -781,6 +776,11 @@ def weight(_tb_tgt, para_sci, para_exp, para_n):
 
     weight_max = max(_tb_tgt["weight"])
     _tb_tgt["weight"][
+        (_tb_tgt["exptime_done"] > 0) | (_tb_tgt["exptime_PPP"] < _tb_tgt["exptime"])
+    ] += weight_max
+
+    weight_max = max(_tb_tgt["rank_fin"])
+    _tb_tgt["rank_fin"][
         (_tb_tgt["exptime_done"] > 0) | (_tb_tgt["exptime_PPP"] < _tb_tgt["exptime"])
     ] += weight_max
 
@@ -824,8 +824,9 @@ def target_DBSCAN(_tb_tgt, sep=1.38):
     for ii in np.array(tgt_pri_ord)[:, 0]:
         tgt_t = _tb_tgt[labels == ii]
         tgt_group.append(tgt_t)
+        psl_ids_str = ", ".join(map(str, set(tgt_t["proposal_id"])))
         print(
-            f'({tgt_t["ra"][0]}, {tgt_t["dec"][0]}): {set(tgt_t["proposal_id"])}, {sum(tgt_t["rank_fin"])}'
+            f'(RA = {tgt_t["ra"][0]}, DEC = {tgt_t["dec"][0]}): {psl_ids_str}, {sum(tgt_t["rank_fin"])}'
         )
 
     return tgt_group
@@ -857,6 +858,88 @@ def PFS_FoV(ppc_ra, ppc_dec, PA, _tb_tgt):
     index_ = np.where(polygon.contains_points(tgt_lst))[0]
 
     return index_
+
+def KDE_xy(_tb_tgt, X, Y):
+    # calculate a single KDE
+    tgt_values = np.vstack((np.deg2rad(_tb_tgt["dec"]), np.deg2rad(_tb_tgt["ra"])))
+    kde = KernelDensity(
+        bandwidth=np.deg2rad(1.38 / 2.0),
+        kernel="linear",
+        algorithm="ball_tree",
+        metric="haversine",
+    )
+    kde.fit(tgt_values.T, sample_weight=_tb_tgt["weight"])
+
+    X1 = np.deg2rad(X)
+    Y1 = np.deg2rad(Y)
+    positions = np.vstack([Y1.ravel(), X1.ravel()])
+    Z = np.reshape(np.exp(kde.score_samples(positions.T)), Y.shape)
+
+    return Z
+
+
+def KDE(_tb_tgt, multiProcesing):
+    # define binning and calculate KDE
+    if len(_tb_tgt) == 1:
+        # if only one target, set it as the peak
+        return (
+            _tb_tgt["ra"].data[0],
+            _tb_tgt["dec"].data[0],
+            np.nan,
+            _tb_tgt["ra"].data[0],
+            _tb_tgt["dec"].data[0],
+        )
+    else:
+        # determine the binning for the KDE cal.
+        # set a bin width of 0.5 deg in ra&dec if the sample spans over a wide area (>50 degree)
+        # give some blank spaces in binning, otherwide KDE will be wrongly calculated
+        ra_low = min(min(_tb_tgt["ra"]) * 0.9, min(_tb_tgt["ra"]) - 1)
+        ra_up = max(max(_tb_tgt["ra"]) * 1.1, max(_tb_tgt["ra"]) + 1)
+        dec_up = max(max(_tb_tgt["dec"]) * 1.1, max(_tb_tgt["dec"]) + 1)
+        dec_low = min(min(_tb_tgt["dec"]) * 0.9, min(_tb_tgt["dec"]) - 1)
+
+        if (max(_tb_tgt["ra"]) - min(_tb_tgt["ra"])) / 100 < 0.5 and (
+            max(_tb_tgt["dec"]) - min(_tb_tgt["dec"])
+        ) / 100 < 0.5:
+            X_, Y_ = np.mgrid[ra_low:ra_up:101j, dec_low:dec_up:101j]
+        elif (max(_tb_tgt["dec"]) - min(_tb_tgt["dec"])) / 100 < 0.5:
+            X_, Y_ = np.mgrid[0:360:721j, dec_low:dec_up:101j]
+        elif (max(_tb_tgt["ra"]) - min(_tb_tgt["ra"])) / 100 < 0.5:
+            X_, Y_ = np.mgrid[ra_low:ra_up:101j, -40:90:261j]
+        else:
+            X_, Y_ = np.mgrid[0:360:721j, -40:90:261j]
+        positions1 = np.vstack([Y_.ravel(), X_.ravel()])
+
+        if multiProcesing:
+            threads_count = 4  # round(multiprocessing.cpu_count() / 2)
+            thread_n = min(
+                threads_count, round(len(_tb_tgt) * 0.5)
+            )  # threads_count=10 in this machine
+
+            with multiprocessing.Pool(thread_n) as p:
+                dMap_ = p.map(
+                    partial(KDE_xy, X=X_, Y=Y_), np.array_split(_tb_tgt, thread_n)
+                )
+
+            Z = sum(dMap_)
+
+        else:
+            Z = KDE_xy(_tb_tgt, X_, Y_)
+
+        # calculate significance level of KDE
+        obj_dis_sig_ = (Z - np.mean(Z)) / np.std(Z)
+        peak_pos = np.where(obj_dis_sig_ == obj_dis_sig_.max())
+
+        if len(peak_pos[0]) == 0 or len(peak_pos[1]) == 0:
+            peak_x = _tb_tgt["ra"].data[0]
+            peak_y = _tb_tgt["dec"].data[0]
+        else:
+            peak_y = positions1[0, peak_pos[1][round(len(peak_pos[1]) * 0.5)]]
+            peak_x = sorted(set(positions1[1, :]))[
+                peak_pos[0][round(len(peak_pos[0]) * 0.5)]
+            ]
+
+        return X_, Y_, obj_dis_sig_, peak_x, peak_y
 
 
 def objective1(params, _tb_tgt):
@@ -920,7 +1003,7 @@ def objective1(params, _tb_tgt):
 
 
 def PPP_centers(
-    _tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=True, backup=False
+    _tb_tgt, nPPC, weight_para=[3, 0, 0], randomseed=0, mutiPro=True, backup=False
 ):
     # determine pointing centers
     time_start = time.time()
@@ -933,6 +1016,9 @@ def PPP_centers(
         return np.array(ppc_lst), Table()
 
     _tb_tgt = sciRank_pri(_tb_tgt)
+    _tb_tgt = count_N(_tb_tgt)
+    para_sci, para_exp, para_n = weight_para
+    _tb_tgt = weight(_tb_tgt, para_sci, para_exp, para_n)
 
     single_exptime_ = _tb_tgt.meta["single_exptime"]
 
@@ -965,7 +1051,12 @@ def PPP_centers(
                 ]
             )
         )
-        print(f"The non-complete proposals: {psl_id_undone}")
+        if psl_id_undone:
+            undone_str = ", ".join(map(str, psl_id_undone))
+            print("-----------------------------------------")
+            print(f"The non-complete proposals: {undone_str}")
+        else:
+            print("All proposals complete.")
 
         _tb_tgt_ = _tb_tgt_[
             (_tb_tgt_["exptime_PPP"] > 0)
@@ -977,14 +1068,18 @@ def PPP_centers(
 
         _tb_tgt_t_ = tb_tgt_t_group[0]
 
-        """
+        #"""
         _df_tgt_t = Table.to_pandas(_tb_tgt_t_)
         n_tgt = min(200, len(_tb_tgt_t_))
         _df_tgt_t = _df_tgt_t.sample(n_tgt, ignore_index=True, random_state=1)
         _tb_tgt_t_1 = Table.from_pandas(_df_tgt_t)  
+
+        _, _, _, peak_x, peak_y = KDE(_tb_tgt_t_1, False)
+
         #"""
 
-        initial_guess = [_tb_tgt_t_["ra"][0], _tb_tgt_t_["dec"][0]]
+        #initial_guess = [_tb_tgt_t_["ra"][0], _tb_tgt_t_["dec"][0]]
+        initial_guess = [peak_x, peak_y]
         result = minimize(
             objective1,
             initial_guess,
@@ -992,7 +1087,7 @@ def PPP_centers(
             method="Nelder-Mead",
             options={"xatol": 0.01, "fatol": 0.001},
         )
-        print(result.x)
+        print(f"The optimal PPC center: {result.x}")
         ppc_ra_, ppc_dec_ = result.x[0], result.x[1]
         ppc_pa_ = 0.0
 
@@ -1088,6 +1183,10 @@ def PPP_centers(
     # write
     nPPC = len(ppc_lst_fin)
     resol = _tb_tgt["resolution"][0]
+
+    #if resol == "M":
+    #    weight_for_qplan = np.linspace(2.0, 10.0, nPPC) # FIX needed!!
+
     if backup:
         ppc_code = [
             f"que_{resol}_{datetime.now().strftime('%y%m%d')}_{int(nn + 1)}_backup"
