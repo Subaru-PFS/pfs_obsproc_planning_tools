@@ -154,6 +154,7 @@ class GeneratePfsDesign(object):
             self.outputDirQplan = os.path.join(self.outputDir, "qplan")
             self.outputDirDesign = os.path.join(self.outputDir, "design")
             self.outputDirOpe = os.path.join(self.outputDir, "ope")
+            self.outputDirValidation = os.path.join(self.outputDir, "figure_pfsDesign_validation")
             self.cobraCoachDir = os.path.join(
                 self.workDir, self.conf["sfa"]["cobra_coach_dir"]
             )
@@ -166,12 +167,18 @@ class GeneratePfsDesign(object):
                 self.cobraCoachDir,
                 self.outputDirDesign,
                 self.outputDirOpe,
+                self.outputDirValidation,
             ]:
                 if not os.path.exists(d):
                     logger.info(f"{d} is not found and created")
                     os.makedirs(d, exist_ok=True)
                 else:
                     logger.info(f"{d} exists")
+
+            # clean folders
+            clear_folder(self.outputDirDesign)
+            clear_folder(self.outputDirOpe)
+            clear_folder(self.outputDirValidation)
 
             # looks like cobra_coach_dir must be in a full absolute path
             self.conf["sfa"]["cobra_coach_dir_orig"] = self.conf["sfa"][
@@ -310,6 +317,7 @@ class GeneratePfsDesign(object):
             fiberNonAllocationCost=fiber_non_allocation_cost,
             show_plots=show_plots,
             backup=backup,
+            conf=self.conf,
         )
 
         ## check output ##
@@ -422,7 +430,7 @@ class GeneratePfsDesign(object):
                             df_sub["obstime_hst"].iloc[i + 1]
                             - df_sub["obstime_stop"].iloc[i]
                         )
-                        if gap > timedelta(minutes=10):
+                        if gap > timedelta(minutes=15):
                             starttime_backup.append(df_sub["obstime_stop"].iloc[i])
                             stoptime_backup.append(df_sub["obstime_hst"].iloc[i + 1])
                             print(
@@ -685,7 +693,6 @@ class GeneratePfsDesign(object):
         filename = "ppp+qplan_output.csv"
         df = pd.read_csv(os.path.join(self.outputDirPPP, filename))
 
-        clear_folder(self.outputDirDesign)
         listPointings, dictPointings, pfsDesignIds, observation_dates_in_hst = SFA.run(
             self.conf,
             workDir=self.outputDir,
@@ -694,7 +701,6 @@ class GeneratePfsDesign(object):
         )
 
         ## ope file generation ##
-        clear_folder(self.outputDirOpe)
         ope = OpeFile(conf=self.conf, workDir=self.outputDir)
         for obsdate in self.obs_dates:
             date_t = ps.parse(f"{obsdate} 12:00 HST")
@@ -782,24 +788,16 @@ class GeneratePfsDesign(object):
         ## update config before run SFA ##
         self.update_config()
 
-        parentPath = self.outputDir
-        figpath = os.path.join(self.outputDir, "figure_pfsDesign_validation")
-
-        if not os.path.exists(figpath):
-            os.makedirs(figpath)
-
-        clear_folder(figpath)
-
         validation.validation(
-            parentPath,
-            figpath,
+            self.outputDir,
+            self.outputDirValidation,
             self.conf["validation"]["savefig"],
             self.conf["validation"]["showfig"],
             self.conf["ssp"]["ssp"],
             self.conf,
         )
 
-        logger.info(f"validation plots saved under {figpath}")
+        logger.info(f"validation plots saved under {self.outputDirValidation}")
 
         if "queue" in self.workDir:
             from . import completion_check
