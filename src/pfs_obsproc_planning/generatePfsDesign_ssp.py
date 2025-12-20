@@ -774,7 +774,7 @@ class GeneratePfsDesign_ssp(object):
             tb_ppc = Table.read(ppc_path)
         except:
             logger.error(f"Missing ppcList.ecsv for WG={WG}: {ppc_path}")
-            continue
+            return Table()
     
         mask = np.array(
             [

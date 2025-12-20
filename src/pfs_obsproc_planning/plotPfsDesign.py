@@ -37,7 +37,7 @@ from pfs.utils.fiberids import FiberIds
     TargetType.SCIENCE: 1
     TargetType.SKY: 2
     TargetType.UNASSIGNED: 4
- """
+"""
 
 
 def get_ag_counts(df_ag, threshold=19, radius=245.0):
@@ -277,55 +277,62 @@ def _draw_histograms(ax2, ax3, df_fib, df_ag, conf):
 
     # stacked histogram per proposal/filter
     df_mags = df_fib[["proposalId", "pfsMag_plot", "pfsflux_plot_filter"]].groupby(by=["proposalId", "pfsflux_plot_filter"], as_index=False)
-    c_list = it.cycle(["salmon", "royalblue", "orange", "limegreen", "violet"])
-    c_sci = []
-    mag_per_prog = np.zeros(df_fib.shape[0])
-    label_per_prog = []
+    c_list = it.cycle([
+        "#1f77b4",  # blue
+        "#ff7f0e",  # orange
+        "#2ca02c",  # green
+        "#d62728",  # red
+        "#9467bd",  # purple
+        "#8c564b",  # brown
+        "#e377c2",  # pink
+        "#7f7f7f",  # gray
+        "#bcbd22",  # olive
+        "#17becf",  # cyan
+        "#aec7e8",  # light blue
+        "#ffbb78",  # light orange
+        "#98df8a",  # light green
+        "#ff9896",  # light red
+        "#c5b0d5",  # light purple
+    ])
 
+    mag_lists = []
+    label_per_prog = []
+    c_sci = []
+    
     for k, v in df_mags.groups.items():
-        if k[0] == "N/A":
+        if k[0] == 'N/A':
             continue
-        mags = df_fib.pfsMag_plot[v].values
+    
+        mags = df_fib.loc[v, "pfsMag_plot"].values
         n_mags = len(mags)
-        n_too_bright = sum(mags < 13)
-        for j in range((df_fib.shape[0] - n_mags)):
-            mags = np.append(mags, np.nan)
-        mag_per_prog = np.vstack((mag_per_prog, mags))
-        label_per_prog.append(f"{p} ({n_mags}; {n_too_bright}<13mag)")
-    """
-    for k, v in df_mags.groups.items():
-        if k[0] == 'N/A': continue
-        mags = df_fib.pfsMag_plot[v].values
-        n_mags = len(mags)
-        n_too_bright = sum(mags<13)
-        for j in range((df_fib.shape[0] - n_mags)):
-            mags = np.append(mags, np.nan)
-        #print(mag_per_prog.shape, mags.shape)
-        mag_per_prog = np.vstack((mag_per_prog, mags))
+        n_too_bright = np.sum(mags < 13)
+    
         if conf["ppp"]["mode"] == "classic":
             if k[0] in conf["sfa"]["proposalIds_obsFiller"]:
-                label_per_prog.append(f"obs. filler ({n_mags}; {n_too_bright}<13mag)")
+                label = f"obs. filler ({n_mags}; {n_too_bright}<13mag)"
             elif k[0] in conf["ppp"]["proposalIds"]:
-                label_per_prog.append(f"{k[0]} ({n_mags}; {n_too_bright}<13mag)")
+                label = f"{k[0]} ({n_mags}; {n_too_bright}<13mag)"
             else:
-                label_per_prog.append(f"usr filler ({n_mags}; {n_too_bright}<13mag)")
+                label = f"usr filler ({n_mags}; {n_too_bright}<13mag)"
         else:
-            label_per_prog.append(f"{k[0]} ({k[1]}, {n_mags}; {n_too_bright}<13mag)")
+            label = f"{k[0]} ({k[1]}, {n_mags}; {n_too_bright}<13mag)"
+    
+        mag_lists.append(mags)
+        label_per_prog.append(label)
         c_sci.append(next(c_list))
 
-    mag_per_prog = mag_per_prog[1:]
     ax2.hist(
-        mag_per_prog.T,
+        mag_lists,
         bins=bins,
         range=(mmin, mmax),
         histtype="barstacked",
         color=c_sci,
-        lw=0,
         alpha=0.4,
         label=label_per_prog,
         stacked=True,
     )
-    ax2.legend(fontsize=8, loc='upper left', bbox_to_anchor=(0.2, 1.2), ncol=2)
+
+    ax2.legend(fontsize=8, loc='upper left', bbox_to_anchor=(0., 1.2), ncol=2)
     ax2.set_xlabel("mag", fontsize=12)
     ax2.set_ylabel("N (target or STD)", fontsize=12)
 
@@ -510,7 +517,7 @@ def plot_FoV(
     # transpose table for the Axes.table layout (rows: total, bright<=threshold)
     agnum_table = [list(i) for i in zip(*agnum_table)]
 
-    ax1.legend(fontsize="x-small", loc='upper left', bbox_to_anchor=(0.2, 1.2), ncol=3)
+    ax1.legend(fontsize="x-small", loc='upper left', bbox_to_anchor=(0., 1.2), ncol=3)
     ax1.set_xlim(xmin=-255, xmax=255)
     ax1.set_ylim(ymin=-255, ymax=255)
 
@@ -655,7 +662,7 @@ def init_check_design():
     return df
 
 
-def check_design(designId, df_fib, df_ag, df_guidestars_toobright):
+def check_design(designId, ppc_code, df_fib, df_ag, df_guidestars_toobright, n_unfib_bright=0):
     a, a_ = check_ags(df_ag, df_guidestars_toobright)
     ag_cols = [
         f"{ai} ({aj})" if aj > 0 else f"{ai}"
@@ -674,6 +681,8 @@ def check_design(designId, df_fib, df_ag, df_guidestars_toobright):
     )
 
     df_ch["designId"] = f"0x{designId:016x}"
+    df_ch["unfib_bright"] = n_unfib_bright
+    df_ch["ppc_code"] = ppc_code
     # df_ch.style.applymap(colour_background_warning_sky_min, subset=['sky_min'])
 
     return df_ch

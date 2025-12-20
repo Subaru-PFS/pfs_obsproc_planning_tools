@@ -160,7 +160,7 @@ def _warn_too_bright_guidestars(ppc_ra, ppc_dec, ppc_pa, ppc_obstime_utc, conf):
         telescope_elevation=None,
         conf=conf,
         guidestar_mag_min=0,
-        guidestar_mag_max=12,
+        guidestar_mag_max=10,
         guidestar_neighbor_mag_min=21.0,
         guidestar_minsep_deg=0.0002778,
     )
@@ -249,24 +249,24 @@ def _build_df_fib(pfsDesign0):
     pfsflux_l = []
     pfsflux_f = []
     try:
-        filt = pfsDesign0[pfsDesign0.targetType == TargetType.FLUXSTD].filterNames[0][0]
+        filt = pfsDesign0[pfsDesign0.targetType == 3].filterNames[0][0]
     except Exception:
         filt = None
 
     for t, fl, a, b in zip(
         pfsDesign0.targetType, pfsDesign0.filterNames, pfsDesign0.totalFlux, pfsDesign0.psfFlux
     ):
-        if t == TargetType.FLUXSTD:
+        if t == 3: #TargetType.FLUXSTD
             pfsflux_l.append(b[0])
             pfsflux_f.append(fl[0])
-        elif t == TargetType.SCIENCE:
+        elif t == 1: #TargetType.SCIENCE
             if filt is not None and filt in fl:
                 # Preserve the original branching behaviour (note: original used `if not np.nan`)
-                pfsflux_l.append(a[fl.index(filt)] if not np.nan else b[fl.index(filt)])
+                pfsflux_l.append(a[fl.index(filt)] if not np.isnan(a[fl.index(filt)]) else b[fl.index(filt)])
                 pfsflux_f.append(filt)
             else:
                 indices = [i for i, item in enumerate(fl) if item != "none"]
-                pfsflux_l.append(a[indices[0]] if not np.nan else b[indices[0]])
+                pfsflux_l.append(a[indices[0]] if not np.isnan(a[indices[0]]) else b[indices[0]])
                 pfsflux_f.append(fl[indices[0]])
         else:
             pfsflux_l.append(np.nan)
@@ -454,9 +454,10 @@ def validation(parentPath, figpath, save, show, ssp, conf):
         else:
             unfib_bright = []
 
-        df = pldes.check_design(designId, df_fib, df_ag, n_unfib_bright=len(unfib_bright))
+        ppc_code_ = pfsDesign0.designName
+        df = pldes.check_design(designId, ppc_code_, df_fib, df_ag, df_guidestars_toobright, n_unfib_bright=len(unfib_bright))
         df_ch = pd.concat([df_ch, df], ignore_index=True)
-        title = f"designId=0x{designId:016x} ({pfsDesign0.raBoresight:.2f},{pfsDesign0.decBoresight:.2f},PA={pfsDesign0.posAng:.1f})\n{pfsDesign0.designName}"
+        title = f"designId=0x{designId:016x} ({pfsDesign0.raBoresight:.2f},{pfsDesign0.decBoresight:.2f},PA={pfsDesign0.posAng:.1f})\n{ppc_code_}"
         fname = f"{figpath}/check_0x{designId:016x}"
         pldes.plot_FoV(
             df_fib,

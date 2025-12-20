@@ -176,9 +176,9 @@ class GeneratePfsDesign(object):
                     logger.info(f"{d} exists")
 
             # clean folders
-            clear_folder(self.outputDirDesign)
-            clear_folder(self.outputDirOpe)
-            clear_folder(self.outputDirValidation)
+            #clear_folder(self.outputDirDesign)
+            #clear_folder(self.outputDirOpe)
+            #clear_folder(self.outputDirValidation)
 
             # looks like cobra_coach_dir must be in a full absolute path
             self.conf["sfa"]["cobra_coach_dir_orig"] = self.conf["sfa"][
