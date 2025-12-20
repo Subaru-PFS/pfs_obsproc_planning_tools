@@ -1326,20 +1326,29 @@ class GeneratePfsDesign_ssp(object):
         self.update_config()
 
         for wg_ in self.conf["ssp"]["WG"]:
-            parentPath = os.path.join(self.workDir, self.conf["ope"]["designPath"], wg_)
-            figpath = os.path.join(
-                self.workDir, self.conf["ope"]["validationPath"], wg_
-            )
+            # read ppcList.ecsv
+            design_sum_path = os.path.join(self.workDir, "pfs_designs", f"{wg_}_summary_reconfigure.csv")
 
-            validation.validation(
-                parentPath,
-                figpath,
-                True,
-                False,
-                self.conf["ssp"]["ssp"],
-                self.conf,
-            )
-
-            logger.info(f"validation plots saved under {figpath}")
+            if os.path.exists(design_sum_path):
+                parentPath = os.path.join(self.workDir, self.conf["ope"]["designPath"], wg_)
+                figpath = os.path.join(
+                    self.workDir, self.conf["ope"]["validationPath"], wg_
+                )
+    
+                validation.validation(
+                    parentPath,
+                    figpath,
+                    True,
+                    False,
+                    self.conf["ssp"]["ssp"],
+                    self.conf,
+                )
+    
+                logger.info(f"validation plots saved under {figpath}")
+            else:
+                logger.error(
+                    f"[Validation of design] ({wg_}) File not found: {design_sum_path}"
+                )
+                continue
 
         return None
