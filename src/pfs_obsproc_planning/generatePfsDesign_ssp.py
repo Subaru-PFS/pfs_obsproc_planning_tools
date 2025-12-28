@@ -858,101 +858,10 @@ class GeneratePfsDesign_ssp(object):
             vis.update(vis3_update)
 
             # make class_dict (not sure really needed or not)
-            class_dict = {
-                # Priorities correspond to the magnitudes of bright stars (in most case for the 2022 June Engineering)
-                "sci_P0": {
-                    "nonObservationCost": 5e10,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "sci_P1": {
-                    "nonObservationCost": 4e10,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "sci_P2": {
-                    "nonObservationCost": 2e10,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "sci_P3": {
-                    "nonObservationCost": 1e10,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "sci_P4": {
-                    "nonObservationCost": 1e9,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "sci_P5": {
-                    "nonObservationCost": 1e8,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "sci_P6": {
-                    "nonObservationCost": 1e7,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "sci_P7": {
-                    "nonObservationCost": 1e6,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "sci_P8": {
-                    "nonObservationCost": 1e5,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "sci_P9": {
-                    "nonObservationCost": 1e4,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "sci_P10": {
-                    "nonObservationCost": 1e3,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "sci_P11": {
-                    "nonObservationCost": 100,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "sci_P12": {
-                    "nonObservationCost": 10,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "sci_P13": {
-                    "nonObservationCost": 5,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "sci_P9999": {  # fillers
-                    "nonObservationCost": 1,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "cal": {
-                    "numRequired": 200,
-                    "nonObservationCost": 6e10,
-                    "calib": True,
-                },
-                "sky": {
-                    "numRequired": 400,
-                    "nonObservationCost": 6e10,
-                    "calib": True,
-                },
-            }
-            target_class_dict = {}
-            # for i in range(1, 13, 1):
-            for i in range(0, 14, 1):
-                target_class_dict[f"sci_P{i}"] = 1
             target_class_dict = {
-                **target_class_dict,
-                **dict(sci_P9999=1, sky=2, cal=3),
+                **{f"sci_P{i}": 1 for i in range(10001)},
+                "sky": 2,
+                "cal": 3,
             }
 
             # calculate targets' position on focal plane for the pointing
@@ -1326,8 +1235,8 @@ class GeneratePfsDesign_ssp(object):
         self.update_config()
 
         for wg_ in self.conf["ssp"]["WG"]:
-            # read ppcList.ecsv
             design_sum_path = os.path.join(self.workDir, "pfs_designs", f"{wg_}_summary_reconfigure.csv")
+            logger.info(design_sum_path)
 
             if os.path.exists(design_sum_path):
                 parentPath = os.path.join(self.workDir, self.conf["ope"]["designPath"], wg_)
