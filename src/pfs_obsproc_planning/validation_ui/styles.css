@@ -1,0 +1,73 @@
+/* Allow text selection in Tabulator cells */
+.tabulator,
+.tabulator * {
+    user-select: text !important;
+    -webkit-user-select: text !important;
+    -moz-user-select: text !important;
+    -ms-user-select: text !important;
+}
+
+/* Scale down and compact flatpickr / Bokeh calendar popups */
+.flatpickr-calendar, .bk-calendar {
+    transform: scale(0.85) !important;
+    transform-origin: 0 0 !important;
+    font-size: 13px !important;
+    line-height: 1 !important;
+    transition: none !important; /* avoid visible resizing animation */
+}
+
+/* Tabulator table font size */
+.tabulator {
+    font-size: 12px !important;
+    line-height: 1.2 !important;
+}
+
+/* Header font size */
+.tabulator .tabulator-header {
+    font-size: 11px !important;
+}
+
+/* Cell padding (optional, helps compactness) */
+.tabulator .tabulator-cell {
+    padding: 4px 10px !important;
+}
+
+/* hover */
+.tabulator .tabulator-row:hover {
+  background-color: #E0E0E0 !important;
+}
+
+/* selected row */
+.tabulator .tabulator-row.tabulator-selected {
+  background-color: #BFBFBF !important;
+}
+
+/* selected + hover (optional, subtle) */
+.tabulator .tabulator-row.tabulator-selected:hover {
+  background-color: #AFAFAF !important;
+}
+
+/* Custom refresh button matching the theme color #6A5AA3 */
+.bk-btn {
+    /* Base color from the template header purple (#6A5AA3) */
+    color: var(--success-text-color) !important;
+    background-color: #ffffff !important;
+    border-color: var(--success-border-subtle) !important;
+    border-width: 3px;
+    font-weight: bold !important;
+}
+
+.bk-btn:hover {
+    color: #ffffff !important;
+    /* Darker shade in the same colormap */
+    background-color: var(--success-text-color) !important;
+    border-color: var(--success-border-subtle) !important;
+}
+
+.bk-btn:disabled {
+    color: var(--secondary-text-color) !important;
+    /* Lighter shade in the same colormap */
+    border-color: #C9C1E2 !important;
+    background-color: #ffffff !important;
+    border-width: 3px;
+}
