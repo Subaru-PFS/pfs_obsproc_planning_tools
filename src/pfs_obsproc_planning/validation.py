@@ -40,9 +40,9 @@ from pfs_design_tool import reconfigure_fibers_ppp as sfa
 warnings.filterwarnings("ignore")
 
 
-from importlib import reload
+#from importlib import reload
 
-reload(pldes)
+#reload(pldes)
 
 
 def njy_mag(j):
@@ -482,6 +482,38 @@ def validation(parentPath, figpath, save, show, ssp, conf):
     df_ch["inr2"] = df_design["inr2"]
     df_ch["el1"] = df_design["el1"]
     df_ch["el2"] = df_design["el2"]
+
+    desired_order = [
+        "designId",
+        "ppc_code",
+        "inr1",
+        "inr2",
+        "el1",
+        "el2",
+        "unfib_bright",
+        "ag1",
+        "ag2",
+        "ag3",
+        "ag4",
+        "ag5",
+        "ag6",
+        "ag_sum",
+        "sky_mean",
+        "sky_std",
+        "sky_min",
+        "sky_max",
+        "sky_sum",
+        "std_mean",
+        "std_std",
+        "std_min",
+        "std_max",
+        "std_sum",
+    ]
+
+    existing = [c for c in desired_order if c in df_ch.columns]
+    remaining = [c for c in df_ch.columns if c not in existing]
+
+    df_ch = df_ch[existing + remaining]
 
     # """
     styled_html = (
