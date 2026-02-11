@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # PPP.py : PPP full version
-
 import multiprocessing
 import os
 import random
@@ -13,7 +12,9 @@ import scipy.optimize as opt
 from scipy.optimize import minimize
 
 from astropy import units as u
-from astropy.coordinates import SkyCoord
+from astropy.coordinates import SkyCoord, AltAz, EarthLocation, get_body, solar_system_ephemeris
+from astropy.time import Time
+from astroplan import Observer
 from astropy.table import Table, vstack, join
 from dateutil import parser, tz
 from functools import partial
@@ -85,6 +86,117 @@ def removeObjIdDuplication(df):
     num2 = len(df)
     logger.info(f"Duplication removed: {num1} --> {num2}")
     return df
+
+
+def select_targets_by_visibility_envelope(
+    tb_tgt,
+    date="2026-01-20",
+    ra_col="ra",
+    dec_col="dec",
+    time_start_utc=8,
+    time_end_utc=11,
+    time_step_min=15,
+    ra_step_deg=1.0,
+    dec_step_deg=1.0,
+    min_alt=32 * u.deg,
+    max_alt=75 * u.deg,
+    min_moon_sep=30 * u.deg,
+    max_moon_sep=360 * u.deg,
+):
+    """
+    Select targets visible for ALL sampled times during the night
+    using a precomputed RA–Dec visibility envelope.
+
+    Parameters
+    ----------
+    tb_tgt : table-like
+        Must contain RA/Dec columns
+    date : str
+        Date string, e.g. "2026-01-10"
+    ra_col, dec_col : str
+        Column names for RA/Dec in degrees
+    time_start_utc, time_end_utc : int
+        UTC hour range [start, end)
+    time_step_min : int
+        Time sampling in minutes
+    ra_step_deg, dec_step_deg : float
+        RA/Dec grid resolution (deg)
+    min_alt, max_alt : astropy units
+        Altitude limits
+    min_moon_sep, max_moon_sep : astropy units
+        Moon separation limits
+
+    Returns
+    -------
+    mask_visible : np.ndarray (bool)
+        Boolean mask for tb_tgt
+    visible_envelope : 2D bool array
+        RA–Dec envelope mask (for debugging / plotting)
+    """
+
+    # --- Observatory ---
+    subaru = EarthLocation.of_site("Subaru Telescope")
+
+    # --- Time grid (UTC) ---
+    times = Time(
+        [
+            f"{date} {h:02d}:{m:02d}:00"
+            for h in range(time_start_utc, time_end_utc)
+            for m in range(0, 60, time_step_min)
+        ],
+        scale="utc",
+    )
+
+    # --- RA–Dec grid ---
+    ra_grid = np.arange(0, 360 + ra_step_deg, ra_step_deg)
+    dec_grid = np.arange(-30, 90 + dec_step_deg, dec_step_deg)
+    ra2d, dec2d = np.meshgrid(ra_grid, dec_grid)
+
+    skygrid = SkyCoord(ra2d * u.deg, dec2d * u.deg)
+
+    # --- Initialize worst-case envelope ---
+    visible_all = np.zeros(ra2d.shape, dtype=bool)
+
+    # --- Loop over time (cheap: grid × time, not targets × time) ---
+    for t in times:
+        with solar_system_ephemeris.set('builtin'):
+            moon_icrs = get_body('moon', t)
+    
+        altaz_frame = AltAz(obstime=t, location=subaru)
+        altaz_grid = skygrid.transform_to(altaz_frame)
+        moon_altaz = moon_icrs.transform_to(altaz_frame)
+        
+        moon_sep = altaz_grid.separation(moon_altaz)
+
+        vis = (
+            (altaz_grid.alt > min_alt) &
+            (altaz_grid.alt < max_alt) &
+            (moon_sep > min_moon_sep) &
+            (moon_sep < max_moon_sep)
+        )
+
+        visible_all |= vis
+
+    # --- Apply envelope to targets (O(N_targets)) ---
+    ra_idx = np.round(tb_tgt[ra_col]).astype(int) % int(360 / ra_step_deg)
+    dec_idx = np.round(
+        (tb_tgt[dec_col] - dec_grid[0]) / dec_step_deg
+    ).astype(int)
+
+    valid_idx = (
+        (dec_idx >= 0) &
+        (dec_idx < visible_all.shape[0])
+    )
+
+    mask_visible = np.zeros(len(tb_tgt), dtype=bool)
+    mask_visible[valid_idx] = visible_all[dec_idx[valid_idx], ra_idx[valid_idx]]
+
+    logger.info(f"Visible targets: {len(mask_visible)} -> {sum(mask_visible)}")
+
+    tb_tgt = tb_tgt[mask_visible]
+
+    return tb_tgt
+
 
 
 def visibility_checker(tb_tgt, obstimes, start_time_list, stop_time_list):
@@ -549,10 +661,10 @@ def readTarget(mode, para, tb_queuedb):
     # """
 
     # for grade c programs, set completion rate as 70% as upper limit: no need as tgt DB has updated allocated_time_tac
-    """
+    #"""
     proposalid = ["S25A-043QF", "S25A-119QF", "S25A-111QF", "S25A-116QF", "S25A-126QF", "S25A-017QF", "S25A-019QF", "S25A-112QF", "S25A-030QF", "S25A-034QF"]
     mask = np.isin(tb_tgt["proposal_id"], proposalid)
-    tb_tgt["allocated_time_tac"][mask] = 5000.0
+    tb_tgt["allocated_time_tac"][mask] = 10000.0
     #"""
 
     if len(set(tb_tgt["single_exptime"])) > 1:
@@ -683,8 +795,8 @@ def readTarget(mode, para, tb_queuedb):
         #"""
 
         if para["visibility_check"]:
-            tb_tgt = visibility_checker(
-                tb_tgt, para["obstimes"], para["starttimes"], para["stoptimes"]
+            tb_tgt = select_targets_by_visibility_envelope(
+                tb_tgt, #para["obstimes"], para["starttimes"], para["stoptimes"]
             )
 
         # separete the sample by 'resolution' (L/M)
@@ -1106,7 +1218,7 @@ def PPP_centers(
                 ppc_ra_,
                 ppc_dec_,
                 ppc_pa_,
-                otime="2025-04-10T08:00:00Z",
+                otime="2026-01-10T10:00:00Z",
             )
             iter_tem += 1
 
@@ -1175,10 +1287,16 @@ def PPP_centers(
         ppc_lst_fin = ppc_lst[:]
 
     ppc_lst_fin = np.array(ppc_lst_fin)
-    epsilon = 1e-3  # small number to avoid divide-by-zero
-    col = np.where(ppc_lst_fin[:, 4] == 0, epsilon, ppc_lst_fin[:, 4])
-    recip = 1 / col
-    weight_for_qplan = (recip / recip.max()) * 1000.0
+    #epsilon = 1e-3  # small number to avoid divide-by-zero
+    #col = np.where(ppc_lst_fin[:, 4] == 0, epsilon, ppc_lst_fin[:, 4])
+    #recip = 1 / col
+    #weight_for_qplan = 1000.0 #(recip / recip.max()) * 1000.0
+
+    v = ppc_lst_fin[:, 4]   # larger value = more important
+
+    order = np.argsort(-v)  # descending importance
+    weight_for_qplan = np.empty(len(v), dtype=int)
+    weight_for_qplan[order] = np.arange(1, len(v) + 1)
 
     # write
     nPPC = len(ppc_lst_fin)
@@ -1459,7 +1577,7 @@ def netflowRun_single(
     TraCollision=False,
     numReservedFibers=0,
     fiberNonAllocationCost=0.0,
-    otime="2025-03-22T08:00:00Z",
+    otime="2026-01-10T10:00:00Z",
     for_ppc=False,
 ):
     # run netflow (without iteration)
@@ -1631,7 +1749,7 @@ def netflowRun_nofibAssign(
     TraCollision=False,
     numReservedFibers=0,
     fiberNonAllocationCost=0.0,
-    otime="2025-04-20T08:00:00Z",
+    otime="2026-01-10T10:00:00Z",
 ):
     # run netflow (with iteration)
     #    if no fiber assignment in some PPCs, shift these PPCs with 0.15 deg
@@ -1815,7 +1933,7 @@ def netflowRun4PPC(
     ppc_x,
     ppc_y,
     ppc_pa,
-    otime="2025-05-20T08:00:00Z",
+    otime="2026-01-10T10:00:00Z",
 ):
     # run netflow (for PPP_centers)
     ppc_lst = np.array([[0, ppc_x, ppc_y, ppc_pa, 0]])

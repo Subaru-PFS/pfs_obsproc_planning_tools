@@ -80,91 +80,73 @@ def read_conf(conf):
 
 
 def check_versions(package, repo_path, version_desire):
-    """Ensure the repository at repo_path is at the desired version."""
+    """Ensure the repository at repo_path is at the desired version.
 
-    def fetch_all_branches_and_tags(repo):
-        """Fetch all branches and tags from a repository."""
-        repo.remotes.origin.fetch()
-        logger.info(f"({package}) Fetched all branches and tags.")
+    Returns
+    -------
+    bool
+        True if the repo HEAD changed (i.e., code was updated/checked out), else False.
 
-    def get_commit_time(repo, version):
-        """Get the commit time of a branch or tag."""
-        if version in [
-            ref.name for ref in repo.remote().refs
-        ]:  # Check if it's a branch
-            commit_time = repo.commit(version).committed_date
-        elif version in [tag.name for tag in repo.tags]:  # Check if it's a tag
-            commit_time = repo.commit(version).committed_date
-        else:
-            return None  # Invalid version
-        return commit_time
+    Notes
+    -----
+    This function only updates the git working tree. To make the updated code take
+    effect within the running Python process, re-exec the script after updates.
+    """
 
-    def compare_commit_times(current_commit_time, desired_commit_time):
-        """Compare commit times to determine if current is older than desired."""
-        if current_commit_time is None:
-            return True  # If no current commit time, always update
-        return (
-            current_commit_time < desired_commit_time
-        )  # Check if the current version's commit is older
+    version = (version_desire or "").strip()
+    if version == "":
+        logger.info(f"({package}) No desired version given; skip.")
+        return False
 
-    def get_current_version(repo):
-        """Get the current branch or tag version."""
-        current_commit = repo.head.commit
-        # Find if the current commit matches any tag
-        for tag in repo.tags:
-            if tag.commit == current_commit:
-                logger.info(f"({package}) Current tag = {tag.name}")
-                return tag.name  # Return the tag name if found
-
-        # If no tag, return the current branch name
-        for ref in repo.remote().refs:
-            if ref.commit == current_commit:
-                logger.info(f"({package}) Current branch = {ref.name}")
-                return ref.name  # Return the branch name if found
-
-        return None  # If no matching commit found
-
-    def checkout_version(repo, version):
-        """Checkout a specified branch or tag."""
-        version = version.strip()
-        if version == "":
-            logger.info(f"({package}) Do not change the current branch/tag.")
-            return  # Do nothing if no version is provided
-
-        current_commit_time = get_commit_time(repo, "HEAD")
-        desired_commit_time = get_commit_time(repo, version)
-
-        if compare_commit_times(current_commit_time, desired_commit_time):
-            if version in [ref.name for ref in repo.remote().refs]:
-                # Checkout the remote branch and track it locally
-                repo.git.checkout(f"-b {version} origin/{version}")
-                logger.info(f"({package}) Checked out and tracking {version}.")
-            elif version in [tag.name for tag in repo.tags]:
-                # Checkout the tag (no tracking needed for tags)
-                repo.git.checkout(version)
-                logger.info(f"({package}) Checked out to tag {version}.")
-            elif repo.commit(version):
-                # If it's a commit hash, check out the commit directly
-                repo.git.checkout(version)
-                logger.info(f"({package}) Checked out to commit {version}.")
-            else:
-                logger.warning(
-                    f"({package}) Version '{version}' not found in branches or tags."
-                )
-        else:
-            logger.info(f"({package}) Current version is up-to-date with {version}.")
-
-    # Step 1: Load the repository from the given path
     repo = git.Repo(repo_path)
+    old_head = repo.head.commit.hexsha
 
-    # Step 2: Fetch all branches and tags
-    fetch_all_branches_and_tags(repo)
-    get_current_version(repo)
+    # Fetch all remote branches and tags (needed to resolve desired versions).
+    try:
+        repo.remotes.origin.fetch(tags=True, prune=True)
+        logger.info(f"({package}) Fetched branches/tags.")
+    except Exception as e:
+        logger.warning(f"({package}) Fetch failed: {e}")
 
-    # Step 3: Checkout the specified branch or tag
-    checkout_version(repo, version_desire)
+    remote_branch_names = set()
+    try:
+        # remote_head is like 'main' (without 'origin/')
+        remote_branch_names = {ref.remote_head for ref in repo.remotes.origin.refs}
+    except Exception:
+        remote_branch_names = set()
 
-    return None
+    tag_names = {tag.name for tag in repo.tags}
+
+    try:
+        if version in remote_branch_names:
+            # Ensure local branch exists and tracks origin/<version>, then pull.
+            local_branch_names = {h.name for h in repo.heads}
+            if version in local_branch_names:
+                repo.git.checkout(version)
+            else:
+                repo.git.checkout("-b", version, f"origin/{version}")
+            try:
+                repo.remotes.origin.pull(version)
+                logger.info(f"({package}) Pulled latest for branch '{version}'.")
+            except Exception as e:
+                logger.warning(f"({package}) Pull failed for branch '{version}': {e}")
+        elif version in tag_names:
+            repo.git.checkout(version)
+            logger.info(f"({package}) Checked out tag '{version}'.")
+        else:
+            # Fallback: treat as commit-ish.
+            repo.git.checkout(version)
+            logger.info(f"({package}) Checked out '{version}'.")
+    except Exception as e:
+        logger.warning(f"({package}) Failed to checkout '{version}': {e}")
+
+    new_head = repo.head.commit.hexsha
+    changed = new_head != old_head
+    if changed:
+        logger.info(f"({package}) Updated: {old_head[:8]} -> {new_head[:8]}")
+    else:
+        logger.info(f"({package}) Already up-to-date at {new_head[:8]}")
+    return changed
 
 
 class GeneratePfsDesign_ssp(object):
@@ -179,35 +161,49 @@ class GeneratePfsDesign_ssp(object):
         # cobracoach dir
         self.cobraCoachDir = os.path.join(self.conf["sfa"]["cobra_coach_dir"])
 
-        # check versions of dependent packages
+        # Check versions of dependent packages.
+        # If any repo is updated, we re-exec this script once so imports reflect the new code.
+        # On the second (re-exec) run, skip the checks to save time.
+        updated_any = False
+        skip_version_check = os.environ.get("PFS_CHECKVERS_REEXEC", "0") == "1"
         def check_version_pfs(self, package):
             if self.conf["packages"]["check_version"]:
                 try:
                     repo_path = self.conf["packages"][package + "_dir"]
                     version_desire = self.conf["packages"][package + "_ver"]
-                    check_versions(package, repo_path, version_desire)
+                    updated = check_versions(package, repo_path, version_desire)
+                    return bool(updated)
                 except KeyError:
                     logger.warning(f"Path of {package} not found in {self.config}")
-                return None
+                return False
             else:
-                return None
+                return False
 
-        for package_ in [
-            "pfs_utils",
-            "ets_pointing",
-            "ets_shuffle",
-            "pfs_obsproc_planning",
-            "pfs_datamodel",
-            "ics_cobraCharmer",
-            "ics_cobraOps",
-            "ets_fiberalloc",
-            "pfs_instdata",
-            "ets_target_database",
-            "ics_fpsActor",
-            "spt_operational_database",
-            "qplan",
-        ]:
-            check_version_pfs(self, package_)
+        if not skip_version_check:
+            for package_ in [
+                "pfs_utils",
+                "ets_pointing",
+                "ets_shuffle",
+                "pfs_obsproc_planning",
+                "pfs_datamodel",
+                "ics_cobraCharmer",
+                "ics_cobraOps",
+                "ets_fiberalloc",
+                "pfs_instdata",
+                "ets_target_database",
+                "ics_fpsActor",
+                "spt_operational_database",
+                "qplan",
+            ]:
+                updated_any = check_version_pfs(self, package_) or updated_any
+
+            # Re-exec once so the updated git checkouts are reflected in imports.
+            if updated_any:
+                os.environ["PFS_CHECKVERS_REEXEC"] = "1"
+                logger.info(
+                    "Version updates detected; re-executing to load updated code..."
+                )
+                os.execv(sys.executable, [sys.executable] + sys.argv)
 
         import pfs.utils
 
@@ -768,8 +764,14 @@ class GeneratePfsDesign_ssp(object):
         logger.info(f"[For SSP] Make design for {WG}")
 
         # read ppcList.ecsv
-        tb_ppc = Table.read(os.path.join(self.workDir, "targets", WG, "ppcList.ecsv"))
+        ppc_path = os.path.join(self.workDir, "targets", WG, "ppcList.ecsv")
 
+        try:
+            tb_ppc = Table.read(ppc_path)
+        except:
+            logger.error(f"Missing ppcList.ecsv for WG={WG}: {ppc_path}")
+            return Table()
+    
         mask = np.array(
             [
                 (isinstance(val, str) and val.strip().lower() != "nan")
@@ -852,101 +854,10 @@ class GeneratePfsDesign_ssp(object):
             vis.update(vis3_update)
 
             # make class_dict (not sure really needed or not)
-            class_dict = {
-                # Priorities correspond to the magnitudes of bright stars (in most case for the 2022 June Engineering)
-                "sci_P0": {
-                    "nonObservationCost": 5e10,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "sci_P1": {
-                    "nonObservationCost": 4e10,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "sci_P2": {
-                    "nonObservationCost": 2e10,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "sci_P3": {
-                    "nonObservationCost": 1e10,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "sci_P4": {
-                    "nonObservationCost": 1e9,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "sci_P5": {
-                    "nonObservationCost": 1e8,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "sci_P6": {
-                    "nonObservationCost": 1e7,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "sci_P7": {
-                    "nonObservationCost": 1e6,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "sci_P8": {
-                    "nonObservationCost": 1e5,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "sci_P9": {
-                    "nonObservationCost": 1e4,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "sci_P10": {
-                    "nonObservationCost": 1e3,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "sci_P11": {
-                    "nonObservationCost": 100,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "sci_P12": {
-                    "nonObservationCost": 10,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "sci_P13": {
-                    "nonObservationCost": 5,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "sci_P9999": {  # fillers
-                    "nonObservationCost": 1,
-                    "partialObservationCost": 1e11,
-                    "calib": False,
-                },
-                "cal": {
-                    "numRequired": 200,
-                    "nonObservationCost": 6e10,
-                    "calib": True,
-                },
-                "sky": {
-                    "numRequired": 400,
-                    "nonObservationCost": 6e10,
-                    "calib": True,
-                },
-            }
-            target_class_dict = {}
-            # for i in range(1, 13, 1):
-            for i in range(0, 14, 1):
-                target_class_dict[f"sci_P{i}"] = 1
             target_class_dict = {
-                **target_class_dict,
-                **dict(sci_P9999=1, sky=2, cal=3),
+                **{f"sci_P{i}": 1 for i in range(10001)},
+                "sky": 2,
+                "cal": 3,
             }
 
             # calculate targets' position on focal plane for the pointing
@@ -1320,20 +1231,29 @@ class GeneratePfsDesign_ssp(object):
         self.update_config()
 
         for wg_ in self.conf["ssp"]["WG"]:
-            parentPath = os.path.join(self.workDir, self.conf["ope"]["designPath"], wg_)
-            figpath = os.path.join(
-                self.workDir, self.conf["ope"]["validationPath"], wg_
-            )
+            design_sum_path = os.path.join(self.workDir, "pfs_designs", f"{wg_}_summary_reconfigure.csv")
+            logger.info(design_sum_path)
 
-            validation.validation(
-                parentPath,
-                figpath,
-                True,
-                False,
-                self.conf["ssp"]["ssp"],
-                self.conf,
-            )
-
-            logger.info(f"validation plots saved under {figpath}")
+            if os.path.exists(design_sum_path):
+                parentPath = os.path.join(self.workDir, self.conf["ope"]["designPath"], wg_)
+                figpath = os.path.join(
+                    self.workDir, self.conf["ope"]["validationPath"], wg_
+                )
+    
+                validation.validation(
+                    parentPath,
+                    figpath,
+                    True,
+                    False,
+                    self.conf["ssp"]["ssp"],
+                    self.conf,
+                )
+    
+                logger.info(f"validation plots saved under {figpath}")
+            else:
+                logger.error(
+                    f"[Validation of design] ({wg_}) File not found: {design_sum_path}"
+                )
+                continue
 
         return None

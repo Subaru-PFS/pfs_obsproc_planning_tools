@@ -137,7 +137,7 @@ class GeneratePfsDesign(object):
         self.config = config
         self.workDir = workDir
         self.repoDir = repoDir
-        self.obs_dates = ["2023-05-20"]
+        self.obs_dates = ["2026-01-17"]
 
         ## configuration file ##
         self.conf = read_conf(os.path.join(self.workDir, self.config))
@@ -255,10 +255,10 @@ class GeneratePfsDesign(object):
         ## read sample##
         if backup:
             proposalId_ = self.conf["ppp"]["proposalIds_backup"]
-            visibility_check_ = False
-            obstimes_ = ["2025-06-22"]
-            starttimes_ = ["2025-06-23 03:00:00"]
-            stoptimes_ = ["2025-06-23 05:00:00"]
+            visibility_check_ = True
+            obstimes_ = ["2026-01-17"]
+            starttimes_ = ["2026-01-17 18:00:00"]
+            stoptimes_ = ["2026-01-17 7:00:00"]
         elif not backup:
             proposalId_ = self.conf["ppp"]["proposalIds"]
             visibility_check_ = self.conf["ppp"]["visibility_check"]
