@@ -31,6 +31,38 @@ import itertools as it
 # from PIL import Image
 from pfs.utils.fiberids import FiberIds
 
+
+# ----------------------
+# Module-level caches (performance)
+# ----------------------
+# Creating FiberIds and building DataFrames is relatively expensive; cache them.
+_FIBERID_XY_DF = None  # DataFrame indexed by fiberId with columns x,y
+_SECTOR_REFERENCE_XY = None  # (20, 2) reference points for get_field_sector2
+
+
+def _get_fiberid_xy_df():
+    """Return cached DataFrame mapping fiberId -> (x, y) in PFI coords."""
+    global _FIBERID_XY_DF
+    if _FIBERID_XY_DF is None:
+        fiber_ids = FiberIds(get_pfs_utils_path())
+        df = pd.DataFrame(fiber_ids.data)
+        _FIBERID_XY_DF = df[["fiberId", "x", "y"]].set_index("fiberId")
+    return _FIBERID_XY_DF
+
+
+def _get_sector_reference_xy():
+    """Return cached sector reference points (shape (20, 2))."""
+    global _SECTOR_REFERENCE_XY
+    if _SECTOR_REFERENCE_XY is None:
+        points = []
+        points.append([[0.0, 0.0]])
+        phi = np.radians(np.linspace(0, 360, 6, endpoint=False) + 15 + 90)
+        points.append(100.0 * np.stack([np.cos(phi), np.sin(phi)], axis=-1))
+        phi = np.radians(np.linspace(0, 360, 13, endpoint=False) - 20 + 90)
+        points.append(175.0 * np.stack([np.cos(phi), np.sin(phi)], axis=-1))
+        _SECTOR_REFERENCE_XY = np.concatenate(points, axis=0)
+    return _SECTOR_REFERENCE_XY
+
 """
     TargetType.BLACKSPOT: 10
     TargetType.FLUXSTD: 3
@@ -91,7 +123,7 @@ def _draw_fov_points(ax, df_fib, df_ag, unfib_bright, c, alpha, s):
         df_fib[df_fib.targetType == 4].pfi_y,
         c=c["un"],
         marker="x",
-        s=s * 1.3,
+        s=s * 1.5,
         alpha=alpha,
         lw=1,
         label=f"UNASSIGNED ({len(df_fib[df_fib.targetType==4].pfi_y)})",
@@ -112,16 +144,17 @@ def _draw_fov_points(ax, df_fib, df_ag, unfib_bright, c, alpha, s):
         )
 
     # black spots
-    ax.scatter(
-        df_fib[df_fib.targetType == 10].pfi_x,
-        df_fib[df_fib.targetType == 10].pfi_y,
-        c=c["dot"],
-        marker="o",
-        s=s,
-        alpha=alpha,
-        lw=0,
-        label=f"BLACKSPOT ({len(df_fib[df_fib.targetType==10].pfi_y)})",
-    )
+    if sum(df_fib.targetType == 10) > 0:
+        ax.scatter(
+            df_fib[df_fib.targetType == 10].pfi_x,
+            df_fib[df_fib.targetType == 10].pfi_y,
+            c=c["dot"],
+            marker="o",
+            s=s,
+            alpha=alpha,
+            lw=0,
+            label=f"BLACKSPOT ({len(df_fib[df_fib.targetType==10].pfi_y)})",
+        )
 
     # sky, fluxstd, science
     ax.scatter(
@@ -442,8 +475,8 @@ def plot_FoV(
            'agx', 'agy', 'agMag', 'camId', 'ag_pfi_x', 'ag_pfi_y'
     """
 
-    fiberIds = FiberIds(get_pfs_utils_path())
-    df_fibId = pd.DataFrame(fiberIds.data)
+    # Cached fiberId -> (x,y) map. Creating FiberIds/DF for every plot is expensive.
+    df_fibId_xy = _get_fiberid_xy_df()
 
     """
     ## it seems ideal to handle these before calling this function.
@@ -464,15 +497,13 @@ def plot_FoV(
     # a quick kludge to filter out bad quality points in poorly focussed images
     # ind=np.arange(len(val))
 
-    # Get x,y position from grand fiber map for unassigned fiber.
-    uafib = df_fib[df_fib.targetType == 4].fiberId
-    for f in uafib:
-        df_fib.loc[df_fib.fiberId == f, "pfi_x"] = df_fibId.loc[
-            df_fibId.fiberId == f, "x"
-        ].values
-        df_fib.loc[df_fib.fiberId == f, "pfi_y"] = df_fibId.loc[
-            df_fibId.fiberId == f, "y"
-        ].values
+    # Get x,y position from grand fiber map for unassigned fiber (vectorized).
+    mask_unassigned = df_fib["targetType"] == 4
+    if mask_unassigned.any():
+        un_fiber_ids = df_fib.loc[mask_unassigned, "fiberId"].astype(int).to_numpy()
+        xy = df_fibId_xy.reindex(un_fiber_ids)
+        df_fib.loc[mask_unassigned, "pfi_x"] = xy["x"].to_numpy()
+        df_fib.loc[mask_unassigned, "pfi_y"] = xy["y"].to_numpy()
 
     # plt.clf()
     fig = plt.figure(
@@ -490,13 +521,20 @@ def plot_FoV(
     ax4 = fig.add_subplot(gs[4,:])
 
     c = {
-        "un": "slategrey",
-        "un_brt": "brown",
-        "dot": "black",
-        "sky": "deepskyblue",
-        "fstar": "green",
-        "sci": "salmon",
-        "ag": "blueviolet",
+        # --- UN: highlight ---
+        "un": "tomato",        # darker slate gray (noticeable, calm)
+        "un_brt": "#C62828",    # dark saddle brown (very strong, warning-like)
+
+        # --- reference / fixed ---
+        "dot": "#1F1F1F",       # near-black (cleaner than pure black)
+        "sky": "deepskyblue",   # KEEP
+        "fstar": "green",       # KEEP
+
+        # --- de-emphasized ---
+        "sci": "#F2C6C6",       # faint salmon (soft, background-level)
+
+        # --- others ---
+        "ag": "blueviolet",     # unchanged
     }
     c_list = it.cycle(["salmon", "royalblue", "orange", "limegreen", "violet"])
 
@@ -512,7 +550,7 @@ def plot_FoV(
 
     # Annotate camera positions with counts
     for cam_index, (count, (xpos, ypos)) in enumerate(ag_positions, start=1):
-        ax1.text(xpos, ypos, f"{cam_index} ({count})", ha="center", fontsize=10)
+        ax1.text(xpos, ypos, f"AG{cam_index} ({count})", ha="center", fontsize=10)
 
     # transpose table for the Axes.table layout (rows: total, bright<=threshold)
     agnum_table = [list(i) for i in zip(*agnum_table)]
@@ -694,16 +732,17 @@ def check_fibers(df_fib):
            'targetType', 'pfi_x', 'pfi_y', 'spec', 'fh', 'pfsFlux', 'pfsFlux', 'sector'
     """
 
-    targets = df_fib["targetType"]
+    targets = df_fib["targetType"].to_numpy(dtype=int, copy=False)
+    sectors = df_fib["sector"].to_numpy(dtype=int, copy=False)
+    minlength = int(max(20, sectors.max(initial=0) + 1))
+
     f = []
     # sky
     try:
-        arr = (
-            df_fib[df_fib["targetType"] == 2]
-            .groupby(by="sector")["targetType"]
-            .count()
-            .values
-        )
+        counts = np.bincount(sectors[targets == 2], minlength=minlength)
+        arr = counts[counts > 0]
+        if arr.size == 0:
+            raise ValueError
         f.extend((np.mean(arr), np.std(arr), np.min(arr), np.max(arr), np.sum(arr)))
         if arr.size < 12:
             f[2] = 0.0
@@ -711,12 +750,10 @@ def check_fibers(df_fib):
         f.extend((np.nan, np.nan, np.nan, np.nan, np.nan))
     # std
     try:
-        arr = (
-            df_fib[df_fib["targetType"] == 3]
-            .groupby(by="sector")["targetType"]
-            .count()
-            .values
-        )
+        counts = np.bincount(sectors[targets == 3], minlength=minlength)
+        arr = counts[counts > 0]
+        if arr.size == 0:
+            raise ValueError
         f.extend((np.mean(arr), np.std(arr), np.min(arr), np.max(arr), np.sum(arr)))
         if arr.size < 12:
             f[7] = 0.0
@@ -732,17 +769,15 @@ def check_ags(df_ag, df_guidestars_toobright):
            'agx', 'agy', 'agMag', 'camId', 'ag_pfi_x', 'ag_pfi_y'
     """
 
-    cam = df_ag["camId"].values
-    cam_ = df_guidestars_toobright["agId"].values
-    a = []
-    a_ = []
-    for i in range(0, 6):
-        a.append(np.sum(cam == i))
-        a_.append(np.sum(cam_ == i))
+    cam = df_ag["camId"].to_numpy(dtype=int, copy=False)
+    cam_ = df_guidestars_toobright["agId"].to_numpy(dtype=int, copy=False)
 
-    a.append(np.sum(a))
-    a_.append(np.sum(a_))
-    return np.array(a), np.array(a_)
+    counts = np.bincount(cam, minlength=6)[:6]
+    counts_ = np.bincount(cam_, minlength=6)[:6]
+
+    a = np.append(counts, counts.sum())
+    a_ = np.append(counts_, counts_.sum())
+    return a, a_
 
 
 def get_field_sector(df_fib):
@@ -784,29 +819,21 @@ def get_field_sector2(df_fib):
     divede sectors to 20 (1 + 6 + 13) regions, proposed by Laszlo
     """
 
-    points = []
-    # centre points
-    points.append([[0, 0]])
-
-    # inner points
-    phi = np.radians(np.linspace(0, 360, 6, endpoint=False) + 15 + 90)
-    points.append(100 * np.stack([np.cos(phi), np.sin(phi)], axis=-1))
-
-    # outer points
-    phi = np.radians(np.linspace(0, 360, 13, endpoint=False) - 20 + 90)
-    points.append(175 * np.stack([np.cos(phi), np.sin(phi)], axis=-1))
-
-    xy = np.concatenate(points, axis=0)
+    xy = _get_sector_reference_xy()
 
     # Cobra centres
-    uv = np.stack([df_fib.pfi_x, df_fib.pfi_y], axis=-1)
+    uv = np.stack(
+        [
+            df_fib.pfi_x.to_numpy(dtype=float, copy=False),
+            df_fib.pfi_y.to_numpy(dtype=float, copy=False),
+        ],
+        axis=-1,
+    )
 
-    # Find the closest point to each cobra centre
-    d = distance_matrix(xy, uv)
-
-    tag = np.argmin(d, axis=0)
-    # tag.shape
-
+    # Find the closest reference point to each cobra centre
+    diff = uv[None, :, :] - xy[:, None, :]
+    d2 = np.sum(diff * diff, axis=2)  # squared distances
+    tag = np.argmin(d2, axis=0)
     return tag
 
 
