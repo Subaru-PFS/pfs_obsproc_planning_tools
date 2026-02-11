@@ -14,7 +14,7 @@ dependencies = [
     "bokeh>=3.3.0",
     "colorcet>=3.0.1",
     "gitpython>=3.1.38",
-    "gurobipy>=10.0.3,<11",
+    "gurobipy>=10.0.3",
     "ipython>=8.16.0",
     "jupyter>=1.0.0",
     "logzero>=1.7.0",
@@ -33,9 +33,8 @@ dependencies = [
     "sqlalchemy>=2.0.21",
     "toml>=0.10.2",
     "wheel>=0.41.2",
-    # "pfs-datamodel @ git+https://github.com/Subaru-PFS/datamodel.git",
 ]
-requires-python = ">=3.11,<3.12"
+requires-python = ">=3.11"
 readme = "README.md"
 license = { text = "MIT" }
 
@@ -61,7 +60,7 @@ dev = [
     "-e ics_fpsActor @ git+https://github.com/Subaru-PFS/ics_fpsActor.git@u/monodera/tweak_sdss3tools_dep#egg=ics_fpsActor",
     "-e pfs-utils @ git+https://github.com/Subaru-PFS/pfs_utils.git#egg=pfs-utils",
     "-e qplan @ git+https://github.com/naojsoft/qplan.git#egg=qplan",
-    # "-e pfs-datamodel @ git+https://github.com/Subaru-PFS/datamodel.git#egg=pfs-datamodel",
+    "-e pfs-datamodel @ git+https://github.com/Subaru-PFS/datamodel.git#egg=pfs-datamodel",
     "-e ets-fiber-assigner @ git+https://github.com/Subaru-PFS/ets_fiberalloc.git#egg=ets-fiber-assigner",        # two-step assignment
     "-e ics-cobraOps @ git+https://github.com/Subaru-PFS/ics_cobraOps.git#egg=ics-cobraOps",
     "-e opdb @ git+https://github.com/Subaru-PFS/spt_operational_database.git#egg=opdb",
