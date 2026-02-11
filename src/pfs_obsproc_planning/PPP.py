@@ -200,8 +200,8 @@ def readTarget(mode, para):
         def query_target_from_db(proposalId):
             sql = f"SELECT ob_code,obj_id,c.input_catalog_id,ra,dec,epoch,priority,pmra,pmdec,parallax,effective_exptime,single_exptime,qa_reference_arm,is_medium_resolution,proposal.proposal_id,rank,grade,allocated_time_lr+allocated_time_mr as \"allocated_time\",allocated_time_lr,allocated_time_mr,filter_g,filter_r,filter_i,filter_z,filter_y,psf_flux_g,psf_flux_r,psf_flux_i,psf_flux_z,psf_flux_y,psf_flux_error_g,psf_flux_error_r,psf_flux_error_i,psf_flux_error_z,psf_flux_error_y,total_flux_g,total_flux_r,total_flux_i,total_flux_z,total_flux_y,total_flux_error_g,total_flux_error_r,total_flux_error_i,total_flux_error_z,total_flux_error_y FROM target JOIN proposal ON target.proposal_id=proposal.proposal_id JOIN input_catalog AS c ON target.input_catalog_id = c.input_catalog_id WHERE proposal.proposal_id in ('{proposalId}') AND c.active;"
 
-            if proposalId == "S25B-UH016-A":
-                sql = sql[:-1] + " AND c.input_catalog_id in (10258, 10259);"
+            #if proposalId == "S25B-UH016-A":
+            #    sql = sql[:-1] + " AND c.input_catalog_id in (10258, 10259);"
 
             conn = tgtDB.connect()
             query = conn.execute(sa.sql.text(sql))
@@ -338,9 +338,23 @@ def readTarget(mode, para):
     proposalid = para["proposalIds"]
 
     tb_tgt_lst = []
-    for proposalid_ in proposalid:
-        tb_tgt_lst.append(query_target_from_db(proposalid_))
-    tb_tgt = vstack(tb_tgt_lst)
+    if len(para["localPath_tgt"]) > 0:
+        path_tgt = para["localPath_tgt"]
+        if path_tgt.endswith(".ecsv"):
+            tb_tgt = Table.read(path_tgt)
+        tb_tgt["proposal_id"] = "S25B-121"
+        tb_tgt["exptime_usr"] = tb_tgt["exptime"]
+        tb_tgt["input_catalog_id"] = 10000
+        tb_tgt["allocated_time_tac"] = 100000
+        tb_tgt["rank"] = 10.0
+        tb_tgt["pmra"] = 0.0
+        tb_tgt["pmdec"] = 0.0
+        tb_tgt["parallax"] = 1.0
+
+    else:
+        for proposalid_ in proposalid:
+            tb_tgt_lst.append(query_target_from_db(proposalid_))
+        tb_tgt = vstack(tb_tgt_lst)
 
     tb_tgt["ra"] = tb_tgt["ra"].astype(float)
     tb_tgt["dec"] = tb_tgt["dec"].astype(float)
@@ -363,12 +377,36 @@ def readTarget(mode, para):
         return Table(), Table(), Table(), Table(), Table()
 
     # fix needed
-    tb_tgt["single_exptime"][tb_tgt["proposal_id"] == "S25B-UH016-A"] = 10800
+    tb_tgt["single_exptime"][tb_tgt["proposal_id"] == "S25B-UH016-A"] = 27000.0
     tb_tgt["exptime_usr"][
         (tb_tgt["proposal_id"] == "S25A-UH022-A") * (tb_tgt["priority"] == 0)
     ] = 12000.0
+    tb_tgt["priority"][
+        (tb_tgt["proposal_id"] == "S25B-UH016-A") * (tb_tgt["input_catalog_id"] == 10289)
+    ] += 10
+    #tb_tgt["priority"][
+    #    (tb_tgt["proposal_id"] == "S25B-UH041-A") * (np.in1d(tb_tgt["exptime_usr"], [28800.0, 39600.0]))
+    #] += 10
+    #tb_tgt["priority"][
+    #    (tb_tgt["proposal_id"] == "S25B-UH041-A") * (np.in1d(tb_tgt["exptime_usr"], [14400.0, 19800.0]))
+    #] += 20
+    tb_tgt["exptime_usr"][
+        (tb_tgt["proposal_id"] == "S25B-UH041-A") * (np.in1d(tb_tgt["exptime_usr"], [14400.0, 19800.0]))
+    ] = 450.0
+    tb_tgt["exptime_usr"][
+        (tb_tgt["proposal_id"] == "S25B-UH041-A") * (np.in1d(tb_tgt["exptime_usr"], [28800.0, 39600.0]))
+    ] = 900.0
+    tb_tgt["exptime_usr"][
+        (tb_tgt["proposal_id"] == "S25B-UH041-A") * (np.in1d(tb_tgt["exptime_usr"], [43200.0, 59400.0]))
+    ] = 1350.0
 
-    tb_tgt.meta["single_exptime"] = list(set(tb_tgt["single_exptime"]))[0]
+    print(tb_tgt["exptime_usr"])
+
+    #tb_tgt=tb_tgt[tb_tgt["exptime_usr"]==1350.0]
+    
+
+    print(list(set(tb_tgt["single_exptime"])))
+    tb_tgt.meta["single_exptime"] = 450.0 #list(set(tb_tgt["single_exptime"]))[0]
 
     logger.info(
         f"[S1] The single exptime is set to {tb_tgt.meta['single_exptime']:.2f} sec."
@@ -864,38 +902,51 @@ def count_N(_tb_tgt):
     return _tb_tgt
 
 
-def sciRank_pri(_tb_tgt):
-    # calculate rank+priority of targets (higher value means more important)
-    # re-order the rank (starting from 0)
+def sciRank_pri(_tb_tgt, n_priority=20):
+    """
+    Calculate final rank incorporating user priority.
+    Higher value => more important.
+
+    Parameters
+    ----------
+    _tb_tgt : table-like
+        Must contain columns 'rank' and 'priority'
+    n_priority : int
+        Number of priority levels (default: 20 for 0–19)
+    """
+
     if len(_tb_tgt) == 0:
         return _tb_tgt
 
-    SciRank = [0.0] + sorted(list(set(_tb_tgt["rank"])))
+    # --- base science ranks ---
+    SciRank = [0.0] + sorted(set(_tb_tgt["rank"]))
+    n_pri = n_priority
+    pri_max = n_pri - 1
 
-    # give each user priority a rank in the interval of the two ranks
-    # (0-9, with 0=rank_i, 9=0.5*(rank_[i-1]+rank_i))
+    # --- build priority interpolation per rank interval ---
     SciRank_usrPri = [
-        np.arange(
-            0.55 * SciRank[i1] + 0.45 * SciRank[i1 - 1],
-            1.05 * SciRank[i1] - 0.05 * SciRank[i1 - 1],
-            0.05 * (SciRank[i1] - SciRank[i1 - 1]),
+        np.linspace(
+            0.55 * SciRank[i] + 0.45 * SciRank[i - 1],
+            1.05 * SciRank[i] - 0.05 * SciRank[i - 1],
+            n_pri,
         )
-        for i1 in range(1, len(SciRank))
+        for i in range(1, len(SciRank))
     ]
 
+    # --- assign final rank values ---
     SciUsr_Ranktot = np.array(
         [
-            SciRank_usrPri[i2 - 1][9 - j2]
-            for s_tem in _tb_tgt
-            for i2 in range(1, len(SciRank))
-            for j2 in range(0, 10, 1)
-            if s_tem["rank"] == SciRank[i2] and s_tem["priority"] == j2
+            SciRank_usrPri[i - 1][pri_max - int(s["priority"])]
+            for s in _tb_tgt
+            for i in range(1, len(SciRank))
+            if s["rank"] == SciRank[i]
         ]
     )
 
     _tb_tgt["rank_fin"] = np.exp(SciUsr_Ranktot)
 
     return _tb_tgt
+
 
 
 def weight(_tb_tgt, para_sci, para_exp, para_n):
@@ -1463,6 +1514,27 @@ def PPC_centers_single(_tb_tgt, nPPC, weight_para):
             elif len(ppc_lst) == 2:
                 ra, dec, pa = [270.29782837, 65.7456042, 94.62414553]
 
+        elif list(set(_tb_tgt["proposal_id"])) == ["S25B-UH041-A"]:
+            #"""
+            if len(ppc_lst) ==0:
+                ra, dec, pa = [36.49583333, -4.49444444, 0]
+            elif len(ppc_lst) ==1:
+                _tb_tgt_ = _tb_tgt_[(_tb_tgt_["priority"] == 999) | (_tb_tgt_["exptime_PPP"] < 1350.0)]
+                ra, dec, pa = [36.49583333, -4.49444444, 0]
+            elif len(ppc_lst) ==2:
+                _tb_tgt_ = _tb_tgt_[(_tb_tgt_["priority"] == 999) | (_tb_tgt_["exptime_PPP"] < 900.0)]
+                ra, dec, pa = [36.49583333, -4.49444444, 0]
+            """
+            if len(ppc_lst) ==0:
+                ra, dec, pa = [150.11916667, 2.20583333, 0]
+            elif len(ppc_lst) ==1:
+                _tb_tgt_ = _tb_tgt_[(_tb_tgt_["priority"] == 999) | (_tb_tgt_["exptime_PPP"] < 1350.0)]
+                ra, dec, pa = [150.11916667, 2.20583333, 0]
+            elif len(ppc_lst) ==2:
+                _tb_tgt_ = _tb_tgt_[(_tb_tgt_["priority"] == 999) | (_tb_tgt_["exptime_PPP"] < 900.0)]
+                ra, dec, pa = [150.11916667, 2.20583333, 0]
+            #"""
+
         else:
             tb_tgt_t_group = target_DBSCAN(_tb_tgt_, 1.38)
 
@@ -1531,7 +1603,7 @@ def PPC_centers_single(_tb_tgt, nPPC, weight_para):
         ppc_code = ["cla_L_uh006_" + str(n + 1) for n in np.arange(nPPC)]
     else:
         ppc_code = [
-            f"cla_{resol}_{pslid_.split('-')[1]}_{str(n+1)}" for n in np.arange(nPPC)
+            f"cla_{resol}_{pslid_.split('-')[1]}_{str(n+1)}_backup" for n in np.arange(nPPC)
         ]
     ppc_ra = ppc_lst_fin[:, 1]
     ppc_dec = ppc_lst_fin[:, 2]
@@ -1595,7 +1667,7 @@ def PPC_centers_single(_tb_tgt, nPPC, weight_para):
     )
 
     # ppcList.write("/home/wanqqq/examples/run_2503/S25A-UH006-B/output/ppp/ppcList.ecsv", format="ascii.ecsv", overwrite=True)
-    # ppcList.write("/home/wanqqq/workDir_pfs/run_2509/S25B-116N/output_20250914/ppp/ppcList1.ecsv", format="ascii.ecsv", overwrite=True)
+    ppcList.write("/home/wanqqq/workDir_pfs/S25B/run_2601/S25B-UH041-A/output_20260106/ppp/ppcList1.ecsv", format="ascii.ecsv", overwrite=True)
 
     logger.info(
         f"[S2] Determine pointing centers done ( nppc = {len(ppc_lst_fin):.0f}; takes {round(time.time()-time_start,3)} sec)"
@@ -1686,7 +1758,7 @@ def sam2netflow(_tb_tgt, for_ppc=False):
     # set FH limit bundle
     tgt_psl_FH_tac_ = {}
 
-    #'''
+    '''
     if for_ppc == False:
         psl_id = sorted(set(_tb_tgt["proposal_id"]))
 
@@ -1718,68 +1790,168 @@ def NetflowPreparation(_tb_tgt):
     classdict = {
         # Priorities correspond to the magnitudes of bright stars (in most case for the 2022 June Engineering)
         "sci_P999": {
-            "nonObservationCost": 200,
-            "partialObservationCost": 200,
+            "nonObservationCost": 1e4,
+            "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P0": {
-            "nonObservationCost": 200,
-            "partialObservationCost": 200,
+            "nonObservationCost": 1e4,
+            "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P1": {
-            "nonObservationCost": 100,
-            "partialObservationCost": 200,
+            "nonObservationCost": 5e3,
+            "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P2": {
-            "nonObservationCost": 80,
-            "partialObservationCost": 200,
+            "nonObservationCost": 5e2,
+            "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P3": {
-            "nonObservationCost": 70,
-            "partialObservationCost": 200,
+            "nonObservationCost": 5e1,
+            "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P4": {
-            "nonObservationCost": 60,
-            "partialObservationCost": 200,
+            "nonObservationCost": 2e3,
+            "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P5": {
-            "nonObservationCost": 50,
-            "partialObservationCost": 200,
+            "nonObservationCost": 1e3,
+            "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P6": {
-            "nonObservationCost": 40,
-            "partialObservationCost": 200,
+            "nonObservationCost": 100,
+            "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P7": {
-            "nonObservationCost": 30,
-            "partialObservationCost": 200,
+            "nonObservationCost": 5,
+            "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P8": {
-            "nonObservationCost": 20,
-            "partialObservationCost": 200,
+            "nonObservationCost": 3,
+            "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P9": {
             "nonObservationCost": 10,
-            "partialObservationCost": 200,
+            "partialObservationCost": 5e4,
+            "calib": False,
+        },
+        "sci_P10": {
+            "nonObservationCost": 5,
+            "partialObservationCost": 5e4,
+            "calib": False,
+        },
+        "sci_P11": {
+            "nonObservationCost": 4,
+            "partialObservationCost": 5e4,
+            "calib": False,
+        },
+        "sci_P12": {
+            "nonObservationCost": 3,
+            "partialObservationCost": 5e4,
+            "calib": False,
+        },
+        "sci_P13": {
+            "nonObservationCost": 2,
+            "partialObservationCost": 5e4,
+            "calib": False,
+        },
+        "sci_P14": {
+            "nonObservationCost": 1,
+            "partialObservationCost": 5e4,
+            "calib": False,
+        },
+        "sci_P15": {
+            "nonObservationCost": 0.9,
+            "partialObservationCost": 5e4,
+            "calib": False,
+        },
+        "sci_P16": {
+            "nonObservationCost": 0.8,
+            "partialObservationCost": 5e4,
+            "calib": False,
+        },
+        "sci_P17": {
+            "nonObservationCost": 0.7,
+            "partialObservationCost": 5e4,
+            "calib": False,
+        },
+        "sci_P18": {
+            "nonObservationCost": 0.6,
+            "partialObservationCost": 5e4,
+            "calib": False,
+        },
+        "sci_P19": {
+            "nonObservationCost": 0.5,
+            "partialObservationCost": 5e4,
+            "calib": False,
+        },
+        "sci_P20": {
+            "nonObservationCost": 0.4,
+            "partialObservationCost": 5e4,
+            "calib": False,
+        },
+        "sci_P21": {
+            "nonObservationCost": 0.3,
+            "partialObservationCost": 5e4,
+            "calib": False,
+        },
+        "sci_P22": {
+            "nonObservationCost": 0.2,
+            "partialObservationCost": 5e4,
+            "calib": False,
+        },
+        "sci_P23": {
+            "nonObservationCost": 0.1,
+            "partialObservationCost": 5e4,
+            "calib": False,
+        },
+        "sci_P24": {
+            "nonObservationCost": 0.05,
+            "partialObservationCost": 5e4,
+            "calib": False,
+        },
+        "sci_P25": {
+            "nonObservationCost": 0.04,
+            "partialObservationCost": 5e4,
+            "calib": False,
+        },
+        "sci_P26": {
+            "nonObservationCost": 0.03,
+            "partialObservationCost": 5e4,
+            "calib": False,
+        },
+        "sci_P27": {
+            "nonObservationCost": 0.02,
+            "partialObservationCost": 5e4,
+            "calib": False,
+        },
+        "sci_P28": {
+            "nonObservationCost": 0.01,
+            "partialObservationCost": 5e4,
+            "calib": False,
+        },
+        "sci_P29": {
+            "nonObservationCost": 0.01,
+            "partialObservationCost": 5e4,
             "calib": False,
         },
         "cal": {
             "numRequired": 200,
-            "nonObservationCost": 200,
+            "nonObservationCost": 2000,
             "calib": True,
         },
         "sky": {
             "numRequired": 400,
-            "nonObservationCost": 200,
+            "nonObservationCost": 2000,
             "calib": True,
         },
     }
@@ -2121,7 +2293,7 @@ def netflowRun(
 
             resol = _tb_tgt["resolution"][0]
             pslid_ = _tb_tgt["proposal_id"][0]
-            ppc_code_ = f"cla_{resol}_{pslid_.split('-')[1]}_{str(i+1)}"
+            ppc_code_ = f"cla_{resol}_{pslid_.split('-')[1]}_{str(i+1)}_backup"
             ppc_lst.append(
                 [
                     ppc_code_,
@@ -2783,6 +2955,10 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
         os.path.join(dirName, "ppcList_all.ecsv"), format="ascii.ecsv", overwrite=True
     )
 
+    _tb_tgt_tot["priority"][
+        (_tb_tgt_tot["proposal_id"] == "S25B-UH016-A") * (_tb_tgt_tot["input_catalog_id"] == 10289)
+    ] -= 10
+
     ob_code = _tb_tgt_tot["ob_code"].data
     ob_obj_id = _tb_tgt_tot["obj_id"].data
     ob_cat_id = _tb_tgt_tot["input_catalog_id"].data
@@ -3026,6 +3202,7 @@ def run(
     fiberNonAllocationCost=0.0,
     show_plots=False,
     backup=False,
+    conf=None,
 ):
     global bench
     bench = bench_info
@@ -3041,9 +3218,9 @@ def run(
     TraCollision = False
     multiProcess = True
 
-    if list(set(tb_tgt["proposal_id"])) == ["S25B-116N"]:
+    if list(set(tb_tgt["proposal_id"])) == ["S25B-116N"] or list(set(tb_tgt["proposal_id"])) == ["S25B-UH041-A"]:
         # LR--------------------------------------------
-        ppc_lst_l = PPC_centers_single(tb_sel_l, nppc_l)
+        ppc_lst_l = PPC_centers_single(tb_sel_l, nppc_l, [para_sci_m, para_exp_m, para_n_m])
 
         tb_tgt_l1 = Table.copy(tb_tgt_l)
         tb_tgt_l1.meta["PPC"] = ppc_lst_l
