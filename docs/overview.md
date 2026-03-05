@@ -39,7 +39,7 @@ The script performs the following key steps:
 
 ## Usage
 
-The script can be run as a standalone command-line tool or imported as a module. Typical usage involves specifying the working directory, configuration file, and desired number of pointings:
+The script can be run as a standalone command-line tool or imported as a module. Please follow the instruction in [README.md](../README.md). Typical usage involves specifying the working directory, configuration file, and desired number of pointings:
 
 ```shell
 python src/pfs_obsproc_planning/generatePfsDesign.py --workDir <workdir> --config config.toml --obs_dates 2026-01-17
@@ -64,8 +64,8 @@ gpd.runSFA(clearOutput=True)
 ## Modular Design
 
 The script is organized into modular methods:
-- `runPPP()`: Runs the preparation pipeline.
-- `runQPlan()`: Executes the queue planner.
+- `runPPP()`: Determination of pointing centers.
+- `runQPlan()`: Executes the queue planner to create observation schedule.
 - `runSFA()`: Performs fiber assignment and generates design files.
 - `runValidation()`: Validates the outputs.
 
