@@ -6,7 +6,7 @@ authors = [
   { name = "Masato Onodera", email = "monodera@naoj.org" },
 ]
 name = "pfs_obsproc_planning"
-version = "0.2.0"
+dynamic = ["version"]
 description = ""
 dependencies = [
   "PyQt5>=5.15.0",
@@ -44,8 +44,11 @@ readme = "README.md"
 license = { text = "MIT" }
 
 [build-system]
-requires = ["pybind11", "setuptools", "wheel"]
+requires = ["pybind11", "setuptools", "setuptools_scm", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+version_file = "src/pfs_obsproc_planning/_version.py"
 
 [tool.setuptools]
 include-package-data = true
