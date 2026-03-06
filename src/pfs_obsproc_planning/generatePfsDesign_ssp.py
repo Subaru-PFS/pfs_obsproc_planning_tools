@@ -17,9 +17,9 @@ hawaii_tz = pytz.timezone("Pacific/Honolulu")
 import git
 import numpy as np
 import pandas as pd
-import toml
+import tomllib
 from astropy.table import Table, vstack
-from logzero import logger
+from loguru import logger
 
 warnings.filterwarnings("ignore")
 
@@ -31,7 +31,8 @@ from .opefile import OpeFile
 
 
 def read_conf(conf):
-    config = toml.load(conf)
+    with open(conf, "rb") as f:
+        config = tomllib.load(f)
 
     # get some parameters from environmet variables
     # if not in the config file and already set as enviroment variables
@@ -207,6 +208,7 @@ class GeneratePfsDesign_ssp(object):
 
         import pfs.utils
 
+    
         repo_path = os.path.join(pfs.utils.__path__[0], "../../../")
         os.environ["PFS_UTILS_DIR"] = os.path.join(pfs.utils.__path__[0], "../../../")
 

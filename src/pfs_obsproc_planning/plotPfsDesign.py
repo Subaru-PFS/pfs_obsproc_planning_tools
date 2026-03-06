@@ -18,7 +18,7 @@ from scipy.spatial import distance_matrix
 # import matplotlib
 # matplotlib.use('agg')
 import matplotlib.pyplot as plt
-from logzero import logger
+from loguru import logger
 
 # event
 # from eventPlot import PointBrowser
