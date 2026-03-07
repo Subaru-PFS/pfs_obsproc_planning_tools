@@ -1,0 +1,21 @@
+[packages]
+pfs_utils_ver = "u/monodera/symlink-data"
+ets_pointing_ver = "u/monodera/adjust-packaging-202603"
+# pfs_datamodel_ver = ""
+# ics_cobraCharmer_ver = ""
+# ics_cobraOps_ver = ""
+# ets_fiberalloc_ver = ""
+# pfs_instdata_ver = ""
+pfs_datamodel_ver = "w.2026.09b"
+ics_cobraCharmer_ver = "1.5.2"
+ics_cobraOps_ver = "v2.0.5"
+ets_fiberalloc_ver = "v3.3"
+pfs_instdata_ver = "1.8.67"
+ets_shuffle_ver = ""  # HEAD is okay
+ets_target_database_ver = ""  # HEAD is okay
+qplan_ver = ""  # HEAD is okay
+spt_operational_database_ver = ""  # HEAD is okay
+# ics_fpsActor_ver = ""  # not used
+
+# # no need to check the version of this package itself
+# pfs_obsproc_planning_ver = ""
