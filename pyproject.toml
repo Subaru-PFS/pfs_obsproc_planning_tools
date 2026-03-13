@@ -28,7 +28,7 @@ dependencies = [
   "pandas>=2.2.0",
   "panel>=1.4.0",
   "pfs-datamodel @ git+https://github.com/Subaru-PFS/datamodel.git",
-  "pfs_design_tool @ git+https://github.com/Subaru-PFS/ets_pointing.git@u/monodera/adjust-packaging-202603",
+  "pfs_design_tool @ git+https://github.com/Subaru-PFS/ets_pointing.git",
   "pfs-utils @ git+https://github.com/Subaru-PFS/pfs_utils.git",
   "python-dateutil>=2.8.2",
   "pytz>=2023.3",
