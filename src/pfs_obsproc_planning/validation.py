@@ -22,7 +22,7 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from logzero import logger
+from loguru import logger
 from mpl_toolkits.mplot3d import Axes3D
 
 # from pfs.drp.stella.readLineList import ReadLineListTask,  ReadLineListConfig

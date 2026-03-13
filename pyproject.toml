@@ -1,89 +1,96 @@
 [project]
 authors = [
-    { name = "Wanqiu He" },
-    { name = "Kiyoto Yabe" },
-    { name = "Eric Jeschke" },
-    { name = "Masato Onodera", email = "monodera@naoj.org" },
+  { name = "Wanqiu He" },
+  { name = "Kiyoto Yabe" },
+  { name = "Eric Jeschke" },
+  { name = "Masato Onodera", email = "monodera@naoj.org" },
 ]
 name = "pfs_obsproc_planning"
-version = "0.2.0"
+dynamic = ["version"]
 description = ""
 dependencies = [
-    "astroplan>=0.9.1",
-    "astropy>=5.3",
-    "bokeh>=3.3.0",
-    "colorcet>=3.0.1",
-    "gitpython>=3.1.38",
-    "gurobipy>=10.0.3,<11",
-    "ipython>=8.16.0",
-    "jupyter>=1.0.0",
-    "logzero>=1.7.0",
-    "matplotlib>=3.8.0",
-    "numpy>=1.24.0",
-    "pandas>=2.1.0",
-    "psycopg2-binary>=2.9.8",
-    "pybind11>=2.11.1",
-    "pyyaml>=5.3.1",
-    "scikit-learn>=1.3.1",
-    "scipy>=1.9.3",
-    "seaborn>=0.13.0",
-    "sep>=1.2.1",
-    "setuptools==75.8.0",
-    "shapely>=2.0.1",
-    "sqlalchemy>=2.0.21",
-    "toml>=0.10.2",
-    "wheel>=0.41.2",
-    # "pfs-datamodel @ git+https://github.com/Subaru-PFS/datamodel.git",
+  "PyQt5>=5.15.0",
+  "astroplan>=0.10",
+  "astropy>=7.0",
+  "beautifulsoup4>=4.12.0",
+  "colorcet>=3.0.1",
+  "ets-fiber-assigner @ git+https://github.com/Subaru-PFS/ets_fiberalloc.git",
+  "ginga>=4.1.0",
+  "gitpython>=3.1.38",
+  "gurobipy>=12,<13",
+  "ics-cobraOps @ git+https://github.com/Subaru-PFS/ics_cobraOps.git",
+  "ipython>=8.16.0",
+  "jupyter>=1.0.0",
+  "loguru>=0.7.0",
+  "matplotlib>=3.9.0",
+  "numpy>=2.0.0",
+  "opdb @ git+https://github.com/Subaru-PFS/spt_operational_database.git",
+  "pandas>=2.2.0",
+  "panel>=1.4.0",
+  "pfs-datamodel @ git+https://github.com/Subaru-PFS/datamodel.git",
+  "pfs_design_tool @ git+https://github.com/Subaru-PFS/ets_pointing.git@u/monodera/adjust-packaging-202603",
+  "pfs-utils @ git+https://github.com/Subaru-PFS/pfs_utils.git",
+  "python-dateutil>=2.8.2",
+  "pytz>=2023.3",
+  "qplan @ git+https://github.com/naojsoft/qplan.git",
+  "scikit-learn>=1.5.0",
+  "scipy>=1.13.0",
+  "seaborn>=0.13.2",
+  "shapely>=2.0.1",
+  "sqlalchemy>=2.0.21",
 ]
-requires-python = ">=3.11,<3.12"
+requires-python = ">=3.12"
 readme = "README.md"
 license = { text = "MIT" }
 
-
 [build-system]
-requires = ["setuptools", "wheel", "pybind11"]
+requires = ["pybind11", "setuptools", "setuptools_scm", "wheel"]
 build-backend = "setuptools.build_meta"
 
-
 [tool.setuptools]
-packages = ["pfs_obsproc_planning", "ets_shuffle", "pfs_design_tool"]
 include-package-data = true
 
+[tool.setuptools.packages.find]
+where = ["src"]
 
-[tool.setuptools.package-dir]
-pfs_obsproc_planning = "src/pfs_obsproc_planning"
-ets_shuffle = "src/ets_shuffle/ets_shuffle"
-pfs_design_tool = "src/ets_pointing/src/pfs_design_tool"
+[tool.setuptools_scm]
+version_file = "src/pfs_obsproc_planning/_version.py"
 
-[tool.pdm.dev-dependencies]
-dev = [
-    "-e ics-cobraCharmer @ git+https://github.com/Subaru-PFS/ics_cobraCharmer.git#egg=ics_cobraCharmer",
-    "-e ics_fpsActor @ git+https://github.com/Subaru-PFS/ics_fpsActor.git@u/monodera/tweak_sdss3tools_dep#egg=ics_fpsActor",
-    "-e pfs-utils @ git+https://github.com/Subaru-PFS/pfs_utils.git#egg=pfs-utils",
-    "-e qplan @ git+https://github.com/naojsoft/qplan.git#egg=qplan",
-    # "-e pfs-datamodel @ git+https://github.com/Subaru-PFS/datamodel.git#egg=pfs-datamodel",
-    "-e ets-fiber-assigner @ git+https://github.com/Subaru-PFS/ets_fiberalloc.git#egg=ets-fiber-assigner",        # two-step assignment
-    "-e ics-cobraOps @ git+https://github.com/Subaru-PFS/ics_cobraOps.git#egg=ics-cobraOps",
-    "-e opdb @ git+https://github.com/Subaru-PFS/spt_operational_database.git#egg=opdb",
-    "-e ets_target_database @ git+https://github.com/Subaru-PFS/ets_target_database.git#egg=ets_target_database",
-]
+# [tool.uv]
+# override-dependencies = [
+#   "pfs-utils @ git+https://github.com/Subaru-PFS/pfs_utils.git@u/monodera/symlink-data",
+# ]
 
+# [tool.uv.sources]
+# pfs-utils = { git = "https://github.com/Subaru-PFS/pfs_utils.git", branch = "u/monodera/symlink-data" }
 
-[tool.pdm.options]
-add = ["--no-isolation"]
-install = ["--no-isolation"]
+# [tool.pdm.dev-dependencies]
+# dev = [
+#   # "-e ics-cobraCharmer @ git+https://github.com/Subaru-PFS/ics_cobraCharmer.git#egg=ics_cobraCharmer",
+#   #   "-e ics_fpsActor @ git+https://github.com/Subaru-PFS/ics_fpsActor.git@u/monodera/tweak_sdss3tools_dep#egg=ics_fpsActor",
+#   #   "-e pfs-utils @ git+https://github.com/Subaru-PFS/pfs_utils.git#egg=pfs-utils",
+#   #   "-e qplan @ git+https://github.com/naojsoft/qplan.git#egg=qplan",
+#   # "-e pfs-datamodel @ git+https://github.com/Subaru-PFS/datamodel.git#egg=pfs-datamodel",
+#   #   "-e ets-fiber-assigner @ git+https://github.com/Subaru-PFS/ets_fiberalloc.git#egg=ets-fiber-assigner",  # two-step assignment
+#   #   "-e ics-cobraOps @ git+https://github.com/Subaru-PFS/ics_cobraOps.git#egg=ics-cobraOps",
+#   #   "-e opdb @ git+https://github.com/Subaru-PFS/spt_operational_database.git#egg=opdb",
+#   #   "-e ets_target_database @ git+https://github.com/Subaru-PFS/ets_target_database.git#egg=ets_target_database",
+# ]
 
+# [tool.pdm.options]
+# add = ["--no-isolation"]
+# install = ["--no-isolation"]
 
-[tool.pdm.scripts]
-gen-requirements = { cmd = [
-    "pdm",
-    "export",
-    "--format",
-    "requirements",
-    "--without-hashes",
-    "--pyproject",
-    "--dev",
-    "--output",
-    "requirements.txt",
-    "--verbose",
-], help = "Generate requirements.txt" }
+# [tool.pdm.scripts]
+# gen-requirements = { cmd = [
+#   "pdm",
+#   "export",
+#   "--format",
+#   "requirements",
+#   "--without-hashes",
+#   "--pyproject",
+#   "--dev",
+#   "--output",
+#   "requirements.txt",
+#   "--verbose",
+# ], help = "Generate requirements.txt" }

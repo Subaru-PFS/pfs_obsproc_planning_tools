@@ -14,7 +14,7 @@ hawaii_tz = pytz.timezone("Pacific/Honolulu")
 import git
 import numpy as np
 import pandas as pd
-import toml
+import tomllib
 from astropy.table import Table, vstack
 from astropy.coordinates import Angle
 import astropy.units as u
@@ -29,7 +29,8 @@ from pfs_design_tool import reconfigure_fibers_ppp as sfa
 
 
 def read_conf(conf):
-    config = toml.load(conf)
+    with open(conf, "rb") as f:
+        config = tomllib.load(f)
     return config
 
 

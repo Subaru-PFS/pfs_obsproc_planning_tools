@@ -8,7 +8,7 @@ warnings.filterwarnings("ignore")
 from PyQt5 import QtWidgets, uic
 from PyQt5.QtWidgets import *
 from loguru import logger
-import toml
+import tomllib
 import os
 
 
@@ -40,7 +40,8 @@ class GeneratePfsDesignGUI(object):
     def getPslID_tgtDB(self):
         filename = self.app_window.lineEdit_workdir_path.text() + "/config.toml"
         if len(filename) > 12:
-            config = toml.load(filename)
+            with open(filename, "rb") as f:
+                config = tomllib.load(f)
         else:
             logger.error("No config.toml file can be found under workdir.")
 
