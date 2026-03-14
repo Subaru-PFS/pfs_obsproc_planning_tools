@@ -560,7 +560,7 @@ def run(
                     info_list = observer.get_target_info(v)
                     target_data.append(Bunch(history=info_list, target=v))
             if len(target_data) > 0:
-                amp = airmass.AirMassPlot(800, 600, logger=logger)
+                amp = airmass.AirMassPlot(800, 600, logger=logger)  # type: ignore[attr-defined]
                 from matplotlib.backends.backend_agg import (
                     FigureCanvasAgg as FigureCanvas,
                 )
@@ -569,9 +569,9 @@ def run(
                 amp.plot_altitude(observer, target_data, observer.timezone)
                 buf2 = BytesIO()
                 canvas.print_figure(buf2, format="png")
-                Image(data=bytes(buf2.getvalue()), format="png", embed=True)  # noqa: F821
+                Image(data=bytes(buf2.getvalue()), format="png", embed=True)  # noqa: F821  # type: ignore[name-defined]
                 figs.append(amp)
-                display(amp.fig)  # noqa: F821
+                display(amp.fig)  # noqa: F821  # type: ignore[name-defined]
     else:
         figs = None
 

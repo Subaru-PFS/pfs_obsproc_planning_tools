@@ -86,7 +86,7 @@ def validation_html_path(selected_date):
     matches = glob.glob(pattern)
 
     if len(matches) == 0:
-        pn.state.notifications.warning(
+        pn.state.notifications.warning(  # type: ignore[union-attr]
             f"No validation file found for {selected_date}.",
             duration=4000,
         )
@@ -94,7 +94,7 @@ def validation_html_path(selected_date):
 
     if len(matches) > 1:
         # Optional: warn if multiple matches
-        pn.state.notifications.warning(
+        pn.state.notifications.warning(  # type: ignore[union-attr]
             f"Multiple validation reports found for {selected_date}. "
             f"Using the first one.",
             duration=5000,
@@ -166,7 +166,7 @@ def refresh(event) -> None:
     latest_date = available_dates[-1]
 
     date_picker.enabled_dates = available_dates
-    date_picker.latest_date = latest_date
+    date_picker.latest_date = latest_date  # type: ignore[attr-defined]
 
     # show last update time in the refresh button label
     latest_time = sorted(df["last_updated"])[-1].strftime("%H:%M")
@@ -181,7 +181,7 @@ refresh_btn.on_click(refresh)
 # ------------------------
 # Reactive view
 # ------------------------
-@pn.depends(date_picker, refresh_btn)
+@pn.depends(date_picker, refresh_btn)  # type: ignore[call-arg]
 def status_view(selected_date, _):
     """Return an HTML pane summarising statuses for the selected date.
 
@@ -208,7 +208,7 @@ def status_view(selected_date, _):
         f"<div style='font-size:20px; font-weight:normal;'>{text}</div>"
     )
 
-@pn.depends(date_picker, refresh_btn)
+@pn.depends(date_picker, refresh_btn)  # type: ignore[call-arg]
 def validation_view(selected_date, _):
     html_path = validation_html_path(selected_date)
 

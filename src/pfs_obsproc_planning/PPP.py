@@ -97,7 +97,7 @@ def visibility_checker(tb_tgt, obstimes):
             default_start_time = observer.evening_twilight_18()
             default_stop_time = observer.morning_twilight_18()
 
-            obs_ok, t_start, t_stop = observer.observable(
+            obs_ok, t_start, t_stop = observer.observable(  # type: ignore[attr-defined]
                 target,
                 default_start_time,
                 default_stop_time,
@@ -383,19 +383,19 @@ def readTarget(mode, para):
         (tb_tgt["proposal_id"] == "S25B-UH016-A") * (tb_tgt["input_catalog_id"] == 10289)
     ] += 10
     #tb_tgt["priority"][
-    #    (tb_tgt["proposal_id"] == "S25B-UH041-A") * (np.in1d(tb_tgt["exptime_usr"], [28800.0, 39600.0]))
+    #    (tb_tgt["proposal_id"] == "S25B-UH041-A") * (np.isin(tb_tgt["exptime_usr"], [28800.0, 39600.0]))
     #] += 10
     #tb_tgt["priority"][
-    #    (tb_tgt["proposal_id"] == "S25B-UH041-A") * (np.in1d(tb_tgt["exptime_usr"], [14400.0, 19800.0]))
+    #    (tb_tgt["proposal_id"] == "S25B-UH041-A") * (np.isin(tb_tgt["exptime_usr"], [14400.0, 19800.0]))
     #] += 20
     tb_tgt["exptime_usr"][
-        (tb_tgt["proposal_id"] == "S25B-UH041-A") * (np.in1d(tb_tgt["exptime_usr"], [14400.0, 19800.0]))
+        (tb_tgt["proposal_id"] == "S25B-UH041-A") * (np.isin(tb_tgt["exptime_usr"], [14400.0, 19800.0]))
     ] = 450.0
     tb_tgt["exptime_usr"][
-        (tb_tgt["proposal_id"] == "S25B-UH041-A") * (np.in1d(tb_tgt["exptime_usr"], [28800.0, 39600.0]))
+        (tb_tgt["proposal_id"] == "S25B-UH041-A") * (np.isin(tb_tgt["exptime_usr"], [28800.0, 39600.0]))
     ] = 900.0
     tb_tgt["exptime_usr"][
-        (tb_tgt["proposal_id"] == "S25B-UH041-A") * (np.in1d(tb_tgt["exptime_usr"], [43200.0, 59400.0]))
+        (tb_tgt["proposal_id"] == "S25B-UH041-A") * (np.isin(tb_tgt["exptime_usr"], [43200.0, 59400.0]))
     ] = 1350.0
 
     print(tb_tgt["exptime_usr"])
@@ -1187,7 +1187,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
             pslID_=sorted(set(lst_pslID_assign))
             pslID_n={tt:lst_pslID_assign.count(tt) for tt in pslID_}
 
-            index_assign = np.in1d(_tb_tgt_t_["identify_code"], lst_tgtID_assign)
+            index_assign = np.isin(_tb_tgt_t_["identify_code"], lst_tgtID_assign)
             _tb_tgt_t_["exptime_PPP"][
                 index_assign
             ] -= single_exptime_  # targets in the PPC observed with single_exptime sec
@@ -1254,7 +1254,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
         for _tb_tgt_t in target_DBSCAN(_tb_tgt_, 1.38):  # [_tb_tgt_]: #
             _tb_tgt_t_ = _tb_tgt_t[
                 (_tb_tgt_t["exptime_PPP"] > 0)
-                & np.in1d(_tb_tgt_t["proposal_id"], psl_id_undone)
+                & np.isin(_tb_tgt_t["proposal_id"], psl_id_undone)
             ]  # targets not finished
             if len(_tb_tgt_t_) == 0:
                 continue
@@ -1302,7 +1302,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
                 for tt in pslID_
             }
 
-            index_assign = np.in1d(_tb_tgt_t_["identify_code"], lst_tgtID_assign)
+            index_assign = np.isin(_tb_tgt_t_["identify_code"], lst_tgtID_assign)
             weight_tem_tot = sum(_tb_tgt_t_["weight"][index_assign])
             weight_peak.append(
                 [
@@ -1335,7 +1335,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
         # ppc_id, ppc_ra, ppc_dec, ppc_pa, ppc_weight, ppc_fh, ppc_FE
         # print(ppc_lst[-1])
 
-        index_assign = np.in1d(_tb_tgt_["identify_code"], weight_peak[-1][5])
+        index_assign = np.isin(_tb_tgt_["identify_code"], weight_peak[-1][5])
         _tb_tgt_["exptime_PPP"][
             index_assign
         ] -= single_exptime_  # targets in the PPC observed with single_exptime sec
@@ -1390,7 +1390,7 @@ def PPC_centers_single(_tb_tgt, nPPC, weight_para):
         # index_ = PFS_FoV(ra, dec, pa, _tb_tgt)
         # lst_tgtID_assign = _tb_tgt["identify_code"][index_]
 
-        index_assign = np.in1d(_tb_tgt["identify_code"], lst_tgtID_assign)
+        index_assign = np.isin(_tb_tgt["identify_code"], lst_tgtID_assign)
 
         N_P0 = sum(index_assign * (_tb_tgt["priority"] == 0))
         N_P1 = sum(index_assign * (_tb_tgt["priority"] == 1))
@@ -1571,7 +1571,7 @@ def PPC_centers_single(_tb_tgt, nPPC, weight_para):
             ], dtype=object)
         )
 
-        index_assign = np.in1d(_tb_tgt_["identify_code"], lst_tgtID_assign)
+        index_assign = np.isin(_tb_tgt_["identify_code"], lst_tgtID_assign)
 
         from collections import Counter
 
@@ -2043,7 +2043,7 @@ def netflowRun_single(
                 numReservedFibers=numReservedFibers,
                 fiberNonAllocationCost=fiberNonAllocationCost,
                 obsprog_time_budget=tgt_psl_FH_tac,
-                assignEveryCobra=True,
+                assignEveryCobra=True,  # type: ignore[call-arg]
             )
 
             prob.solve()
@@ -2080,7 +2080,7 @@ def netflowRun_single(
                     )
                 coll_tidx = []
                 for tidx, cidx in vis.items():
-                    if simulator.collisions[cidx]:
+                    if simulator.collisions[cidx]:  # type: ignore[index]
                         coll_tidx.append(tidx)
                 ncoll += len(coll_tidx)
                 for i1 in range(0, len(coll_tidx)):
@@ -2284,7 +2284,7 @@ def netflowRun(
 
             else:
                 ppc_tot_weight = 1 / sum(
-                    _tb_tgt[np.in1d(_tb_tgt["identify_code"], tgt_assign_id_lst)][
+                    _tb_tgt[np.isin(_tb_tgt["identify_code"], tgt_assign_id_lst)][
                         "weight"
                     ]
                 )
@@ -2465,7 +2465,7 @@ def netflowAssign(_tb_tgt, _tb_ppc):
     # targets with allocated fiber
     for ppc_t in _tb_ppc_pri:
         lst = np.where(
-            np.in1d(_tb_tgt["identify_code"], ppc_t["ppc_allocated_targets"])
+            np.isin(_tb_tgt["identify_code"], ppc_t["ppc_allocated_targets"])
         )[0]
         _tb_tgt["exptime_assign"].data[lst] += int(_tb_tgt.meta["single_exptime"])
 

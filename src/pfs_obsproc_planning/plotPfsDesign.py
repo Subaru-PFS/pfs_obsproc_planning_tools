@@ -400,7 +400,7 @@ def _draw_ag_table(ax4, agnum_table, agnum_threshold):
 
 def get_pfs_utils_path():
     try:
-        import eups
+        import eups  # type: ignore[import-not-found]
 
         logger.info(
             "eups was found. "

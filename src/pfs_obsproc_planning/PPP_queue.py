@@ -768,7 +768,7 @@ def readTarget(mode, para, tb_queuedb):
         )
 
         # only for 064 since too huge list, FIX needed
-        #msk = np.in1d(tb_tgt["proposal_id"], ["S25B-049QN"]) * (tb_tgt["ra"] > 100)
+        #msk = np.isin(tb_tgt["proposal_id"], ["S25B-049QN"]) * (tb_tgt["ra"] > 100)
         #tb_tgt = tb_tgt[~msk]
 
         """
@@ -1069,7 +1069,7 @@ def objective1(params, _tb_tgt):
     index_ = PFS_FoV(ra, dec, pa, _tb_tgt)
     lst_tgtID_assign = _tb_tgt["identify_code"][index_]
 
-    index_assign = np.in1d(_tb_tgt["identify_code"], lst_tgtID_assign)
+    index_assign = np.isin(_tb_tgt["identify_code"], lst_tgtID_assign)
 
     N_P0 = sum(index_assign * (_tb_tgt["priority"] == 0))
     N_P1 = sum(index_assign * (_tb_tgt["priority"] == 1))
@@ -1170,7 +1170,7 @@ def PPP_centers(
 
         _tb_tgt_ = _tb_tgt_[
             (_tb_tgt_["exptime_PPP"] > 0)
-            * np.in1d(_tb_tgt_["proposal_id"], psl_id_undone)
+            * np.isin(_tb_tgt_["proposal_id"], psl_id_undone)
         ]  # targets not finished
         _tb_tgt_["priority"][_tb_tgt_["exptime_done"] > 0] = 999
 
@@ -1220,7 +1220,7 @@ def PPP_centers(
             )
             iter_tem += 1
 
-        index_assign = np.in1d(_tb_tgt_["identify_code"], lst_tgtID_assign)
+        index_assign = np.isin(_tb_tgt_["identify_code"], lst_tgtID_assign)
         weight_tem_tot = sum(_tb_tgt_["rank_fin"][index_assign])
 
         lst_pslID_assign = [ii.split("_")[0] for ii in lst_tgtID_assign]
@@ -1686,7 +1686,7 @@ def netflowRun_single(
                     )
                 coll_tidx = []
                 for tidx, cidx in vis.items():
-                    if simulator.collisions[cidx]:
+                    if simulator.collisions[cidx]:  # type: ignore[index]
                         coll_tidx.append(tidx)
                 ncoll += len(coll_tidx)
                 for i1 in range(0, len(coll_tidx)):
@@ -1846,7 +1846,7 @@ def netflowRun(
 
             else:
                 ppc_tot_weight = 1 / sum(
-                    _tb_tgt[np.in1d(_tb_tgt["identify_code"], tgt_assign_id_lst)][
+                    _tb_tgt[np.isin(_tb_tgt["identify_code"], tgt_assign_id_lst)][
                         "rank_fin"
                     ]
                 )
@@ -1966,7 +1966,7 @@ def netflowAssign(_tb_tgt, _tb_ppc):
     # targets with allocated fiber
     for ppc_t in _tb_ppc_pri:
         lst = np.where(
-            np.in1d(_tb_tgt["identify_code"], ppc_t["ppc_allocated_targets"])
+            np.isin(_tb_tgt["identify_code"], ppc_t["ppc_allocated_targets"])
         )[0]
         _tb_tgt["exptime_assign"].data[lst] += int(_tb_tgt.meta["single_exptime"])
 
@@ -2716,6 +2716,8 @@ def run(
 ):
     global bench
     bench = bench_info
+    if conf is None:
+        raise ValueError("conf must not be None")
 
     today = date.today().strftime("%Y%m%d")
     tb_queuedb_filename = os.path.join(dirName, f"tgt_queueDB_{today}.csv")

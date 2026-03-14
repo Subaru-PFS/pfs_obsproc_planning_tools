@@ -500,7 +500,7 @@ def plot_CR(conf, tb_tgt, tb_queue, workDir, pdf):
         obcode_assign = [
             row["obCode"] for row in hdul[1].data if row["obCode"] != "N/A"
         ]
-        mask = np.in1d(tb_tgt["ob_code"].data, obcode_assign)
+        mask = np.isin(tb_tgt["ob_code"].data, obcode_assign)
         tb_tgt["exptime_exp"][mask] += 900
 
     # --- Proposal ID lists ---

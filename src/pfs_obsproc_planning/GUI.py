@@ -155,6 +155,8 @@ class GeneratePfsDesignGUI(object):
         self.app_window.lineEdit_workdir_path.setText(fname)
 
         workdir = self.app_window.lineEdit_workdir_path.text().strip()
+        if self.repoDir is None:
+            raise ValueError("repoDir must not be None")
         repodir = self.repoDir.strip()
 
         if workdir != "":

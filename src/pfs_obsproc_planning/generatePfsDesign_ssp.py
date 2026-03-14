@@ -10,7 +10,7 @@ sys.stdout = open(os.devnull, "w")
 
 import tomllib
 import warnings
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import git
 import numpy as np
@@ -813,7 +813,7 @@ class GeneratePfsDesign_ssp(object):
 
         validate_success_ppc, ppccode_no_guide = self.ssp_ppc_validate(tb_ppc)
 
-        tb_ppc = tb_ppc[~np.in1d(tb_ppc["ppc_code"], ppccode_no_guide)]
+        tb_ppc = tb_ppc[~np.isin(tb_ppc["ppc_code"], ppccode_no_guide)]
 
         for tb_ppc_t in tb_ppc:
             ppc_code = tb_ppc_t["ppc_code"]
@@ -1104,7 +1104,7 @@ class GeneratePfsDesign_ssp(object):
         ## ope file generation ##
         ope = OpeFile(conf=self.conf, workDir=self.workDir)
 
-        today_utc = datetime.utcnow().date()
+        today_utc = datetime.now(timezone.utc).date()
         for obsdate_utc in obsdates_utc:
             # skip if earlier than today
             obsdate_ = datetime.strptime(obsdate_utc, "%Y-%m-%d").date()
