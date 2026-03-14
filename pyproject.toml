@@ -25,7 +25,7 @@ dependencies = [
   "matplotlib>=3.9.0",
   "numpy>=2.0.0",
   "opdb @ git+https://github.com/Subaru-PFS/spt_operational_database.git",
-  "pandas>=2.2.0",
+  "pandas>=2.2.0,<3.0.0",
   "panel>=1.4.0",
   "pfs-datamodel @ git+https://github.com/Subaru-PFS/datamodel.git",
   "pfs_design_tool @ git+https://github.com/Subaru-PFS/ets_pointing.git",
