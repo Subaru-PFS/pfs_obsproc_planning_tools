@@ -28,7 +28,7 @@ from mpl_toolkits.mplot3d import Axes3D
 # from pfs.drp.stella.readLineList import ReadLineListTask,  ReadLineListConfig
 # from pfs.drp.stella import DetectorMap
 # import lsst.daf.persistence as dafPersist
-from pfs.datamodel.pfsConfig import *
+from pfs.datamodel.pfsConfig import FiberStatus, PfsDesign
 from pfs.utils.coordinates.CoordTransp import ag_pixel_to_pfimm
 from pfs.utils.coordinates.DistortionCoefficients import radec_to_subaru
 from pfs.utils.fiberids import FiberIds

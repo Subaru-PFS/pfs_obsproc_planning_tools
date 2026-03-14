@@ -263,7 +263,7 @@ def _draw_ne_arrows(ax, pa):
     ax.text(
         posne[0] + dl * 2.5 * de[0],
         posne[1] + dl * 2.5 * de[1],
-        f"E",
+        "E",
         ha="center",
         va="center",
         fontsize=10,
@@ -272,7 +272,7 @@ def _draw_ne_arrows(ax, pa):
     ax.text(
         posne[0] + dl * 2.5 * dn[0],
         posne[1] + dl * 2.5 * dn[1],
-        f"N",
+        "N",
         ha="center",
         va="center",
         fontsize=10,
@@ -587,9 +587,9 @@ def plot_FoV(
     
     fig.suptitle(title, fontsize=12)
 
-    if save == True:
+    if save:
         plt.savefig(fname + ".pdf")
-    if show == True:
+    if show:
         plt.show()
 
     return fig.tight_layout()

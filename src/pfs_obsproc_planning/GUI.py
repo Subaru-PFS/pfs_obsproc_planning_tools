@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 # GUI.py : GUI for Subaru Fiber Allocation software
 
+import os
+import tomllib
 import warnings
 
-warnings.filterwarnings("ignore")
-
 from PyQt5 import QtWidgets, uic
-from PyQt5.QtWidgets import *
+from PyQt5.QtWidgets import QFileDialog, QTableWidgetItem
 from loguru import logger
-import tomllib
-import os
+
+warnings.filterwarnings("ignore")
 
 
 class GeneratePfsDesignGUI(object):
@@ -164,7 +164,7 @@ class GeneratePfsDesignGUI(object):
                 import pfs.utils
 
                 pfsutils_path = os.path.join(pfs.utils.__path__[0], "../../../")
-            except:
+            except Exception:
                 pfsutils_path = ""
 
             self.app_window.lineEdit_instdata_path.setText(instdata_path)

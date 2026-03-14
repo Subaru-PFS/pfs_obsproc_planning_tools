@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # generatePfsDesign_ssp.py : PPP+qPlan+SFA
+# ruff: noqa: E402  (sys.stdout redirect must precede imports to suppress noisy output)
 
 import os
 import sys
@@ -7,27 +8,28 @@ import sys
 # skip print out message
 sys.stdout = open(os.devnull, "w")
 
+import tomllib
 import warnings
 from datetime import datetime, timedelta
-
-import pytz
-
-hawaii_tz = pytz.timezone("Pacific/Honolulu")
 
 import git
 import numpy as np
 import pandas as pd
-import tomllib
+import pfs.utils
+import pytz
+import astropy.units as u
+from astropy.coordinates import Angle
 from astropy.table import Table, vstack
 from loguru import logger
-
-warnings.filterwarnings("ignore")
-
 import ets_fiber_assigner.netflow as nf
 from pfs_design_tool import reconfigure_fibers_ppp as sfa
 from pfs_design_tool.pointing_utils import nfutils
 
 from .opefile import OpeFile
+
+warnings.filterwarnings("ignore")
+
+hawaii_tz = pytz.timezone("Pacific/Honolulu")
 
 
 def read_conf(conf):
@@ -206,9 +208,6 @@ class GeneratePfsDesign_ssp(object):
                 )
                 os.execv(sys.executable, [sys.executable] + sys.argv)
 
-        import pfs.utils
-
-    
         repo_path = os.path.join(pfs.utils.__path__[0], "../../../")
         os.environ["PFS_UTILS_DIR"] = os.path.join(pfs.utils.__path__[0], "../../../")
 
@@ -323,21 +322,21 @@ class GeneratePfsDesign_ssp(object):
                 expected_dtype = col_info["dtype"]
 
                 # For string types, expected_dtype == str; check dtype.kind for Unicode ('U') or bytes ('S').
-                if expected_dtype == str:
+                if expected_dtype is str:
                     # Check for string: dtype.kind should be 'U' (Unicode) or 'S' (bytes)
                     if col_dtype.kind not in ["U", "S"]:
                         validate_success = False
                         logger.error(
                             f"Column '{col}' expected to be a string type but got {col_dtype}"
                         )
-                elif expected_dtype == float:
+                elif expected_dtype is float:
                     # Check for any floating type (np.float32, np.float64, or Python float)
                     if not np.issubdtype(col_dtype, np.floating):
                         validate_success = False
                         logger.error(
                             f"Column '{col}' expected to be a float type but got {col_dtype}"
                         )
-                elif expected_dtype == int:
+                elif expected_dtype is int:
                     # Check for any integer type
                     if not np.issubdtype(col_dtype, np.integer):
                         validate_success = False
@@ -412,7 +411,7 @@ class GeneratePfsDesign_ssp(object):
             for i, val in enumerate(tb[col_name]):
                 if np.ma.is_masked(val):
                     continue
-                if val == None:
+                if val is None:
                     continue
                 if val not in valid_values:
                     invalid_rows.append((i, val))
@@ -770,7 +769,7 @@ class GeneratePfsDesign_ssp(object):
 
         try:
             tb_ppc = Table.read(ppc_path)
-        except:
+        except Exception:
             logger.error(f"Missing ppcList.ecsv for WG={WG}: {ppc_path}")
             return Table()
     
@@ -1139,9 +1138,6 @@ class GeneratePfsDesign_ssp(object):
             tb_ppc_t["obstime_in_hst"] = tb_ppc_t["ppc_obstime"]
             tb_ppc_t["single_exptime"] = tb_ppc_t["ppc_exptime"]
             tb_ppc_t["n_split_frame"] = tb_ppc_t["ppc_nframes"]
-
-            import astropy.units as u
-            from astropy.coordinates import Angle
 
             # Convert RA to HHMMSS.SS
             ra_angle = Angle(tb_ppc_t["ppc_ra"] * u.deg)

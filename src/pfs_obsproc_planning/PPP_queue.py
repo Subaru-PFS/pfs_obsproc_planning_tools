@@ -28,17 +28,15 @@ from qplan.util.site import site_subaru as observer
 from qplan.util.eph_cache import EphemerisCache
 from datetime import datetime, timedelta, timezone, date
 from ginga.misc.log import get_logger
-
-logger_qplan = get_logger("qplan_test", null=True)
-eph_cache = EphemerisCache(logger_qplan, precision_minutes=5)
-
-warnings.filterwarnings("ignore")
-
-# below for netflow
 import ets_fiber_assigner.netflow as nf
 from ics.cobraOps.Bench import Bench
 from ics.cobraOps.CollisionSimulator import CollisionSimulator
 from ics.cobraOps.TargetGroup import TargetGroup
+
+warnings.filterwarnings("ignore")
+
+logger_qplan = get_logger("qplan_test", null=True)
+eph_cache = EphemerisCache(logger_qplan, precision_minutes=5)
 
 # netflow configuration (FIXME; should be load from config file)
 cobra_location_group = None
@@ -328,7 +326,7 @@ def visibility_checker(tb_tgt, obstimes, start_time_list, stop_time_list):
         f'{sum(tb_tgt["is_visible"])}/{len(tb_tgt)} are visible during the given obstimes.'
     )
 
-    tb_tgt = tb_tgt[tb_tgt["is_visible"] == True]
+    tb_tgt = tb_tgt[tb_tgt["is_visible"]]
 
     psl_id = sorted(set(tb_tgt["proposal_id"]))
 
@@ -462,7 +460,7 @@ def readTarget(mode, para, tb_queuedb):
     target sample (all), target sample (low-resolution mode), target sample (medium-resolution mode)
     """
     time_start = time.time()
-    logger.info(f"[S1] Read targets started (PPP)")
+    logger.info("[S1] Read targets started (PPP)")
 
     if len(para["localPath_tgt"]) > 0:
         tb_tgt = Table.read(para["localPath_tgt"])
@@ -547,7 +545,7 @@ def readTarget(mode, para, tb_queuedb):
 
             # convert Boolean to String
             df_tgt["resolution"] = [
-                "M" if v == True else "L" for v in df_tgt["resolution"]
+                "M" if v else "L" for v in df_tgt["resolution"]
             ]
             df_tgt["allocated_time_tac"] = [
                 df_tgt["allocated_time_lr"][ii]
@@ -1119,12 +1117,12 @@ def PPP_centers(
 ):
     # determine pointing centers
     time_start = time.time()
-    logger.info(f"[S2] Determine pointing centers started")
+    logger.info("[S2] Determine pointing centers started")
 
     ppc_lst = []
 
     if len(_tb_tgt) == 0:
-        logger.warning(f"[S2] no targets")
+        logger.warning("[S2] no targets")
         return np.array(ppc_lst), Table()
 
     _tb_tgt = sciRank_pri(_tb_tgt)
@@ -1466,7 +1464,7 @@ def sam2netflow(_tb_tgt, for_ppc=False):
     tgt_psl_FH_tac_ = {}
 
     #'''
-    if for_ppc == False:
+    if not for_ppc:
         psl_id = sorted(set(_tb_tgt["proposal_id"]))
 
         for psl_id_ in psl_id:
@@ -1968,7 +1966,7 @@ def netflowAssign(_tb_tgt, _tb_ppc):
     # targets with allocated fiber
     for ppc_t in _tb_ppc_pri:
         lst = np.where(
-            np.in1d(_tb_tgt["identify_code"], ppc_t["ppc_allocated_targets"]) == True
+            np.in1d(_tb_tgt["identify_code"], ppc_t["ppc_allocated_targets"])
         )[0]
         _tb_tgt["exptime_assign"].data[lst] += int(_tb_tgt.meta["single_exptime"])
 
@@ -2800,11 +2798,11 @@ def run(
 
     if not backup:
         tb_ppc_tot.write(
-            os.path.join(dirName, f"ppcList.ecsv"), format="ascii.ecsv", overwrite=True
+            os.path.join(dirName, "ppcList.ecsv"), format="ascii.ecsv", overwrite=True
         )
     else:
         tb_ppc_tot.write(
-            os.path.join(dirName, f"ppcList_backup.ecsv"),
+            os.path.join(dirName, "ppcList_backup.ecsv"),
             format="ascii.ecsv",
             overwrite=True,
         )
