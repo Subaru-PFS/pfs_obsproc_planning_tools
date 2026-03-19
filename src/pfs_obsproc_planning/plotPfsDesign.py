@@ -111,23 +111,49 @@ def get_ag_counts(df_ag, threshold=19, radius=245.0):
 
 
 # ---------------------- Drawing helpers ----------------------
-def _draw_fov_points(ax, df_fib, df_ag, unfib_bright, c, alpha, s):
+def _draw_fov_points(ax, df_fib, df_ag, unfib_bright, fiber_id_n2, c, alpha, s):
     """Draw scatter points on the FoV axes (unassigned, sky, std, sci, AGs).
 
     This consolidates the multiple consecutive scatter() calls into a single
    , well-named helper for readability.
     """
-    # unassigned (targetType == 4)
+    if sum((df_fib.targetType == 4) * (df_fib.fiberStatus == 1)) > 0:
+        # unassigned (targetType == 4)
+        ax.scatter(
+            df_fib[(df_fib.targetType == 4) * (df_fib.fiberStatus == 1)].pfi_x,
+            df_fib[(df_fib.targetType == 4) * (df_fib.fiberStatus == 1)].pfi_y,
+            c=c["un"],
+            marker="x",
+            s=s * 1.5,
+            alpha=alpha,
+            lw=1,
+            label=f"UNASSIGNED ({len(df_fib[(df_fib.targetType == 4) * (df_fib.fiberStatus == 1)].pfi_y)})",
+        )
+
+    # borken (fiberStatus != 1)
     ax.scatter(
-        df_fib[df_fib.targetType == 4].pfi_x,
-        df_fib[df_fib.targetType == 4].pfi_y,
-        c=c["un"],
+        df_fib[(df_fib.targetType == 4) * (df_fib.fiberStatus != 1)].pfi_x,
+        df_fib[(df_fib.targetType == 4) * (df_fib.fiberStatus != 1)].pfi_y,
+        c="gray",
         marker="x",
         s=s * 1.5,
         alpha=alpha,
         lw=1,
-        label=f"UNASSIGNED ({len(df_fib[df_fib.targetType==4].pfi_y)})",
+        label=f"broken ({len(df_fib[(df_fib.targetType == 4) * (df_fib.fiberStatus != 1)].pfi_y)})",
     )
+
+    if len(fiber_id_n2) > 0:
+        ax.scatter(
+            df_fib[df_fib.fiberId.isin(fiber_id_n2)].pfi_x,
+            df_fib[df_fib.fiberId.isin(fiber_id_n2)].pfi_y,
+            edgecolor="tomato",
+            facecolor="none",
+            marker="D",
+            s=s * 1.5,
+            alpha=alpha,
+            lw=1,
+            label=f"n2 cobra ({len(fiber_id_n2):.0f})",
+        )
 
     # highlight unassigned near bright stars
     if len(unfib_bright) > 0:
@@ -445,6 +471,7 @@ def plot_FoV(
     pa=0.0,
     conf=None,
     unfib_bright=None,
+    fiber_id_n2=None,
 ):
     """Create a multi-panel figure summarizing a PFS design FoV.
 
@@ -464,6 +491,9 @@ def plot_FoV(
     # Avoid mutable default
     if unfib_bright is None:
         unfib_bright = []
+
+    if fiber_id_n2 is None:
+        fiber_id_n2 = []
 
     # Ensure common expected columns exist (light defensive typing/formatting)
     df_fib = df_fib.copy()
@@ -542,7 +572,7 @@ def plot_FoV(
     s = 10.0
 
     # draw scatter points and guide stars on the main FoV axes (delegated)
-    _draw_fov_points(ax1, df_fib, df_ag, unfib_bright, c, alpha, s)
+    _draw_fov_points(ax1, df_fib, df_ag, unfib_bright, fiber_id_n2, c, alpha, s)
 
     # store AG counts and annotation positions
     agnum_threshold = 19

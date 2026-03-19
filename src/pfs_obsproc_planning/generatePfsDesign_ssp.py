@@ -83,73 +83,91 @@ def read_conf(conf):
 
 
 def check_versions(package, repo_path, version_desire):
-    """Ensure the repository at repo_path is at the desired version.
+    """Ensure the repository at repo_path is at the desired version."""
 
-    Returns
-    -------
-    bool
-        True if the repo HEAD changed (i.e., code was updated/checked out), else False.
+    def fetch_all_branches_and_tags(repo):
+        """Fetch all branches and tags from a repository."""
+        repo.remotes.origin.fetch()
+        logger.info(f"({package}) Fetched all branches and tags.")
 
-    Notes
-    -----
-    This function only updates the git working tree. To make the updated code take
-    effect within the running Python process, re-exec the script after updates.
-    """
-
-    version = (version_desire or "").strip()
-    if version == "":
-        logger.info(f"({package}) No desired version given; skip.")
-        return False
-
-    repo = git.Repo(repo_path)
-    old_head = repo.head.commit.hexsha
-
-    # Fetch all remote branches and tags (needed to resolve desired versions).
-    try:
-        repo.remotes.origin.fetch(tags=True, prune=True)
-        logger.info(f"({package}) Fetched branches/tags.")
-    except Exception as e:
-        logger.warning(f"({package}) Fetch failed: {e}")
-
-    remote_branch_names = set()
-    try:
-        # remote_head is like 'main' (without 'origin/')
-        remote_branch_names = {ref.remote_head for ref in repo.remotes.origin.refs}
-    except Exception:
-        remote_branch_names = set()
-
-    tag_names = {tag.name for tag in repo.tags}
-
-    try:
-        if version in remote_branch_names:
-            # Ensure local branch exists and tracks origin/<version>, then pull.
-            local_branch_names = {h.name for h in repo.heads}
-            if version in local_branch_names:
-                repo.git.checkout(version)
-            else:
-                repo.git.checkout("-b", version, f"origin/{version}")
-            try:
-                repo.remotes.origin.pull(version)
-                logger.info(f"({package}) Pulled latest for branch '{version}'.")
-            except Exception as e:
-                logger.warning(f"({package}) Pull failed for branch '{version}': {e}")
-        elif version in tag_names:
-            repo.git.checkout(version)
-            logger.info(f"({package}) Checked out tag '{version}'.")
+    def get_commit_time(repo, version):
+        """Get the commit time of a branch or tag."""
+        if version in [
+            ref.name for ref in repo.remote().refs
+        ]:  # Check if it's a branch
+            commit_time = repo.commit(version).committed_date
+        elif version in [tag.name for tag in repo.tags]:  # Check if it's a tag
+            commit_time = repo.commit(version).committed_date
         else:
-            # Fallback: treat as commit-ish.
-            repo.git.checkout(version)
-            logger.info(f"({package}) Checked out '{version}'.")
-    except Exception as e:
-        logger.warning(f"({package}) Failed to checkout '{version}': {e}")
+            return None  # Invalid version
+        return commit_time
 
-    new_head = repo.head.commit.hexsha
-    changed = new_head != old_head
-    if changed:
-        logger.info(f"({package}) Updated: {old_head[:8]} -> {new_head[:8]}")
-    else:
-        logger.info(f"({package}) Already up-to-date at {new_head[:8]}")
-    return changed
+    def compare_commit_times(current_commit_time, desired_commit_time):
+        """Compare commit times to determine if current is older than desired."""
+        if current_commit_time is None:
+            return True  # If no current commit time, always update
+        return (
+            current_commit_time < desired_commit_time
+        )  # Check if the current version's commit is older
+
+    def get_current_version(repo):
+        """Get the current branch or tag version."""
+        current_commit = repo.head.commit
+        # Find if the current commit matches any tag
+        for tag in repo.tags:
+            if tag.commit == current_commit:
+                logger.info(f"({package}) Current tag = {tag.name}")
+                return tag.name  # Return the tag name if found
+
+        # If no tag, return the current branch name
+        for ref in repo.remote().refs:
+            if ref.commit == current_commit:
+                logger.info(f"({package}) Current branch = {ref.name}")
+                return ref.name  # Return the branch name if found
+
+        return None  # If no matching commit found
+
+    def checkout_version(repo, version):
+        """Checkout a specified branch or tag."""
+        version = version.strip()
+        if version == "":
+            logger.info(f"({package}) Do not change the current branch/tag.")
+            return  # Do nothing if no version is provided
+
+        current_commit_time = get_commit_time(repo, "HEAD")
+        desired_commit_time = get_commit_time(repo, version)
+
+        if compare_commit_times(current_commit_time, desired_commit_time):
+            if version in [ref.name for ref in repo.remote().refs]:
+                # Checkout the remote branch and track it locally
+                repo.git.checkout(f"-b {version} origin/{version}")
+                logger.info(f"({package}) Checked out and tracking {version}.")
+            elif version in [tag.name for tag in repo.tags]:
+                # Checkout the tag (no tracking needed for tags)
+                repo.git.checkout(version)
+                logger.info(f"({package}) Checked out to tag {version}.")
+            elif repo.commit(version):
+                # If it's a commit hash, check out the commit directly
+                repo.git.checkout(version)
+                logger.info(f"({package}) Checked out to commit {version}.")
+            else:
+                logger.warning(
+                    f"({package}) Version '{version}' not found in branches or tags."
+                )
+        else:
+            logger.info(f"({package}) Current version is up-to-date with {version}.")
+
+    # Step 1: Load the repository from the given path
+    repo = git.Repo(repo_path)
+
+    # Step 2: Fetch all branches and tags
+    fetch_all_branches_and_tags(repo)
+    get_current_version(repo)
+
+    # Step 3: Checkout the specified branch or tag
+    checkout_version(repo, version_desire)
+
+    return None
 
 
 class GeneratePfsDesign_ssp(object):
@@ -164,49 +182,35 @@ class GeneratePfsDesign_ssp(object):
         # cobracoach dir
         self.cobraCoachDir = os.path.join(self.conf["sfa"]["cobra_coach_dir"])
 
-        # Check versions of dependent packages.
-        # If any repo is updated, we re-exec this script once so imports reflect the new code.
-        # On the second (re-exec) run, skip the checks to save time.
-        updated_any = False
-        skip_version_check = os.environ.get("PFS_CHECKVERS_REEXEC", "0") == "1"
+        # check versions of dependent packages
         def check_version_pfs(self, package):
             if self.conf["packages"]["check_version"]:
                 try:
                     repo_path = self.conf["packages"][package + "_dir"]
                     version_desire = self.conf["packages"][package + "_ver"]
-                    updated = check_versions(package, repo_path, version_desire)
-                    return bool(updated)
+                    check_versions(package, repo_path, version_desire)
                 except KeyError:
                     logger.warning(f"Path of {package} not found in {self.config}")
-                return False
+                return None
             else:
-                return False
+                return None
 
-        if not skip_version_check:
-            for package_ in [
-                "pfs_utils",
-                "ets_pointing",
-                "ets_shuffle",
-                "pfs_obsproc_planning",
-                "pfs_datamodel",
-                "ics_cobraCharmer",
-                "ics_cobraOps",
-                "ets_fiberalloc",
-                "pfs_instdata",
-                "ets_target_database",
-                "ics_fpsActor",
-                "spt_operational_database",
-                "qplan",
-            ]:
-                updated_any = check_version_pfs(self, package_) or updated_any
-
-            # Re-exec once so the updated git checkouts are reflected in imports.
-            if updated_any:
-                os.environ["PFS_CHECKVERS_REEXEC"] = "1"
-                logger.info(
-                    "Version updates detected; re-executing to load updated code..."
-                )
-                os.execv(sys.executable, [sys.executable] + sys.argv)
+        for package_ in [
+            "pfs_utils",
+            "ets_pointing",
+            "ets_shuffle",
+            "pfs_obsproc_planning",
+            "pfs_datamodel",
+            "ics_cobraCharmer",
+            "ics_cobraOps",
+            "ets_fiberalloc",
+            "pfs_instdata",
+            "ets_target_database",
+            "ics_fpsActor",
+            "spt_operational_database",
+            "qplan",
+        ]:
+            check_version_pfs(self, package_)
 
         repo_path = os.path.join(pfs.utils.__path__[0], "../../../")
         os.environ["PFS_UTILS_DIR"] = os.path.join(pfs.utils.__path__[0], "../../../")

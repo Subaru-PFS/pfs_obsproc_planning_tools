@@ -513,6 +513,7 @@ class GeneratePfsDesign(object):
         ob_pmdecs = np.array([float(ii) for ii in t["ob_pmdec"]])
         ob_parallaxs = np.array([float(ii) for ii in t["ob_parallax"]])
         ob_equinoxs = t["ob_equinox"]
+        ob_qa_reference_arms = t["qa_reference_arm"]
         ob_priorities = t["ob_priority"]
         ob_single_exptimes = t["ob_single_exptime"]
         ob_filter_gs = t["ob_filter_g"]
@@ -552,6 +553,7 @@ class GeneratePfsDesign(object):
                 ob_pmdec,
                 ob_parallax,
                 ob_equinox,
+                ob_qa_reference_arm,
                 "sci_P%d" % (int(ob_priority)),
                 ob_single_exptime,
                 ob_filter_g,
@@ -580,7 +582,7 @@ class GeneratePfsDesign(object):
                 ob_total_flux_error_z,
                 ob_total_flux_error_y,
             ]
-            for proposal_id, ob_code, ob_obj_id, ob_cat_id, ob_ra, ob_dec, ob_pmra, ob_pmdec, ob_parallax, ob_equinox, ob_priority, ob_single_exptime, ob_filter_g, ob_filter_r, ob_filter_i, ob_filter_z, ob_filter_y, ob_psf_flux_g, ob_psf_flux_r, ob_psf_flux_i, ob_psf_flux_z, ob_psf_flux_y, ob_psf_flux_error_g, ob_psf_flux_error_r, ob_psf_flux_error_i, ob_psf_flux_error_z, ob_psf_flux_error_y, ob_total_flux_g, ob_total_flux_r, ob_total_flux_i, ob_total_flux_z, ob_total_flux_y, ob_total_flux_error_g, ob_total_flux_error_r, ob_total_flux_error_i, ob_total_flux_error_z, ob_total_flux_error_y in zip(
+            for proposal_id, ob_code, ob_obj_id, ob_cat_id, ob_ra, ob_dec, ob_pmra, ob_pmdec, ob_parallax, ob_equinox, ob_qa_reference_arm, ob_priority, ob_single_exptime, ob_filter_g, ob_filter_r, ob_filter_i, ob_filter_z, ob_filter_y, ob_psf_flux_g, ob_psf_flux_r, ob_psf_flux_i, ob_psf_flux_z, ob_psf_flux_y, ob_psf_flux_error_g, ob_psf_flux_error_r, ob_psf_flux_error_i, ob_psf_flux_error_z, ob_psf_flux_error_y, ob_total_flux_g, ob_total_flux_r, ob_total_flux_i, ob_total_flux_z, ob_total_flux_y, ob_total_flux_error_g, ob_total_flux_error_r, ob_total_flux_error_i, ob_total_flux_error_z, ob_total_flux_error_y in zip(
                 proposal_ids,
                 ob_codes,
                 ob_obj_ids,
@@ -591,6 +593,7 @@ class GeneratePfsDesign(object):
                 ob_pmdecs,
                 ob_parallaxs,
                 ob_equinoxs,
+                ob_qa_reference_arms,
                 ob_priorities,
                 ob_single_exptimes,
                 ob_filter_gs,
@@ -661,7 +664,7 @@ class GeneratePfsDesign(object):
 
         ## write to csv ##
         filename = "ppp+qplan_output.csv"
-        header = "pointing,ra_center,dec_center,pa_center,ob_unique_code,proposal_id,ob_code,obj_id,cat_id,ra_target,dec_target,pmra_target,pmdec_target,parallax_target,equinox_target,target_class,ob_single_exptime,filter_g,filter_r,filter_i,filter_z,filter_y,psf_flux_g,psf_flux_r,psf_flux_i,psf_flux_z,psf_flux_y,psf_flux_error_g,psf_flux_error_r,psf_flux_error_i,psf_flux_error_z,psf_flux_error_y,total_flux_g,total_flux_r,total_flux_i,total_flux_z,total_flux_y,total_flux_error_g,total_flux_error_r,total_flux_error_i,total_flux_error_z,total_flux_error_y,obstime,obsdate_in_hst"
+        header = "pointing,ra_center,dec_center,pa_center,ob_unique_code,proposal_id,ob_code,obj_id,cat_id,ra_target,dec_target,pmra_target,pmdec_target,parallax_target,equinox_target,qa_reference_arm,target_class,ob_single_exptime,filter_g,filter_r,filter_i,filter_z,filter_y,psf_flux_g,psf_flux_r,psf_flux_i,psf_flux_z,psf_flux_y,psf_flux_error_g,psf_flux_error_r,psf_flux_error_i,psf_flux_error_z,psf_flux_error_y,total_flux_g,total_flux_r,total_flux_i,total_flux_z,total_flux_y,total_flux_error_g,total_flux_error_r,total_flux_error_i,total_flux_error_z,total_flux_error_y,obstime,obsdate_in_hst"
         np.savetxt(
             os.path.join(self.outputDirPPP, filename),
             data,
