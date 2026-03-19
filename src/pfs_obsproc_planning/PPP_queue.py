@@ -384,18 +384,18 @@ def queryQueue(psl_id_list, DBPath_qDB, tb_queuedb_filename):
             continue
 
         for ex_ob in ex_obs_list:
-            exps = qq.get_exposures(ex_ob)
+            ex_ob_stats = qq.get_pfs_executed_ob_stats_by_ob_key(ex_ob.ob_key)
             ob = qq.get_ob(ex_ob.ob_key)
             arm = ob.inscfg.qa_reference_arm
 
-            exptime_b = sum(exp.effective_exptime_b or 0 for exp in exps)
-            exptime_r = sum(exp.effective_exptime_r or 0 for exp in exps)
-            exptime_m = sum(exp.effective_exptime_m or 0 for exp in exps)
-            exptime_n = sum(exp.effective_exptime_n or 0 for exp in exps)
+            exptime_b = ex_ob_stats.cum_eff_exp_time_b
+            exptime_r = ex_ob_stats.cum_eff_exp_time_r
+            exptime_m = ex_ob_stats.cum_eff_exp_time_m
+            exptime_n = ex_ob_stats.cum_eff_exp_time_n
 
-            # select arm-specific exposure time
-            arm_map = {"b": exptime_b, "r": exptime_r, "m": exptime_m, "n": exptime_n}
-            exptime_selected = arm_map.get(arm, 0)
+            # This is the cumulative effective exposure time
+            # corresponding to the "qa_reference_arm" value.
+            exptime_selected = ex_ob_stats.cum_eff_exp_time
 
             if exptime_selected >= 0:
                 counter += 1
@@ -409,7 +409,7 @@ def queryQueue(psl_id_list, DBPath_qDB, tb_queuedb_filename):
                     exptime_r,
                     exptime_m,
                     exptime_n,
-                    len(exps) * 450.0,  # nominal exposure time per OB
+                    len(ex_ob.exp_history) * 450.0,  # nominal exposure time per OB
                 ])
 
     if not results:
