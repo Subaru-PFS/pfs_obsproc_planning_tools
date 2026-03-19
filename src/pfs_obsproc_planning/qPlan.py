@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 # qPlan.py : queuePlanner
 
-import os, sys
+import os
+import sys
 import warnings
 from datetime import datetime, timedelta, timezone, date
+from io import BytesIO
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -11,22 +13,7 @@ import pandas as pd
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.table import Table
-
-warnings.filterwarnings("ignore")
-
-
-def make_schedule_table(schedule):
-    data = [
-        (slot.start_time, slot.ob.name)
-        for slot in schedule
-        if slot.ob is not None and not slot.ob.derived
-    ]
-    df = pd.DataFrame(data, columns=["datetime", "ob_code"])
-    return df
-
-
-from io import BytesIO
-
+from dateutil import parser
 from ginga.misc.Bunch import Bunch
 from ginga.misc.log import get_logger
 
@@ -44,7 +31,18 @@ from qplan.entity import (
 from qplan.plots import airmass
 from qplan.Scheduler import Scheduler
 from qplan.util.site import site_subaru as observer
-from dateutil import parser
+
+warnings.filterwarnings("ignore")
+
+
+def make_schedule_table(schedule):
+    data = [
+        (slot.start_time, slot.ob.name)
+        for slot in schedule
+        if slot.ob is not None and not slot.ob.derived
+    ]
+    df = pd.DataFrame(data, columns=["datetime", "ob_code"])
+    return df
 
 
 def run(
@@ -547,7 +545,7 @@ def run(
     print(df)
 
     # plot visibility plots for each night
-    if plotVisibility == True:
+    if plotVisibility:
         figs = []
         for obs_date in conf["qplan"]["obs_dates"]:
             t = observer.get_date(obs_date)
@@ -562,7 +560,7 @@ def run(
                     info_list = observer.get_target_info(v)
                     target_data.append(Bunch(history=info_list, target=v))
             if len(target_data) > 0:
-                amp = airmass.AirMassPlot(800, 600, logger=logger)
+                amp = airmass.AirMassPlot(800, 600, logger=logger)  # type: ignore[attr-defined]
                 from matplotlib.backends.backend_agg import (
                     FigureCanvasAgg as FigureCanvas,
                 )
@@ -571,9 +569,9 @@ def run(
                 amp.plot_altitude(observer, target_data, observer.timezone)
                 buf2 = BytesIO()
                 canvas.print_figure(buf2, format="png")
-                Image(data=bytes(buf2.getvalue()), format="png", embed=True)
+                Image(data=bytes(buf2.getvalue()), format="png", embed=True)  # noqa: F821  # type: ignore[name-defined]
                 figs.append(amp)
-                display(amp.fig)
+                display(amp.fig)  # noqa: F821  # type: ignore[name-defined]
     else:
         figs = None
 

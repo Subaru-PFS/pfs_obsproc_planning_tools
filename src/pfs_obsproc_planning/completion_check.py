@@ -27,7 +27,7 @@ def run(conf, workDir="."):
     tb_tgt = Table.read(os.path.join(workDir, "ppp/obList_tot.ecsv"))
     try:
         tb_tgt_backup = Table.read(os.path.join(workDir, "ppp/obList_backup.ecsv"))
-    except:
+    except Exception:
         tb_tgt_backup = Table()
     tb_tgt = vstack([tb_tgt, tb_tgt_backup])
 
@@ -35,7 +35,7 @@ def run(conf, workDir="."):
     tb_ppc = Table.read(os.path.join(workDir, "ppp/ppcList.ecsv"))
     try:
         tb_ppc_backup = Table.read(os.path.join(workDir, "ppp/ppcList_backup.ecsv"))
-    except:
+    except Exception:
         tb_ppc_backup = Table()
     tb_ppc = vstack([tb_ppc, tb_ppc_backup])
 
@@ -500,7 +500,7 @@ def plot_CR(conf, tb_tgt, tb_queue, workDir, pdf):
         obcode_assign = [
             row["obCode"] for row in hdul[1].data if row["obCode"] != "N/A"
         ]
-        mask = np.in1d(tb_tgt["ob_code"].data, obcode_assign)
+        mask = np.isin(tb_tgt["ob_code"].data, obcode_assign)
         tb_tgt["exptime_exp"][mask] += 900
 
     # --- Proposal ID lists ---
