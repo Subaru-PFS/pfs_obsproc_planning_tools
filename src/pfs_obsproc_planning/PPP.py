@@ -44,7 +44,9 @@ cobra_instrument_region = None
 min_sky_targets_per_instrument_region = None
 instrument_region_penalty = None
 black_dot_penalty_cost = None
+cobraSafetyMargin = 0.1
 
+np.random.seed(0)
 
 def DBinfo(para_db):
     # the link of DB to connect
@@ -385,28 +387,32 @@ def readTarget(mode, para):
         (tb_tgt["proposal_id"] == "S25B-UH016-A") * (tb_tgt["input_catalog_id"] == 10289)
     ] += 10
     #tb_tgt["priority"][
-    #    (tb_tgt["proposal_id"] == "S25B-UH041-A") * (np.in1d(tb_tgt["exptime_usr"], [28800.0, 39600.0]))
+    #    (tb_tgt["proposal_id"] == "S25B-UH041-A") * (np.isin(tb_tgt["exptime_usr"], [28800.0, 39600.0]))
     #] += 10
     #tb_tgt["priority"][
-    #    (tb_tgt["proposal_id"] == "S25B-UH041-A") * (np.in1d(tb_tgt["exptime_usr"], [14400.0, 19800.0]))
+    #    (tb_tgt["proposal_id"] == "S25B-UH041-A") * (np.isin(tb_tgt["exptime_usr"], [14400.0, 19800.0]))
     #] += 20
     tb_tgt["exptime_usr"][
-        (tb_tgt["proposal_id"] == "S25B-UH041-A") * (np.in1d(tb_tgt["exptime_usr"], [14400.0, 19800.0]))
+        (tb_tgt["proposal_id"] == "S25B-UH041-A") * (np.isin(tb_tgt["exptime_usr"], [14400.0, 19800.0]))
     ] = 450.0
     tb_tgt["exptime_usr"][
-        (tb_tgt["proposal_id"] == "S25B-UH041-A") * (np.in1d(tb_tgt["exptime_usr"], [28800.0, 39600.0]))
+        (tb_tgt["proposal_id"] == "S25B-UH041-A") * (np.isin(tb_tgt["exptime_usr"], [28800.0, 39600.0]))
     ] = 900.0
     tb_tgt["exptime_usr"][
-        (tb_tgt["proposal_id"] == "S25B-UH041-A") * (np.in1d(tb_tgt["exptime_usr"], [43200.0, 59400.0]))
+        (tb_tgt["proposal_id"] == "S25B-UH041-A") * (np.isin(tb_tgt["exptime_usr"], [43200.0, 59400.0]))
     ] = 1350.0
-
-    print(tb_tgt["exptime_usr"])
+    tb_tgt["exptime_usr"][
+        (tb_tgt["proposal_id"] == "S26A-TE007-G") * (tb_tgt["ra"]<210)
+    ] = 2700.0
+    tb_tgt=tb_tgt[tb_tgt["ra"]<210]
+    #tb_tgt["priority"][
+    #    (tb_tgt["proposal_id"] == "S26A-TE007-G") * (tb_tgt["exptime_usr"] == 4500)
+    #] = 0
 
     #tb_tgt=tb_tgt[tb_tgt["exptime_usr"]==1350.0]
-    
 
     print(list(set(tb_tgt["single_exptime"])))
-    tb_tgt.meta["single_exptime"] = 450.0 #list(set(tb_tgt["single_exptime"]))[0]
+    tb_tgt.meta["single_exptime"] = 2700 #list(set(tb_tgt["single_exptime"]))[0]
 
     logger.info(
         f"[S1] The single exptime is set to {tb_tgt.meta['single_exptime']:.2f} sec."
@@ -1189,7 +1195,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
             pslID_=sorted(set(lst_pslID_assign))
             pslID_n={tt:lst_pslID_assign.count(tt) for tt in pslID_}
 
-            index_assign = np.in1d(_tb_tgt_t_["identify_code"], lst_tgtID_assign)
+            index_assign = np.isin(_tb_tgt_t_["identify_code"], lst_tgtID_assign)
             _tb_tgt_t_["exptime_PPP"][
                 index_assign
             ] -= single_exptime_  # targets in the PPC observed with single_exptime sec
@@ -1256,7 +1262,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
         for _tb_tgt_t in target_DBSCAN(_tb_tgt_, 1.38):  # [_tb_tgt_]: #
             _tb_tgt_t_ = _tb_tgt_t[
                 (_tb_tgt_t["exptime_PPP"] > 0)
-                & np.in1d(_tb_tgt_t["proposal_id"], psl_id_undone)
+                & np.isin(_tb_tgt_t["proposal_id"], psl_id_undone)
             ]  # targets not finished
             if len(_tb_tgt_t_) == 0:
                 continue
@@ -1293,7 +1299,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
                     peak_x,
                     peak_y,
                     peak_pa,
-                    otime="2025-04-10T08:00:00Z",
+                    otime="2026-03-24T13:00:00Z",
                 )
                 iter_tem += 1
 
@@ -1304,7 +1310,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
                 for tt in pslID_
             }
 
-            index_assign = np.in1d(_tb_tgt_t_["identify_code"], lst_tgtID_assign)
+            index_assign = np.isin(_tb_tgt_t_["identify_code"], lst_tgtID_assign)
             weight_tem_tot = sum(_tb_tgt_t_["weight"][index_assign])
             weight_peak.append(
                 [
@@ -1337,7 +1343,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
         # ppc_id, ppc_ra, ppc_dec, ppc_pa, ppc_weight, ppc_fh, ppc_FE
         # print(ppc_lst[-1])
 
-        index_assign = np.in1d(_tb_tgt_["identify_code"], weight_peak[-1][5])
+        index_assign = np.isin(_tb_tgt_["identify_code"], weight_peak[-1][5])
         _tb_tgt_["exptime_PPP"][
             index_assign
         ] -= single_exptime_  # targets in the PPC observed with single_exptime sec
@@ -1386,13 +1392,13 @@ def PPC_centers_single(_tb_tgt, nPPC, weight_para):
           Negative of the weighted sum of bright and faint counts (since we minimize).
         """
         ra, dec = params
-        pa = 120.0
+        pa = 0.0
         # pa = params
         lst_tgtID_assign = netflowRun4PPC(_tb_tgt, ra, dec, pa)
         # index_ = PFS_FoV(ra, dec, pa, _tb_tgt)
         # lst_tgtID_assign = _tb_tgt["identify_code"][index_]
 
-        index_assign = np.in1d(_tb_tgt["identify_code"], lst_tgtID_assign)
+        index_assign = np.isin(_tb_tgt["identify_code"], lst_tgtID_assign)
 
         N_P0 = sum(index_assign * (_tb_tgt["priority"] == 0))
         N_P1 = sum(index_assign * (_tb_tgt["priority"] == 1))
@@ -1479,6 +1485,7 @@ def PPC_centers_single(_tb_tgt, nPPC, weight_para):
     _tb_tgt = count_N(_tb_tgt)
     _tb_tgt = weight(_tb_tgt, para_sci, para_exp, para_n)
     single_exptime_ = _tb_tgt.meta["single_exptime"]
+    print(single_exptime_)
 
     _tb_tgt_ = _tb_tgt[_tb_tgt["exptime_PPP"] > 0]
     _tb_tgt_["exptime_done"] = 0.0
@@ -1519,10 +1526,13 @@ def PPC_centers_single(_tb_tgt, nPPC, weight_para):
             if len(ppc_lst) ==0:
                 ra, dec, pa = [36.49583333, -4.49444444, 0]
             elif len(ppc_lst) ==1:
-                _tb_tgt_ = _tb_tgt_[(_tb_tgt_["priority"] == 999) | (_tb_tgt_["exptime_PPP"] < 1350.0)]
+                _tb_tgt_ = _tb_tgt_[(_tb_tgt_["priority"] == 999) | (_tb_tgt_["exptime_PPP"] < 57600.0)]
                 ra, dec, pa = [36.49583333, -4.49444444, 0]
             elif len(ppc_lst) ==2:
-                _tb_tgt_ = _tb_tgt_[(_tb_tgt_["priority"] == 999) | (_tb_tgt_["exptime_PPP"] < 900.0)]
+                _tb_tgt_ = _tb_tgt_[(_tb_tgt_["priority"] == 999) | (_tb_tgt_["exptime_PPP"] < 43200.0)]
+                ra, dec, pa = [36.49583333, -4.49444444, 0]
+            elif len(ppc_lst) ==3:
+                _tb_tgt_ = _tb_tgt_[(_tb_tgt_["priority"] == 999) | (_tb_tgt_["exptime_PPP"] < 28800.0)]
                 ra, dec, pa = [36.49583333, -4.49444444, 0]
             """
             if len(ppc_lst) ==0:
@@ -1533,6 +1543,282 @@ def PPC_centers_single(_tb_tgt, nPPC, weight_para):
             elif len(ppc_lst) ==2:
                 _tb_tgt_ = _tb_tgt_[(_tb_tgt_["priority"] == 999) | (_tb_tgt_["exptime_PPP"] < 900.0)]
                 ra, dec, pa = [150.11916667, 2.20583333, 0]
+            #"""
+        elif list(set(_tb_tgt["proposal_id"])) == ["S26A-TE007-G"]:
+            central_ra, central_dec = 203.879558,59.047015
+            pa = 120
+                
+            def optimize_pointing_objective(coords):
+                test_ra, test_dec = coords
+                
+                # Run netflow to get assigned target IDs
+                assigned_ids = netflowRun4PPC(_tb_tgt_, test_ra, test_dec, pa)
+                
+                # Get indices of assigned targets
+                index_assign = np.isin(_tb_tgt_["identify_code"], assigned_ids)
+                
+                # Count P0-P2 targets (priority 0-2)
+                assigned_targets = _tb_tgt_[index_assign]
+                n_p0_p2 = np.sum(assigned_targets["priority"] <= 1)
+                n_p0_p2_norm = n_p0_p2 / (_tb_tgt_["priority"] <= 1).sum()  # normalized by total P0-P2 targets
+                
+                # Total allocated targets
+                n_total = len(assigned_ids) 
+                n_total_norm = len(assigned_ids) / len(_tb_tgt_)  # normalized by total targets/
+                
+                # Normalized score with minimum as 2
+                # Weight P0-P2 targets more heavily
+                score = - (5 * n_p0_p2_norm + n_total_norm)
+                
+                print(f"Testing RA={test_ra:.6f}, Dec={test_dec:.6f}: "
+                      f"P0-P2={n_p0_p2}, Total={n_total}, Score={score:.3f}")
+                
+                return score
+            
+            # Use L-BFGS-B method which supports bounds
+            from scipy.optimize import minimize
+            
+            initial_guess = [central_ra, central_dec]
+            bounds = [(central_ra - 0.1, central_ra + 0.1), 
+                     (central_dec - 0.1, central_dec + 0.1)]
+            
+            print(f"\nOptimizing pointing position around RA={central_ra}, Dec={central_dec}")
+            print(f"Search range: ±0.1 degrees")
+            
+            result = minimize(
+                optimize_pointing_objective,
+                initial_guess,
+                method="L-BFGS-B",
+                bounds=bounds,
+                options={"ftol": 1.0, "eps": 0.01}
+            )
+            
+            # Store optimized position for reuse
+            optimized_ra, optimized_dec = result.x
+            
+            print(f"\nOptimal position found: RA={optimized_ra:.6f}, Dec={optimized_dec:.6f}")
+            print(f"Optimization result: {result.message}")
+            ra, dec, pa = optimized_ra, optimized_dec, pa
+        elif list(set(_tb_tgt["proposal_id"])) == ["S26A-UH022-A"]:
+            """
+            from astropy.io import fits
+            import glob
+
+            # Directory
+            fits_dir = "/home/wanqqq/workDir_pfs/S26A/run_2603/S26A-UH022-A/output_20260216/design/"
+            
+            # Collect exposure counts
+            exptime_counter = {}
+            
+            # Loop over all fits files
+            for fits_file in glob.glob(os.path.join(fits_dir, "*.fits")):
+                with fits.open(fits_file) as hdul:
+                    obcodes = hdul[1].data["obCode"]
+            
+                    for ob in obcodes:
+                        ob = ob.strip() if isinstance(ob, str) else ob
+                        exptime_counter[ob] = exptime_counter.get(ob, 0) + 14400
+
+            print(len(exptime_counter))
+
+            for i, ob in enumerate(_tb_tgt_["ob_code"]):
+                if ob in exptime_counter:
+                    _tb_tgt_["exptime_PPP"][i] -= exptime_counter[ob]
+                    _tb_tgt_["priority"][i] = 999
+
+            ra, dec, pa = [150.119167,	2.205833, 0]
+            print(len(_tb_tgt_))
+            _tb_tgt_ = _tb_tgt_[_tb_tgt_["exptime_PPP"]>0]
+            print(len(_tb_tgt_))
+            _tb_tgt_ = _tb_tgt_[((_tb_tgt_["priority"] <= 6) & (_tb_tgt_["exptime_PPP"] == 57600.0)) | (_tb_tgt_["exptime_PPP"] != 57600.0)]
+            mask = _tb_tgt_["exptime_PPP"] != 57600.0
+            _tb_tgt_["priority"][mask] += 10
+            #_tb_tgt_ = _tb_tgt_[(_tb_tgt_["priority"] == 999) | (_tb_tgt_["exptime_PPP"] == 57600.0)]
+            print(min(_tb_tgt_["exptime_PPP"]), max(_tb_tgt_["exptime_PPP"]))
+            print(min(_tb_tgt_["priority"]), max(_tb_tgt_["priority"]))
+            from collections import Counter
+            print(Counter(_tb_tgt_[_tb_tgt_["priority"] == 999]["exptime_PPP"]))
+            """
+
+            """
+            # Only optimize once for the first PPC
+            if len(ppc_lst) == 0:
+                # Local optimization for S26A-UH022-A pointing position
+                # Optimize within 0.1 degrees to maximize P0-P2 and total allocated targets
+                central_ra, central_dec = 150.119167, 2.205833
+                pa = 0
+                
+                def optimize_pointing_objective(coords):
+                    test_ra, test_dec = coords
+                    
+                    # Run netflow to get assigned target IDs
+                    assigned_ids = netflowRun4PPC(_tb_tgt_, test_ra, test_dec, pa)
+                    
+                    # Get indices of assigned targets
+                    index_assign = np.isin(_tb_tgt_["identify_code"], assigned_ids)
+                    
+                    # Count P0-P2 targets (priority 0-2)
+                    assigned_targets = _tb_tgt_[index_assign]
+                    n_p0_p2 = np.sum(assigned_targets["priority"] <= 1)
+                    n_p0_p2_norm = n_p0_p2 / (_tb_tgt_["priority"] <= 1).sum()  # normalized by total P0-P2 targets
+                    
+                    # Total allocated targets
+                    n_total = len(assigned_ids) 
+                    n_total_norm = len(assigned_ids) / len(_tb_tgt_)  # normalized by total targets/
+                    
+                    # Normalized score with minimum as 2
+                    # Weight P0-P2 targets more heavily
+                    score = - (5 * n_p0_p2_norm + n_total_norm)
+                    
+                    print(f"Testing RA={test_ra:.6f}, Dec={test_dec:.6f}: "
+                          f"P0-P2={n_p0_p2}, Total={n_total}, Score={score:.3f}")
+                    
+                    return score
+                
+                # Use L-BFGS-B method which supports bounds
+                from scipy.optimize import minimize
+                
+                initial_guess = [central_ra, central_dec]
+                bounds = [(central_ra - 0.1, central_ra + 0.1), 
+                         (central_dec - 0.1, central_dec + 0.1)]
+                
+                print(f"\nOptimizing pointing position around RA={central_ra}, Dec={central_dec}")
+                print(f"Search range: ±0.1 degrees")
+                
+                result = minimize(
+                    optimize_pointing_objective,
+                    initial_guess,
+                    method="L-BFGS-B",
+                    bounds=bounds,
+                    options={"ftol": 1.0, "eps": 0.01}
+                )
+                
+                # Store optimized position for reuse
+                optimized_ra, optimized_dec = result.x
+                
+                print(f"\nOptimal position found: RA={optimized_ra:.6f}, Dec={optimized_dec:.6f}")
+                print(f"Optimization result: {result.message}")
+                        
+            #"""
+            if len(ppc_lst) ==0:
+                ra, dec, pa = 150.029167, 2.195718, 0
+            elif len(ppc_lst) ==1:
+                _tb_tgt_ = _tb_tgt_[(_tb_tgt_["priority"] == 999) | (_tb_tgt_["exptime_PPP"] < 57600.0)]
+                ra, dec, pa = 150.029167, 2.195718, 0
+            elif len(ppc_lst) ==2:
+                _tb_tgt_ = _tb_tgt_[(_tb_tgt_["priority"] == 999) | (_tb_tgt_["exptime_PPP"] < 43200.0)]
+                ra, dec, pa = 150.029167, 2.195718, 0
+            elif len(ppc_lst) ==3:
+                _tb_tgt_ = _tb_tgt_[(_tb_tgt_["priority"] == 999) | (_tb_tgt_["exptime_PPP"] < 28800.0)]
+                ra, dec, pa = 150.029167, 2.195718, 0
+            #"""
+
+        elif list(set(_tb_tgt["proposal_id"])) == ["S26A-091"]:
+            """
+            from astropy.io import fits
+            import glob
+
+            # Directory
+            fits_dir = "/home/wanqqq/workDir_pfs/S26A/run_2603/S26A-UH022-A/output_20260216/design/"
+            
+            # Collect exposure counts
+            exptime_counter = {}
+            
+            # Loop over all fits files
+            for fits_file in glob.glob(os.path.join(fits_dir, "*.fits")):
+                with fits.open(fits_file) as hdul:
+                    obcodes = hdul[1].data["obCode"]
+            
+                    for ob in obcodes:
+                        ob = ob.strip() if isinstance(ob, str) else ob
+                        exptime_counter[ob] = exptime_counter.get(ob, 0) + 14400
+
+            print(len(exptime_counter))
+
+            for i, ob in enumerate(_tb_tgt_["ob_code"]):
+                if ob in exptime_counter:
+                    _tb_tgt_["exptime_PPP"][i] -= exptime_counter[ob]
+                    _tb_tgt_["priority"][i] = 999
+
+            ra, dec, pa = [150.119167,	2.205833, 0]
+            print(len(_tb_tgt_))
+            _tb_tgt_ = _tb_tgt_[_tb_tgt_["exptime_PPP"]>0]
+            print(len(_tb_tgt_))
+            _tb_tgt_ = _tb_tgt_[((_tb_tgt_["priority"] <= 6) & (_tb_tgt_["exptime_PPP"] == 57600.0)) | (_tb_tgt_["exptime_PPP"] != 57600.0)]
+            mask = _tb_tgt_["exptime_PPP"] != 57600.0
+            _tb_tgt_["priority"][mask] += 10
+            #_tb_tgt_ = _tb_tgt_[(_tb_tgt_["priority"] == 999) | (_tb_tgt_["exptime_PPP"] == 57600.0)]
+            print(min(_tb_tgt_["exptime_PPP"]), max(_tb_tgt_["exptime_PPP"]))
+            print(min(_tb_tgt_["priority"]), max(_tb_tgt_["priority"]))
+            from collections import Counter
+            print(Counter(_tb_tgt_[_tb_tgt_["priority"] == 999]["exptime_PPP"]))
+            """
+            print("now it is for 091")
+            #"""
+            # Only optimize once for the first PPC
+            if len(ppc_lst) < 2:
+                # Local optimization for S26A-UH022-A pointing position
+                # Optimize within 0.1 degrees to maximize P0-P2 and total allocated targets
+                central_ra, central_dec = 150.119167, 2.205833
+                pa = 0
+                print("now it is for 091")
+                
+                def optimize_pointing_objective(coords):
+                    test_ra, test_dec = coords
+                    
+                    # Run netflow to get assigned target IDs
+                    assigned_ids = netflowRun4PPC(_tb_tgt_, test_ra, test_dec, pa)
+                    
+                    # Get indices of assigned targets
+                    index_assign = np.isin(_tb_tgt_["identify_code"], assigned_ids)
+                    
+                    # Count P0-P2 targets (priority 0-2)
+                    assigned_targets = _tb_tgt_[index_assign]
+                    n_p0_p2 = np.sum(assigned_targets["priority"] <= 2)
+                    n_p0_p2_norm = n_p0_p2 / (_tb_tgt_["priority"] <= 2).sum()  # normalized by total P0-P2 targets
+                    
+                    # Total allocated targets
+                    n_total = len(assigned_ids) 
+                    n_total_norm = len(assigned_ids) / len(_tb_tgt_)  # normalized by total targets/
+                    
+                    # Normalized score with minimum as 2
+                    # Weight P0-P2 targets more heavily
+                    score = - (5 * n_p0_p2_norm + n_total_norm)
+                    
+                    print(f"Testing RA={test_ra:.6f}, Dec={test_dec:.6f}: "
+                          f"P0-P2={n_p0_p2}, Total={n_total}, Score={score:.3f}")
+                    
+                    return score
+                
+                # Use L-BFGS-B method which supports bounds
+                #from scipy.optimize import minimize
+                
+                initial_guess = [central_ra, central_dec]
+                bounds = [(central_ra - 1, central_ra + 1), 
+                         (central_dec - 0.5, central_dec + 0.5)]
+                
+                print(f"\nOptimizing pointing position around RA={central_ra}, Dec={central_dec}")
+                print(f"Search range: ±0.1 degrees")
+                
+                result = minimize(
+                    optimize_pointing_objective,
+                    initial_guess,
+                    method="L-BFGS-B",
+                    bounds=bounds,
+                    options={"ftol": 1.0, "eps": 0.01}
+                )
+                
+                # Store optimized position for reuse
+                optimized_ra, optimized_dec = result.x
+                
+                print(f"\nOptimal position found: RA={optimized_ra:.6f}, Dec={optimized_dec:.6f}")
+                print(f"Optimization result: {result.message}")
+                        
+            #"""
+            if len(ppc_lst) ==0:
+                ra, dec, pa = optimized_ra, optimized_dec, 0
+            elif len(ppc_lst) ==1:
+                ra, dec, pa = optimized_ra, optimized_dec, 0
             #"""
 
         else:
@@ -1560,6 +1846,7 @@ def PPC_centers_single(_tb_tgt, nPPC, weight_para):
             pa = 120.0
 
         lst_tgtID_assign = netflowRun4PPC(_tb_tgt_, ra, dec, pa)
+        index_in = PFS_FoV(ra, dec, pa, _tb_tgt_)
 
         ppc_lst.append(
             np.array([
@@ -1573,10 +1860,10 @@ def PPC_centers_single(_tb_tgt, nPPC, weight_para):
             ], dtype=object)
         )
 
-        index_assign = np.in1d(_tb_tgt_["identify_code"], lst_tgtID_assign)
+        index_assign = np.isin(_tb_tgt_["identify_code"], lst_tgtID_assign)
 
         from collections import Counter
-
+        print(dict(Counter(_tb_tgt_["exptime_PPP"][index_in])))
         print(dict(Counter(_tb_tgt_["exptime_PPP"][index_assign])))
 
         _tb_tgt_["exptime_PPP"][
@@ -1603,7 +1890,7 @@ def PPC_centers_single(_tb_tgt, nPPC, weight_para):
         ppc_code = ["cla_L_uh006_" + str(n + 1) for n in np.arange(nPPC)]
     else:
         ppc_code = [
-            f"cla_{resol}_{pslid_.split('-')[1]}_{str(n+1)}_backup" for n in np.arange(nPPC)
+            f"cla_{resol}_{pslid_.split('-')[1]}_{str(n+1)}" for n in np.arange(nPPC)
         ]
     ppc_ra = ppc_lst_fin[:, 1]
     ppc_dec = ppc_lst_fin[:, 2]
@@ -1667,7 +1954,7 @@ def PPC_centers_single(_tb_tgt, nPPC, weight_para):
     )
 
     # ppcList.write("/home/wanqqq/examples/run_2503/S25A-UH006-B/output/ppp/ppcList.ecsv", format="ascii.ecsv", overwrite=True)
-    ppcList.write("/home/wanqqq/workDir_pfs/S25B/run_2601/S25B-UH041-A/output_20260106/ppp/ppcList1.ecsv", format="ascii.ecsv", overwrite=True)
+    ppcList.write("/home/wanqqq/workDir_pfs/S26A/run_2603/S26A-TE007-G/output_20260306/ppp/ppcList_1by1.ecsv", format="ascii.ecsv", overwrite=True)
 
     logger.info(
         f"[S2] Determine pointing centers done ( nppc = {len(ppc_lst_fin):.0f}; takes {round(time.time()-time_start,3)} sec)"
@@ -1711,22 +1998,24 @@ def sam2netflow(_tb_tgt, for_ppc=False):
     for tt in _tb_tgt:
         if for_ppc:
             # set exptime = single_exptime_ if running netflow to determine PPC
-            tgt_id_, tgt_ra_, tgt_dec_, tgt_exptime_, tgt_proposal_id_, tgt_pri_ = (
+            tgt_id_, tgt_ra_, tgt_dec_, tgt_exptime_, tgt_proposal_id_, tgt_pri_, ref_arm_ = (
                 tt["identify_code"],
                 tt["ra"],
                 tt["dec"],
                 single_exptime_,
                 tt["proposal_id"],
                 int(tt["priority"]),
+                tt["qa_reference_arm"],
             )
         else:
-            tgt_id_, tgt_ra_, tgt_dec_, tgt_exptime_, tgt_proposal_id_, tgt_pri_ = (
+            tgt_id_, tgt_ra_, tgt_dec_, tgt_exptime_, tgt_proposal_id_, tgt_pri_, ref_arm_ = (
                 tt["identify_code"],
                 tt["ra"],
                 tt["dec"],
                 tt["exptime_PPP"],
                 tt["proposal_id"],
                 int(tt["priority"]),
+                tt["qa_reference_arm"],
             )
         """  
         tgt_lst_netflow.append(
@@ -1743,6 +2032,11 @@ def sam2netflow(_tb_tgt, for_ppc=False):
         int_ += 1
         #"""
 
+        if ref_arm_ == "n":
+            req_flags_ = 0 # targets requesting NIR
+        else:
+            req_flags_ = 1 # targets no requesting NIR
+
         tgt_lst_netflow.append(
             nf.ScienceTarget(
                 tgt_id_,
@@ -1751,6 +2045,8 @@ def sam2netflow(_tb_tgt, for_ppc=False):
                 tgt_exptime_,
                 tgt_pri_,
                 "sci",
+                req_flags=req_flags_,
+                parallax=1e-7,
             )
         )
         _tgt_lst_psl_id.append("sci_P" + str(int(tgt_pri_)))
@@ -1790,173 +2086,336 @@ def NetflowPreparation(_tb_tgt):
     classdict = {
         # Priorities correspond to the magnitudes of bright stars (in most case for the 2022 June Engineering)
         "sci_P999": {
-            "nonObservationCost": 1e4,
+            "nonObservationCost": 5e4,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P0": {
-            "nonObservationCost": 1e4,
+            "nonObservationCost": 5e4,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P1": {
-            "nonObservationCost": 5e3,
+            "nonObservationCost": 5e4,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P2": {
-            "nonObservationCost": 5e2,
+            "nonObservationCost": 2e4,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P3": {
-            "nonObservationCost": 5e1,
+            "nonObservationCost": 1e4,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P4": {
-            "nonObservationCost": 2e3,
+            "nonObservationCost": 9e3,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P5": {
-            "nonObservationCost": 1e3,
+            "nonObservationCost": 8e3,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P6": {
-            "nonObservationCost": 100,
+            "nonObservationCost": 7e3,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P7": {
-            "nonObservationCost": 5,
+            "nonObservationCost": 6e3,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P8": {
-            "nonObservationCost": 3,
+            "nonObservationCost": 5e3,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P9": {
-            "nonObservationCost": 10,
+            "nonObservationCost": 1e3,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P10": {
-            "nonObservationCost": 5,
+            "nonObservationCost": 100,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P11": {
-            "nonObservationCost": 4,
+            "nonObservationCost": 90,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P12": {
-            "nonObservationCost": 3,
+            "nonObservationCost": 80,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P13": {
-            "nonObservationCost": 2,
+            "nonObservationCost": 70,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P14": {
-            "nonObservationCost": 1,
+            "nonObservationCost": 60,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P15": {
-            "nonObservationCost": 0.9,
+            "nonObservationCost": 50,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P16": {
-            "nonObservationCost": 0.8,
+            "nonObservationCost": 40,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P17": {
-            "nonObservationCost": 0.7,
+            "nonObservationCost": 30,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P18": {
-            "nonObservationCost": 0.6,
+            "nonObservationCost": 20,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P19": {
-            "nonObservationCost": 0.5,
+            "nonObservationCost": 10,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P20": {
-            "nonObservationCost": 0.4,
+            "nonObservationCost": 5,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P21": {
-            "nonObservationCost": 0.3,
+            "nonObservationCost": 6,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P22": {
-            "nonObservationCost": 0.2,
+            "nonObservationCost": 5,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P23": {
-            "nonObservationCost": 0.1,
+            "nonObservationCost": 4,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P24": {
-            "nonObservationCost": 0.05,
+            "nonObservationCost": 3,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P25": {
-            "nonObservationCost": 0.04,
+            "nonObservationCost": 2.5,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P26": {
-            "nonObservationCost": 0.03,
+            "nonObservationCost": 2,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P27": {
-            "nonObservationCost": 0.02,
+            "nonObservationCost": 1.5,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P28": {
-            "nonObservationCost": 0.01,
+            "nonObservationCost": 1,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "sci_P29": {
-            "nonObservationCost": 0.01,
+            "nonObservationCost": 1,
             "partialObservationCost": 5e4,
             "calib": False,
         },
         "cal": {
-            "numRequired": 200,
+            "numRequired": 0,
             "nonObservationCost": 2000,
             "calib": True,
         },
         "sky": {
-            "numRequired": 400,
+            "numRequired": 0,
             "nonObservationCost": 2000,
             "calib": True,
         },
     }
 
     return classdict
+
+
+def _build_cost_classdict(base_classdict, non_obs_costs):
+    classdict = {key: value.copy() for key, value in base_classdict.items()}
+    for key, cost in non_obs_costs.items():
+        if key in classdict:
+            classdict[key]["nonObservationCost"] = float(cost)
+            if "partialObservationCost" in classdict[key]:
+                classdict[key]["nonObservationCost"] = min(
+                    classdict[key]["nonObservationCost"],
+                    classdict[key]["partialObservationCost"],
+                )
+    return classdict
+
+
+def _score_assignment_counts(_tb_tgt, res, tgt_lst_netflow, focus_max=10):
+    assigned_ids = set()
+    for vis in res:
+        for tidx in vis.keys():
+            assigned_ids.add(tgt_lst_netflow[tidx].ID)
+
+    if not assigned_ids:
+        return 0, 0, 0
+
+    pri_map = {
+        code: int(pri)
+        for code, pri in zip(_tb_tgt["identify_code"], _tb_tgt["priority"])
+    }
+
+    total = sum(
+        1
+        for code in assigned_ids
+        if pri_map.get(code) is not None and 0 <= pri_map.get(code) <= focus_max
+    )
+    p0 = sum(1 for code in assigned_ids if pri_map.get(code) == 0)
+    p1 = sum(1 for code in assigned_ids if pri_map.get(code) == 1)
+
+    return total, p0, p1
+
+
+def optimize_non_observation_costs(
+    _tb_tgt,
+    ppc_lst,
+    seed=0,
+    scale_range=(0.05, 50.0),
+    weight_total=1.0,
+    weight_p0=3.0,
+    weight_p1=2.0,
+    focus_max=10,
+    otime="2026-03-24T13:00:00Z",
+):
+    """
+    Minimize the negative of the normalized assignment score.
+    Returns (best_classdict, best_metrics).
+    """
+    rng = np.random.default_rng(seed)
+    base_classdict = NetflowPreparation(_tb_tgt)
+
+    total_available = int(
+        np.sum((_tb_tgt["priority"] >= 0) & (_tb_tgt["priority"] <= focus_max))
+    )
+    p0_available = int(np.sum(_tb_tgt["priority"] == 0))
+    p1_available = int(np.sum(_tb_tgt["priority"] == 1))
+
+    def build_costs(scales):
+        scale_p0, scale_p1, scale_p2_6, scale_p7_10 = scales
+        non_obs_costs = {}
+        for pri in range(0, 11):
+            key = f"sci_P{pri}"
+            if pri == 0:
+                scale = scale_p0
+            elif pri == 1:
+                scale = scale_p1
+            elif 2 <= pri <= 6:
+                scale = scale_p2_6
+            else:
+                scale = scale_p7_10
+            non_obs_costs[key] = base_classdict[key]["nonObservationCost"] * scale
+        return non_obs_costs
+
+    def objective(scales):
+        low, high = scale_range
+        if np.any(scales < low) or np.any(scales > high):
+            return 1e3
+
+        classdict = _build_cost_classdict(base_classdict, build_costs(scales))
+
+        res, _, tgt_lst_netflow = netflowRun_single(
+            ppc_lst,
+            _tb_tgt,
+            otime=otime,
+            classdict_override=classdict,
+        )
+
+        from collections import Counter
+
+        total, p0, p1 = _score_assignment_counts(
+            _tb_tgt, res, tgt_lst_netflow, focus_max=focus_max
+        )
+        total_norm = total / total_available if total_available > 0 else 0.0
+        p0_norm = p0 / p0_available if p0_available > 0 else 0.0
+        p1_norm = p1 / p1_available if p1_available > 0 else 0.0
+        score = (
+            weight_total * total_norm
+            + weight_p0 * p0_norm
+            + weight_p1 * p1_norm
+        )
+
+        assigned_ids = {
+            tgt_lst_netflow[tidx].ID
+            for vis in res
+            for tidx in vis.keys()
+        }
+        pri_map = {
+            code: pri
+            for code, pri in zip(_tb_tgt["identify_code"], _tb_tgt["priority"])
+        }
+        def _sorted_counts(counter):
+            keys = sorted(k for k in counter.keys() if k != 999)
+            if 999 in counter:
+                keys.append(999)
+            return {k: counter[k] for k in keys}
+
+        print(_sorted_counts(Counter(_tb_tgt["priority"])))
+        print(_sorted_counts(Counter(pri_map[code] for code in assigned_ids)))
+
+        non_obs_costs = {
+            int(key.replace("sci_P", "")): value["nonObservationCost"]
+            for key, value in classdict.items()
+            if key.startswith("sci_P")
+        }
+        print(_sorted_counts(non_obs_costs))
+        return -score
+
+    x0 = np.ones(4)
+    result = minimize(objective, x0, method="Powell")
+
+    best_scales = result.x
+    best_costs = build_costs(best_scales)
+    best_classdict = _build_cost_classdict(base_classdict, best_costs)
+
+    res, _, tgt_lst_netflow = netflowRun_single(
+        ppc_lst,
+        _tb_tgt,
+        otime=otime,
+        classdict_override=best_classdict,
+    )
+    total, p0, p1 = _score_assignment_counts(
+        _tb_tgt, res, tgt_lst_netflow, focus_max=focus_max
+    )
+
+    best = {
+        "score": -result.fun,
+        "total": total,
+        "p0": p0,
+        "p1": p1,
+        "non_obs_costs": best_costs,
+        "scales": best_scales,
+        "success": bool(result.success),
+        "message": result.message,
+    }
+
+    return best_classdict, best
 
 
 def cobraMoveCost(dist):
@@ -1970,8 +2429,9 @@ def netflowRun_single(
     TraCollision=False,
     numReservedFibers=0,
     fiberNonAllocationCost=10,
-    otime="2025-03-22T08:00:00Z",
+    otime="2026-03-24T13:00:00Z",
     for_ppc=False,
+    classdict_override=None,
 ):
     # run netflow (without iteration)
     Telra = ppc_lst[:, 1]
@@ -1980,7 +2440,11 @@ def netflowRun_single(
     Telweight = ppc_lst[:, 4]
 
     tgt_lst_netflow, tgt_psl_FH_tac = sam2netflow(_tb_tgt, for_ppc)
-    classdict = NetflowPreparation(_tb_tgt)
+    classdict = (
+        classdict_override
+        if classdict_override is not None
+        else NetflowPreparation(_tb_tgt)
+    )
 
     telescopes = []
 
@@ -2017,6 +2481,22 @@ def netflowRun_single(
     forbiddenPairs = [[] for i in range(nvisit)]
     alreadyObserved = {}
 
+    from pfs.utils.fiberids import FiberIds
+    from pathlib import Path
+    import pfs.utils
+    
+    p = Path(pfs.utils.__path__[0])
+    p_fiberdata = p.parent.parent.parent / "data" / "fiberids" 
+    
+    cobra_idx_n2 = FiberIds(path=p_fiberdata).cobrasForSpectrograph(spectrographId=2)
+    cobra_idx_n2 = cobra_idx_n2[cobra_idx_n2<=2394]
+
+    cobra_idx_n2 = np.array(cobra_idx_n2)
+    mask_n2 = np.zeros(2394, dtype=bool)
+    mask_n2[cobra_idx_n2] = True
+    flag_n2 = np.array([0] * 2394)
+    flag_n2[mask_n2] = 1 # cobras of module 2 can not provide NIR
+
     if TraCollision:
         done = False
         while not done:
@@ -2046,6 +2526,8 @@ def netflowRun_single(
                 fiberNonAllocationCost=fiberNonAllocationCost,
                 obsprog_time_budget=tgt_psl_FH_tac,
                 assignEveryCobra=True,
+                cobraSafetyMargin=cobraSafetyMargin,
+                cobraFeatureFlags=flag_n2,
             )
 
             prob.solve()
@@ -2118,7 +2600,8 @@ def netflowRun_single(
             numReservedFibers=numReservedFibers,
             fiberNonAllocationCost=fiberNonAllocationCost,
             obsprog_time_budget=tgt_psl_FH_tac,
-            # assignEveryCobra=True,
+            cobraSafetyMargin=cobraSafetyMargin,
+            cobraFeatureFlags=flag_n2,
         )
 
         prob.solve()
@@ -2145,7 +2628,8 @@ def netflowRun_nofibAssign(
     TraCollision=False,
     numReservedFibers=0,
     fiberNonAllocationCost=0.0,
-    otime="2025-04-20T08:00:00Z",
+    otime="2026-03-24T13:00:00Z",
+    classdict_override=None,
 ):
     # run netflow (with iteration)
     #    if no fiber assignment in some PPCs, shift these PPCs with 0.15 deg
@@ -2159,6 +2643,7 @@ def netflowRun_nofibAssign(
         fiberNonAllocationCost,
         otime,
         for_ppc,
+        classdict_override,
     )
     return res, telescope, tgt_lst_netflow
 
@@ -2212,6 +2697,7 @@ def netflowRun(
     TraCollision=False,
     numReservedFibers=0,
     fiberNonAllocationCost=0.0,
+    classdict_override=None,
 ):
     # run netflow (with iteration and DBSCAN)
 
@@ -2266,6 +2752,7 @@ def netflowRun(
             TraCollision,
             numReservedFibers,
             fiberNonAllocationCost,
+            classdict_override=classdict_override,
         )
 
         for i, (vis, tel) in enumerate(zip(res, telescope)):
@@ -2286,14 +2773,14 @@ def netflowRun(
 
             else:
                 ppc_tot_weight = 1 / sum(
-                    _tb_tgt[np.in1d(_tb_tgt["identify_code"], tgt_assign_id_lst)][
+                    _tb_tgt[np.isin(_tb_tgt["identify_code"], tgt_assign_id_lst)][
                         "weight"
                     ]
                 )
 
             resol = _tb_tgt["resolution"][0]
             pslid_ = _tb_tgt["proposal_id"][0]
-            ppc_code_ = f"cla_{resol}_{pslid_.split('-')[1]}_{str(i+1)}_backup"
+            ppc_code_ = f"cla_{resol}_{pslid_.split('-')[1]}_{str(i+1)}"
             ppc_lst.append(
                 [
                     ppc_code_,
@@ -2369,7 +2856,7 @@ def netflowRun4PPC(
     ppc_x,
     ppc_y,
     ppc_pa,
-    otime="2025-05-20T08:00:00Z",
+    otime="2026-03-24T13:00:00Z",
 ):
     # run netflow (for PPP_centers)
     ppc_lst = np.array([[0, ppc_x, ppc_y, ppc_pa, 0]])
@@ -2388,7 +2875,7 @@ def netflowRun4PPC(
             tgt_assign_id_lst.append(tgt_lst_netflow[tidx].ID)
 
     return tgt_assign_id_lst
-    # """
+    """
     ppc_lst_ = []
     for i, (vis, tel) in enumerate(zip(res, telescope)):
         ppc_fib_eff = len(vis) / 2394.0 * 100
@@ -2467,7 +2954,7 @@ def netflowAssign(_tb_tgt, _tb_ppc):
     # targets with allocated fiber
     for ppc_t in _tb_ppc_pri:
         lst = np.where(
-            np.in1d(_tb_tgt["identify_code"], ppc_t["ppc_allocated_targets"]) == True
+            np.isin(_tb_tgt["identify_code"], ppc_t["ppc_allocated_targets"]) == True
         )[0]
         _tb_tgt["exptime_assign"].data[lst] += int(_tb_tgt.meta["single_exptime"])
 
@@ -2952,7 +3439,7 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
     )
 
     ppcList.write(
-        os.path.join(dirName, "ppcList_all.ecsv"), format="ascii.ecsv", overwrite=True
+        os.path.join(dirName, "ppcList.ecsv"), format="ascii.ecsv", overwrite=True
     )
 
     _tb_tgt_tot["priority"][
@@ -2974,6 +3461,7 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
     ob_resolution = _tb_tgt_tot["resolution"].data
     proposal_id = _tb_tgt_tot["proposal_id"].data
     proposal_rank = _tb_tgt_tot["rank"].data
+    ob_qa_reference_arm = _tb_tgt_tot["qa_reference_arm"].data
     ob_weight_best = _tb_tgt_tot["rank_fin"].data
     ob_allocate_time_netflow = _tb_tgt_tot["exptime_assign"].data
     ob_filter_g = _tb_tgt_tot["filter_g"].data
@@ -3020,6 +3508,7 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
             ob_resolution,
             proposal_id,
             proposal_rank,
+            ob_qa_reference_arm,
             ob_weight_best,
             ob_allocate_time_netflow,
             ob_filter_g,
@@ -3065,6 +3554,7 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
             "ob_resolution",
             "proposal_id",
             "proposal_rank",
+            "qa_reference_arm",
             "ob_weight_best",
             "ob_exptime_assign",
             "ob_filter_g",
@@ -3203,6 +3693,7 @@ def run(
     show_plots=False,
     backup=False,
     conf=None,
+    optimize_costs=False,
 ):
     global bench
     bench = bench_info
@@ -3218,7 +3709,7 @@ def run(
     TraCollision = False
     multiProcess = True
 
-    if list(set(tb_tgt["proposal_id"])) == ["S25B-116N"] or list(set(tb_tgt["proposal_id"])) == ["S25B-UH041-A"]:
+    if list(set(tb_tgt["proposal_id"])) == ["S25B-116N"] or list(set(tb_tgt["proposal_id"])) == ["S25B-UH041-A"] or list(set(tb_tgt["proposal_id"])) == ["S26A-UH022-A"] or list(set(tb_tgt["proposal_id"])) == ["S26A-TE007-G"]:
         # LR--------------------------------------------
         ppc_lst_l = PPC_centers_single(tb_sel_l, nppc_l, [para_sci_m, para_exp_m, para_n_m])
 
@@ -3259,7 +3750,7 @@ def run(
         output(tb_ppc_tot, tb_tgt_tot, dirName=dirName)
         return None
 
-    if list(set(tb_tgt["proposal_id"])) == ["S25B-TE421-K"]:
+    if list(set(tb_tgt["proposal_id"])) == ["S25B-TE421-K"] or list(set(tb_tgt["proposal_id"])) == ["S26A-091"]:
         # MR--------------------------------------------
         ppc_lst_m = PPC_centers_single(tb_sel_m, nppc_m, [para_sci_m, para_exp_m, para_n_m])
 
@@ -3333,12 +3824,23 @@ def run(
     tb_tgt_l1 = count_N(tb_tgt_l1)
     tb_tgt_l1 = weight(tb_tgt_l1, para_sci_l, para_exp_l, para_n_l)
 
+    if optimize_costs:
+        best_classdict_l, best_metrics_l = optimize_non_observation_costs(
+            tb_tgt_l1,
+            ppc_lst_l,
+            seed=randomseed,
+        )
+        logger.info(f"[S3] LR cost optimization: {best_metrics_l}")
+    else:
+        best_classdict_l = None
+
     tb_ppc_l = netflowRun(
         tb_tgt_l1,
         randomseed,
         TraCollision,
         numReservedFibers,
         fiberNonAllocationCost,
+        classdict_override=best_classdict_l,
     )
 
     tb_tgt_l1 = netflowAssign(tb_tgt_l1, tb_ppc_l)
@@ -3371,12 +3873,23 @@ def run(
     tb_tgt_m1 = count_N(tb_tgt_m1)
     tb_tgt_m1 = weight(tb_tgt_m1, para_sci_m, para_exp_m, para_n_m)
 
+    if optimize_costs:
+        best_classdict_m, best_metrics_m = optimize_non_observation_costs(
+            tb_tgt_m1,
+            ppc_lst_m,
+            seed=randomseed,
+        )
+        logger.info(f"[S3] MR cost optimization: {best_metrics_m}")
+    else:
+        best_classdict_m = None
+
     tb_ppc_m = netflowRun(
         tb_tgt_m1,
         randomseed,
         TraCollision,
         numReservedFibers,
         fiberNonAllocationCost,
+        classdict_override=best_classdict_m,
     )
 
     tb_tgt_m1 = netflowAssign(tb_tgt_m1, tb_ppc_m)
