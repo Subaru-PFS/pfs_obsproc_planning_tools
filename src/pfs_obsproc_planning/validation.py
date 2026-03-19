@@ -25,6 +25,8 @@ import pandas as pd
 from logzero import logger
 from mpl_toolkits.mplot3d import Axes3D
 
+from astropy.table import Table
+
 # from pfs.drp.stella.readLineList import ReadLineListTask,  ReadLineListConfig
 # from pfs.drp.stella import DetectorMap
 # import lsst.daf.persistence as dafPersist
@@ -280,6 +282,7 @@ def _build_df_fib(pfsDesign0):
             (
                 pfsDesign0.fiberId,
                 pfsDesign0.targetType,
+                pfsDesign0.fiberStatus,
                 pfsDesign0.pfiNominal,
                 pfsDesign0.spectrograph,
                 pfsDesign0.fiberHole,
@@ -293,6 +296,7 @@ def _build_df_fib(pfsDesign0):
         columns=[
             "fiberId",
             "targetType",
+            "fiberStatus",
             "pfi_x",
             "pfi_y",
             "spec",
@@ -314,6 +318,7 @@ def _build_df_fib(pfsDesign0):
     df_fib["pfi_y"] = df_fib.pfi_y.astype(float)
     df_fib["cadId"] = df_fib.catId.astype(int)
     df_fib["targetType"] = df_fib.targetType.astype(int)
+    df_fib["fiberStatus"] = df_fib.fiberStatus.astype(int)
     df_fib["fiberId"] = df_fib.fiberId.astype(int)
 
     df_fib["psfMag"] = df_fib["pfsFlux"].apply(njy_mag)
@@ -350,6 +355,34 @@ def _build_df_ag(pfsDesign0):
     return df_ag
 
 
+def _load_ppp_targets_qa_reference_n(parentPath: str) -> pd.DataFrame:
+    """Load PPP obList.ecsv and return rows with qa_reference_arm == 'n'.
+
+    Returns an empty DataFrame if the file can't be read or expected columns
+    are missing.
+    """
+    oblist_path = os.path.join(parentPath, "ppp", "obList.ecsv")
+    if not os.path.exists(oblist_path):
+        logger.warning(f"PPP obList.ecsv not found: {oblist_path}")
+        return pd.DataFrame()
+
+    try:
+        tbl = Table.read(oblist_path, format="ascii.ecsv")
+        df = tbl.to_pandas()
+    except Exception as e:
+        logger.warning(f"Failed to read PPP obList.ecsv ({oblist_path}): {e}")
+        return pd.DataFrame()
+
+    if "qa_reference_arm" not in df.columns:
+        logger.warning(
+            f"PPP obList.ecsv missing 'qa_reference_arm' column: {oblist_path}"
+        )
+        return pd.DataFrame()
+
+    df_n = df[df["qa_reference_arm"].astype(str).str.strip().str.lower() == "n"]
+    return df_n
+
+
 def validation(parentPath, figpath, save, show, ssp, conf):
     """Run validation for all PfsDesigns found in the summary at `parentPath`.
 
@@ -362,6 +395,13 @@ def validation(parentPath, figpath, save, show, ssp, conf):
     """
     # Load design summary and normalize observation times
     pfsDesignDir, df_design = _load_design_summary(parentPath, ssp)
+
+    # open-use only: read target table first and keep only qa_reference_arm == 'n'
+    if not ssp:
+        df_tgt_n = _load_ppp_targets_qa_reference_n(parentPath)
+        ob_codes_qa_n = set(df_tgt_n["ob_code"].astype(str).str.strip())
+    else:
+        ob_codes_qa_n = set()
 
     # Compute InR/El at start and stop times
     df_design = _add_inr_columns(df_design)
@@ -392,6 +432,11 @@ def validation(parentPath, figpath, save, show, ssp, conf):
     fibId = FiberIds(
         path=os.path.join(conf["packages"]["pfs_utils_dir"], "data", "fiberids")
     )
+
+    cobra_idx_n2 = fibId.cobrasForSpectrograph(spectrographId=2)
+    cobra_idx_n2 = cobra_idx_n2[cobra_idx_n2<=2394]
+    cobra_id_n2 = cobra_idx_n2 + 1
+    fiber_id_n2 = fibId.cobraIdToFiberId(cobra_id_n2)
 
     # Accumulate bright sources near unassigned fibers across all designs
     df_all_unassigned_toobright = pd.DataFrame()
@@ -439,6 +484,21 @@ def validation(parentPath, figpath, save, show, ssp, conf):
         # Build per-fiber DataFrame and check magnitudes
         df_fib = _build_df_fib(pfsDesign0)
 
+        # search for targets requesting n but allocated with n2 cobra
+        if len(ob_codes_qa_n) > 0:
+            fiber_id_n2_for_plot = (
+                df_fib.loc[
+                    df_fib["fiberId"].isin(fiber_id_n2)
+                    & df_fib["obCode"].astype(str).str.strip().isin(ob_codes_qa_n),
+                    "fiberId",
+                ]
+                .astype(int)
+                .unique()
+                .tolist()
+            )
+        else:
+            fiber_id_n2_for_plot = []
+
         df_too_bright = df_fib[(df_fib["psfMag"] < 13) | (df_fib["totalMag"] < 13)]
         if not df_too_bright.empty:
             logger.warning(
@@ -470,6 +530,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
             pa=pfsDesign0.posAng,
             conf=conf,
             unfib_bright=unfib_bright,
+            fiber_id_n2=fiber_id_n2_for_plot,
         )
 
     # After processing all designs, optionally save a single CSV containing
@@ -517,20 +578,20 @@ def validation(parentPath, figpath, save, show, ssp, conf):
 
     # """
     styled_html = (
-        df_ch.style.applymap(
+        df_ch.style.map(
             pldes.colour_background_warning_sky_min, subset=["sky_min"]
         )
-        .applymap(pldes.colour_background_warning_std_min, subset=["std_min"])
-        .applymap(pldes.colour_background_warning_sky_tot, subset=["sky_sum"])
-        .applymap(pldes.colour_background_warning_std_tot, subset=["std_sum"])
-        .applymap(
+        .map(pldes.colour_background_warning_std_min, subset=["std_min"])
+        .map(pldes.colour_background_warning_sky_tot, subset=["sky_sum"])
+        .map(pldes.colour_background_warning_std_tot, subset=["std_sum"])
+        .map(
             pldes.colour_background_warning_ag_min,
             subset=["ag1", "ag2", "ag3", "ag4", "ag5", "ag6"],
         )
-        .applymap(pldes.colour_background_warning_ag_tot, subset=["ag_sum"])
-        .applymap(pldes.colour_background_warning_inr, subset=["inr1", "inr2"])
-        .applymap(pldes.colour_background_warning_el, subset=["el1", "el2"])
-        .applymap(pldes.colour_background_warning_unfib, subset=["unfib_bright"])
+        .map(pldes.colour_background_warning_ag_tot, subset=["ag_sum"])
+        .map(pldes.colour_background_warning_inr, subset=["inr1", "inr2"])
+        .map(pldes.colour_background_warning_el, subset=["el1", "el2"])
+        .map(pldes.colour_background_warning_unfib, subset=["unfib_bright"])
         .format(precision=1)
     )
     # """
