@@ -28,17 +28,15 @@ from qplan.util.site import site_subaru as observer
 from qplan.util.eph_cache import EphemerisCache
 from datetime import datetime, timedelta, timezone, date
 from ginga.misc.log import get_logger
-
-logger_qplan = get_logger("qplan_test", null=True)
-eph_cache = EphemerisCache(logger_qplan, precision_minutes=5)
-
-warnings.filterwarnings("ignore")
-
-# below for netflow
 import ets_fiber_assigner.netflow as nf
 from ics.cobraOps.Bench import Bench
 from ics.cobraOps.CollisionSimulator import CollisionSimulator
 from ics.cobraOps.TargetGroup import TargetGroup
+
+warnings.filterwarnings("ignore")
+
+logger_qplan = get_logger("qplan_test", null=True)
+eph_cache = EphemerisCache(logger_qplan, precision_minutes=5)
 
 # netflow configuration (FIXME; should be load from config file)
 cobra_location_group = None
@@ -329,7 +327,7 @@ def visibility_checker(tb_tgt, obstimes, start_time_list, stop_time_list):
         f'{sum(tb_tgt["is_visible"])}/{len(tb_tgt)} are visible during the given obstimes.'
     )
 
-    tb_tgt = tb_tgt[tb_tgt["is_visible"] == True]
+    tb_tgt = tb_tgt[tb_tgt["is_visible"]]
 
     psl_id = sorted(set(tb_tgt["proposal_id"]))
 
@@ -387,18 +385,18 @@ def queryQueue(psl_id_list, DBPath_qDB, tb_queuedb_filename):
             continue
 
         for ex_ob in ex_obs_list:
-            exps = qq.get_exposures(ex_ob)
+            ex_ob_stats = qq.get_pfs_executed_ob_stats_by_ob_key(ex_ob.ob_key)
             ob = qq.get_ob(ex_ob.ob_key)
             arm = ob.inscfg.qa_reference_arm
 
-            exptime_b = sum(exp.effective_exptime_b or 0 for exp in exps)
-            exptime_r = sum(exp.effective_exptime_r or 0 for exp in exps)
-            exptime_m = sum(exp.effective_exptime_m or 0 for exp in exps)
-            exptime_n = sum(exp.effective_exptime_n or 0 for exp in exps)
+            exptime_b = ex_ob_stats.cum_eff_exp_time_b
+            exptime_r = ex_ob_stats.cum_eff_exp_time_r
+            exptime_m = ex_ob_stats.cum_eff_exp_time_m
+            exptime_n = ex_ob_stats.cum_eff_exp_time_n
 
-            # select arm-specific exposure time
-            arm_map = {"b": exptime_b, "r": exptime_r, "m": exptime_m, "n": exptime_n}
-            exptime_selected = arm_map.get(arm, 0)
+            # This is the cumulative effective exposure time
+            # corresponding to the "qa_reference_arm" value.
+            exptime_selected = ex_ob_stats.cum_eff_exp_time
 
             if exptime_selected >= 0:
                 counter += 1
@@ -412,7 +410,7 @@ def queryQueue(psl_id_list, DBPath_qDB, tb_queuedb_filename):
                     exptime_r,
                     exptime_m,
                     exptime_n,
-                    len(exps) * 450.0,  # nominal exposure time per OB
+                    len(ex_ob.exp_history) * 450.0,  # nominal exposure time per OB
                 ])
 
     if not results:
@@ -463,7 +461,7 @@ def readTarget(mode, para, tb_queuedb):
     target sample (all), target sample (low-resolution mode), target sample (medium-resolution mode)
     """
     time_start = time.time()
-    logger.info(f"[S1] Read targets started (PPP)")
+    logger.info("[S1] Read targets started (PPP)")
 
     if len(para["localPath_tgt"]) > 0:
         tb_tgt = Table.read(para["localPath_tgt"])
@@ -548,7 +546,7 @@ def readTarget(mode, para, tb_queuedb):
 
             # convert Boolean to String
             df_tgt["resolution"] = [
-                "M" if v == True else "L" for v in df_tgt["resolution"]
+                "M" if v else "L" for v in df_tgt["resolution"]
             ]
             df_tgt["allocated_time_tac"] = [
                 df_tgt["allocated_time_lr"][ii]
@@ -1129,7 +1127,7 @@ def PPP_centers(
 ):
     # determine pointing centers
     time_start = time.time()
-    logger.info(f"[S2] Determine pointing centers started")
+    logger.info("[S2] Determine pointing centers started")
 
     ppc_lst = []
 
@@ -1499,7 +1497,7 @@ def sam2netflow(_tb_tgt, for_ppc=False):
     tgt_psl_FH_tac_ = {}
 
     #'''
-    if for_ppc == False:
+    if not for_ppc:
         psl_id = sorted(set(_tb_tgt["proposal_id"]))
 
         for psl_id_ in psl_id:
@@ -1739,7 +1737,7 @@ def netflowRun_single(
                     )
                 coll_tidx = []
                 for tidx, cidx in vis.items():
-                    if simulator.collisions[cidx]:
+                    if simulator.collisions[cidx]:  # type: ignore[index]
                         coll_tidx.append(tidx)
                 ncoll += len(coll_tidx)
                 for i1 in range(0, len(coll_tidx)):
@@ -2774,6 +2772,8 @@ def run(
 ):
     global bench
     bench = bench_info
+    if conf is None:
+        raise ValueError("conf must not be None")
 
     today = date.today().strftime("%Y%m%d")
     tb_queuedb_filename = os.path.join(dirName, f"tgt_queueDB_{today}.csv")
@@ -2856,11 +2856,11 @@ def run(
 
     if not backup:
         tb_ppc_tot.write(
-            os.path.join(dirName, f"ppcList.ecsv"), format="ascii.ecsv", overwrite=True
+            os.path.join(dirName, "ppcList.ecsv"), format="ascii.ecsv", overwrite=True
         )
     else:
         tb_ppc_tot.write(
-            os.path.join(dirName, f"ppcList_backup.ecsv"),
+            os.path.join(dirName, "ppcList_backup.ecsv"),
             format="ascii.ecsv",
             overwrite=True,
         )

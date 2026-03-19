@@ -2,34 +2,36 @@
 # generatePfsDesign.py : PPP+qPlan+SFR
 
 import argparse
-import os, sys
+import os
+import sys
+import time
 import warnings
 from datetime import timedelta, datetime, date
-import pytz
-from dateutil import parser as ps
-import time
-
-hawaii_tz = pytz.timezone("Pacific/Honolulu")
 
 import git
 import numpy as np
 import pandas as pd
-import toml
-from astropy.table import Table, vstack
+import pytz
+import tomllib
 from astropy.coordinates import Angle
+from astropy.table import Table, vstack
 import astropy.units as u
+from dateutil import parser as ps
 from loguru import logger
+import ets_fiber_assigner.netflow as nf
+from pfs_design_tool import reconfigure_fibers_ppp as sfa
+from pfs_design_tool.pointing_utils import nfutils
+
+from .opefile import OpeFile
 
 warnings.filterwarnings("ignore")
 
-from .opefile import OpeFile
-from pfs_design_tool.pointing_utils import nfutils
-import ets_fiber_assigner.netflow as nf
-from pfs_design_tool import reconfigure_fibers_ppp as sfa
+hawaii_tz = pytz.timezone("Pacific/Honolulu")
 
 
 def read_conf(conf):
-    config = toml.load(conf)
+    with open(conf, "rb") as f:
+        config = tomllib.load(f)
     return config
 
 
@@ -143,7 +145,7 @@ class GeneratePfsDesign(object):
         self.conf = read_conf(os.path.join(self.workDir, self.config))
 
         ## define directory of outputs from each component ##
-        if self.conf["ssp"]["ssp"] == False:
+        if not self.conf["ssp"]["ssp"]:
             ## set obs_dates
             self.obs_dates = self.conf["qplan"]["obs_dates"]
 
@@ -298,7 +300,7 @@ class GeneratePfsDesign(object):
         )
 
         # reserve fibers for calibration targets?
-        if self.conf["ppp"]["reserveFibers"] == True:
+        if self.conf["ppp"]["reserveFibers"]:
             num_reserved_fibers = int(
                 self.conf["sfa"]["n_sky"] + self.conf["sfa"]["n_fluxstd"]
             )
@@ -380,7 +382,7 @@ class GeneratePfsDesign(object):
             }
 
             if self.conf["ppp"]["daily_plan"]:
-                logger.info(f"Now running for the daily planning")
+                logger.info("Now running for the daily planning")
 
                 if not (self.df_qplan).empty:
                     self.df_qplan["obstime_hst"] = self.df_qplan[
@@ -498,7 +500,7 @@ class GeneratePfsDesign(object):
         t1 = Table.read(os.path.join(self.outputDirPPP, "obList.ecsv"))
         try:
             t2 = Table.read(os.path.join(self.outputDirPPP, "obList_backup.ecsv"))
-        except:
+        except Exception:
             t2 = Table()
         t = vstack([t1, t2])
         proposal_ids = t["proposal_id"]
@@ -629,7 +631,7 @@ class GeneratePfsDesign(object):
             tb_ppp_backup = Table.read(
                 os.path.join(self.outputDirPPP, "ppcList_backup.ecsv")
             )
-        except:
+        except Exception:
             tb_ppp_backup = Table()
         data_ppp = vstack([tb_ppp, tb_ppp_backup])
         # print(len(data_ppp))
@@ -903,11 +905,11 @@ def main():
 
     ## run queuePlanner ##
 
-    if args.skip_qplan == False:
+    if not args.skip_qplan:
         gpd.runQPlan(args.obs_dates)
 
     ## run SFA.py
-    if args.skip_sfa == False:
+    if not args.skip_sfa:
         gpd.runSFA()
 
     return 0

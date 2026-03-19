@@ -25,16 +25,14 @@ from sklearn.neighbors import KernelDensity
 from qplan import q_db, q_query, entity
 from qplan.util.site import site_subaru as observer
 from ginga.misc.log import get_logger
-
-logger_qplan = get_logger("qplan_test", null=True)
-
-warnings.filterwarnings("ignore")
-
-# below for netflow
 import ets_fiber_assigner.netflow as nf
 from ics.cobraOps.Bench import Bench
 from ics.cobraOps.CollisionSimulator import CollisionSimulator
 from ics.cobraOps.TargetGroup import TargetGroup
+
+warnings.filterwarnings("ignore")
+
+logger_qplan = get_logger("qplan_test", null=True)
 
 # netflow configuration (FIXME; should be load from config file)
 cobra_location_group = None
@@ -101,7 +99,7 @@ def visibility_checker(tb_tgt, obstimes):
             default_start_time = observer.evening_twilight_18()
             default_stop_time = observer.morning_twilight_18()
 
-            obs_ok, t_start, t_stop = observer.observable(
+            obs_ok, t_start, t_stop = observer.observable(  # type: ignore[attr-defined]
                 target,
                 default_start_time,
                 default_stop_time,
@@ -128,7 +126,7 @@ def visibility_checker(tb_tgt, obstimes):
         f'{sum(tb_tgt["is_visible"])}/{len(tb_tgt)} are visible during the given obstimes.'
     )
 
-    tb_tgt = tb_tgt[tb_tgt["is_visible"] == True]
+    tb_tgt = tb_tgt[tb_tgt["is_visible"]]
 
     psl_id = sorted(set(tb_tgt["proposal_id"]))
 
@@ -177,7 +175,7 @@ def readTarget(mode, para):
     target sample (all), target sample (low-resolution mode), target sample (medium-resolution mode)
     """
     time_start = time.time()
-    logger.info(f"[S1] Read targets started (PPP)")
+    logger.info("[S1] Read targets started (PPP)")
 
     if len(para["localPath_tgt"]) > 0:
         tb_tgt = Table.read(para["localPath_tgt"])
@@ -265,7 +263,7 @@ def readTarget(mode, para):
 
             # convert Boolean to String
             df_tgt["resolution"] = [
-                "M" if v == True else "L" for v in df_tgt["resolution"]
+                "M" if v else "L" for v in df_tgt["resolution"]
             ]
             df_tgt["allocated_time_tac"] = [
                 df_tgt["allocated_time_lr"][ii]
@@ -1121,7 +1119,7 @@ def KDE(_tb_tgt, multiProcesing):
 def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=True):
     # determine pointing centers
     time_start = time.time()
-    logger.info(f"[S2] Determine pointing centers started")
+    logger.info("[S2] Determine pointing centers started")
 
     para_sci, para_exp, para_n = weight_para
 
@@ -1135,7 +1133,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
         return ppc_lst
 
     if len(_tb_tgt) == 0:
-        logger.warning(f"[S2] no targets")
+        logger.warning("[S2] no targets")
         return np.array(ppc_lst)
 
     _tb_tgt = sciRank_pri(_tb_tgt)
@@ -1472,7 +1470,7 @@ def PPC_centers_single(_tb_tgt, nPPC, weight_para):
         return -score
 
     time_start = time.time()
-    logger.info(f"[S2] Determine pointing centers started")
+    logger.info("[S2] Determine pointing centers started")
 
     # _tb_tgt = sciRank_pri(_tb_tgt)
     # _tb_tgt = count_N(_tb_tgt)
@@ -2525,7 +2523,7 @@ def netflowRun_single(
                 numReservedFibers=numReservedFibers,
                 fiberNonAllocationCost=fiberNonAllocationCost,
                 obsprog_time_budget=tgt_psl_FH_tac,
-                assignEveryCobra=True,
+                assignEveryCobra=True,  # type: ignore[call-arg]
                 cobraSafetyMargin=cobraSafetyMargin,
                 cobraFeatureFlags=flag_n2,
             )
@@ -2546,14 +2544,14 @@ def netflowRun_single(
             ncoll = 0
             for ivis, (vis, tp) in enumerate(zip(res, tpos)):
                 selectedTargets = np.full(
-                    len(bench.cobras.centers), NULL_TARGET_POSITION
+                    len(bench.cobras.centers), TargetGroup.NULL_TARGET_POSITION
                 )
-                ids = np.full(len(bench.cobras.centers), NULL_TARGET_ID)
+                ids = np.full(len(bench.cobras.centers), TargetGroup.NULL_TARGET_ID)
                 for tidx, cidx in vis.items():
                     selectedTargets[cidx] = tp[tidx]
                     ids[cidx] = ""
                 for i in range(selectedTargets.size):
-                    if selectedTargets[i] != NULL_TARGET_POSITION:
+                    if selectedTargets[i] != TargetGroup.NULL_TARGET_POSITION:
                         dist = np.abs(selectedTargets[i] - bench.cobras.centers[i])
 
                 simulator = CollisionSimulator(bench, TargetGroup(selectedTargets, ids))
@@ -2564,7 +2562,7 @@ def netflowRun_single(
                     )
                 coll_tidx = []
                 for tidx, cidx in vis.items():
-                    if simulator.collisions[cidx]:
+                    if simulator.collisions[cidx]:  # type: ignore[index]
                         coll_tidx.append(tidx)
                 ncoll += len(coll_tidx)
                 for i1 in range(0, len(coll_tidx)):
@@ -2954,7 +2952,7 @@ def netflowAssign(_tb_tgt, _tb_ppc):
     # targets with allocated fiber
     for ppc_t in _tb_ppc_pri:
         lst = np.where(
-            np.isin(_tb_tgt["identify_code"], ppc_t["ppc_allocated_targets"]) == True
+            np.isin(_tb_tgt["identify_code"], ppc_t["ppc_allocated_targets"])
         )[0]
         _tb_tgt["exptime_assign"].data[lst] += int(_tb_tgt.meta["single_exptime"])
 
