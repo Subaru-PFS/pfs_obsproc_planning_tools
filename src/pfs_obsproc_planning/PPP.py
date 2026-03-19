@@ -3,13 +3,10 @@
 
 import multiprocessing
 import os
-import random
 import time
 import warnings
 
-import matplotlib.pyplot as plt
 import numpy as np
-import scipy.optimize as opt
 from scipy.optimize import minimize
 
 from astropy import units as u
@@ -20,7 +17,7 @@ from functools import partial
 from itertools import chain
 from loguru import logger
 from matplotlib.path import Path
-from sklearn.cluster import DBSCAN, AgglomerativeClustering
+from sklearn.cluster import DBSCAN
 from sklearn.neighbors import KernelDensity
 from qplan import q_db, q_query, entity
 from qplan.util.site import site_subaru as observer
@@ -1052,7 +1049,7 @@ def KDE_xy(_tb_tgt, X, Y):
     return Z
 
 
-def KDE(_tb_tgt, multiProcesing):
+def KDE(_tb_tgt, multi_processing):
     # define binning and calculate KDE
     if len(_tb_tgt) == 1:
         # if only one target, set it as the peak
@@ -1084,7 +1081,7 @@ def KDE(_tb_tgt, multiProcesing):
             X_, Y_ = np.mgrid[0:360:721j, -40:90:261j]
         positions1 = np.vstack([Y_.ravel(), X_.ravel()])
 
-        if multiProcesing:
+        if multi_processing:
             threads_count = 4  # round(multiprocessing.cpu_count() / 2)
             thread_n = min(
                 threads_count, round(len(_tb_tgt) * 0.5)
@@ -1116,7 +1113,9 @@ def KDE(_tb_tgt, multiProcesing):
         return X_, Y_, obj_dis_sig_, peak_x, peak_y
 
 
-def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=True):
+def PPP_centers(
+    _tb_tgt, n_ppc, weight_para=[1.5, 0, 0], randomseed=0, multi_processing=True
+):
     # determine pointing centers
     time_start = time.time()
     logger.info("[S2] Determine pointing centers started")
@@ -1244,7 +1243,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
             < len(tb_fh)
         )
         and len(_tb_tgt_) > 0
-        and len(ppc_lst) <= nPPC
+        and len(ppc_lst) <= n_ppc
     ):
         weight_peak = []
 
@@ -1272,7 +1271,9 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
 
             peak_pa = 120.0
 
-            X_, Y_, obj_dis_sig_, peak_x, peak_y = KDE(_tb_tgt_t_1, mutiPro)
+            X_, Y_, obj_dis_sig_, peak_x, peak_y = KDE(
+                _tb_tgt_t_1, multi_processing
+            )
 
             index_ = PFS_FoV(
                 peak_x, peak_y, peak_pa, _tb_tgt_t_
@@ -1362,8 +1363,8 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
         Table.pprint_all(tb_fh)
     #
 
-    if len(ppc_lst) > nPPC:
-        ppc_lst_fin = sorted(ppc_lst, key=lambda x: x[4], reverse=True)[:nPPC]
+    if len(ppc_lst) > n_ppc:
+        ppc_lst_fin = sorted(ppc_lst, key=lambda x: x[4], reverse=True)[:n_ppc]
 
     else:
         ppc_lst_fin = ppc_lst[:]
@@ -1377,7 +1378,7 @@ def PPP_centers(_tb_tgt, nPPC, weight_para=[1.5, 0, 0], randomseed=0, mutiPro=Tr
     return ppc_lst_fin
 
 
-def PPC_centers_single(_tb_tgt, nPPC, weight_para):
+def PPC_centers_single(_tb_tgt, n_ppc, weight_para):
     def objective1(params, _tb_tgt):
         """
         Objective function to optimize the PPC parameters.
@@ -1498,7 +1499,7 @@ def PPC_centers_single(_tb_tgt, nPPC, weight_para):
     tb_fh["FH_done"] = 0.0
     tb_fh["N_done"] = 0.0
 
-    while (len(_tb_tgt_) > 0) and (len(ppc_lst) < nPPC):
+    while (len(_tb_tgt_) > 0) and (len(ppc_lst) < n_ppc):
         if list(set(_tb_tgt["proposal_id"])) == ["S25A-UH006-B"]:
             if len(ppc_lst) == 0:
                 initial_guess = [150.08189537, 2.18829806, 92.51180584]
@@ -1885,23 +1886,23 @@ def PPC_centers_single(_tb_tgt, nPPC, weight_para):
     resol = _tb_tgt["resolution"][0]
     pslid_ = _tb_tgt["proposal_id"][0]
     if pslid_ == "S25A-UH006-B":
-        ppc_code = ["cla_L_uh006_" + str(n + 1) for n in np.arange(nPPC)]
+        ppc_code = ["cla_L_uh006_" + str(n + 1) for n in np.arange(n_ppc)]
     else:
         ppc_code = [
-            f"cla_{resol}_{pslid_.split('-')[1]}_{str(n+1)}" for n in np.arange(nPPC)
+            f"cla_{resol}_{pslid_.split('-')[1]}_{str(n+1)}" for n in np.arange(n_ppc)
         ]
     ppc_ra = ppc_lst_fin[:, 1]
     ppc_dec = ppc_lst_fin[:, 2]
     ppc_pa = ppc_lst_fin[:, 3]
-    ppc_equinox = ["J2000"] * nPPC
-    ppc_priority = [0] * nPPC
-    ppc_priority_usr = [0] * nPPC
-    ppc_exptime = [900.0] * nPPC
-    ppc_totaltime = [1200.0] * nPPC
-    ppc_resolution = [resol] * nPPC
+    ppc_equinox = ["J2000"] * n_ppc
+    ppc_priority = [0] * n_ppc
+    ppc_priority_usr = [0] * n_ppc
+    ppc_exptime = [900.0] * n_ppc
+    ppc_totaltime = [1200.0] * n_ppc
+    ppc_resolution = [resol] * n_ppc
     ppc_fibAlloFrac = ppc_lst_fin[:, -1]
     ppc_tgtAllo = ppc_lst_fin[:, -2]
-    ppc_comment = [""] * nPPC
+    ppc_comment = [""] * n_ppc
 
     ppcList = Table(
         [
@@ -2963,7 +2964,7 @@ def netflow_iter(
     _tb_tgt,
     _tb_ppc_netflow,
     weight_para,
-    nPPC,
+    n_ppc,
     randomseed=0,
     TraCollision=False,
     numReservedFibers=0,
@@ -2973,7 +2974,7 @@ def netflow_iter(
     # iterate the total procedure to re-assign fibers to targets which have not been assigned in the previous/first iteration
     # note that some targets in the dense region may need very long time to be assigned with fibers
     # if targets can not be successfully assigned with fibers in >10 iterations, then directly stop
-    # if total number of ppc > nPPC, then directly stop
+    # if total number of ppc > n_ppc, then directly stop
 
     if len(_tb_tgt) == 0 or len(_tb_ppc_netflow) == 0:
         return _tb_ppc_netflow
@@ -3026,7 +3027,7 @@ def netflow_iter(
         _tb_ppc_netflow.remove_rows(np.where(_tb_ppc_netflow["ppc_fiber_usage_frac"] == 0)[0])
         _tb_tgt_t2 = PPP_centers(
             _tb_tgt_t1,
-            nPPC - len(_tb_ppc_netflow),
+            n_ppc - len(_tb_ppc_netflow),
             weight_para,
             randomseed,
         )
@@ -3039,7 +3040,7 @@ def netflow_iter(
             fiberNonAllocationCost, 
         )
 
-        if len(_tb_ppc_netflow) >= nPPC or iter_m2 >= 10:
+        if len(_tb_ppc_netflow) >= n_ppc or iter_m2 >= 10:
             # stop if n_ppc exceeds the requirment
             return _tb_ppc_netflow
 
@@ -3053,328 +3054,6 @@ def netflow_iter(
     return _tb_ppc_netflow 
     #"""
     return _tb_ppc_netflow
-
-
-def complete_ppc(_tb_tgt, mode):
-    """check completion rate
-
-    Parameters
-    ==========
-    _tb_tgt : sample
-
-    mode :
-        "compOFtgt_weighted" -- completion = (weight(finished) + 0.5 * weight(partial)) / weight(tgt_all)
-
-        "compOFtgt_n"          -- completion = (N(finished) + 0.5 * N(partial)) / N(tgt_all)
-
-        "compOFpsl_n"       -- completion in count, completion in ratio, list of (psl_id, rank) ordered by rank
-
-    Returns
-    =======
-    completion rates
-    """
-
-    if mode == "compOFtgt_weighted":
-        # finished
-        index_allo = np.where(_tb_tgt["exptime_PPP"] == _tb_tgt["exptime_assign"])[0]
-
-        if len(index_allo) == 0:
-            weight_allo = 0
-
-        else:
-            weight_allo = sum(_tb_tgt[index_allo]["weight"])
-
-        # patrly observed
-        index_part = np.where(
-            (_tb_tgt["exptime_PPP"] > _tb_tgt["exptime_assign"])
-            & (_tb_tgt["exptime_assign"] > 0)
-        )[0]
-
-        if len(index_part) > 0:
-            weight_allo += 0.5 * sum(_tb_tgt[index_part]["weight"])
-
-        weight_tot = sum(_tb_tgt["weight"])
-
-        comp = weight_allo / weight_tot
-
-        return comp
-
-    elif mode == "compOFtgt_n":
-        # finished
-        index_allo = np.where(_tb_tgt["exptime_PPP"] == _tb_tgt["exptime_assign"])[0]
-        weight_allo = len(index_allo)
-
-        # patrly observed
-        index_part = np.where(
-            (_tb_tgt["exptime_PPP"] > _tb_tgt["exptime_assign"])
-            & (_tb_tgt["exptime_assign"] > 0)
-        )[0]
-        weight_allo += 0.5 * len(index_part)
-
-        comp = weight_allo / len(_tb_tgt)
-
-        return comp
-
-    elif mode == "compOFpsl_n":
-        # proposal list
-        listPsl_ = list(set(_tb_tgt["proposal_id"]))
-
-        PslRank_ = [_tb_tgt[_tb_tgt["proposal_id"] == kk]["rank"][0] for kk in listPsl_]
-        rank_index = reversed(np.argsort(PslRank_))
-
-        listPsl = [
-            [listPsl_[ll], PslRank_[ll]] for ll in rank_index
-        ]  # proposal list ordered by rank
-
-        n_psl = len(listPsl)
-
-        # user priority
-        sub_l = np.arange(0, 9.1, 1)
-
-        # completion rate in each proposal (each user-defined priority, each proposal, all input targets)
-        comN_sub_psl = []
-        comRatio_sub_psl = []
-
-        comp_tot = 0
-        for jj in range(n_psl):
-            _tb_tgt_t = _tb_tgt[_tb_tgt["proposal_id"] == listPsl[jj][0]]
-
-            count_sub = (
-                [sum(_tb_tgt_t["priority"] == ll) for ll in sub_l]
-                + [len(_tb_tgt_t)]
-                + [len(_tb_tgt)]
-            )
-
-            comp_psl = np.where(
-                _tb_tgt_t["exptime_PPP"] == _tb_tgt_t["exptime_assign"]
-            )[0]
-            comp_tot += len(comp_psl)
-            comT_t = (
-                [sum(_tb_tgt_t["priority"][comp_psl] == ll) for ll in sub_l]
-                + [len(comp_psl)]
-                + [comp_tot]
-            )
-            comN_sub_psl.append(comT_t)
-
-            comRatio_sub_psl.append(
-                [comT_t[oo] / count_sub[oo] for oo in range(len(count_sub))]
-            )
-
-        return np.array(comN_sub_psl), np.array(comRatio_sub_psl), np.array(listPsl)
-
-
-def PPC_efficiency(tb_ppc_netflow):
-    # calculate fiber allocation efficiency
-
-    fib_eff = tb_ppc_netflow["ppc_fiber_usage_frac"].data  # unit --> %
-
-    if max(fib_eff) == 0:
-        return fib_eff, 0, 0
-
-    else:
-        fib_eff_mean1 = np.mean(fib_eff / max(fib_eff))
-        fib_eff_mean2 = np.mean(fib_eff) * 0.01  # unit --> fraction without %
-        return fib_eff, fib_eff_mean1, fib_eff_mean2
-
-
-def fun2opt(para, info):
-    """function to be optimized
-
-    Parameters
-    ==========
-    para: float
-        conta,b,c -- weighting scheme
-
-    info:
-        samp -- input sample (all, low-mode, medium-mode)
-
-        nPPC_L -- number of PPC for low-resolution mode
-        nPPC_M -- number of PPC for medium-resolution mode
-
-        randomSeed -- random seed for np.random
-
-        crMode -- the same with complete_ppc
-
-        checkTraCollision -- boolean; whether or not to allow netflow to check collision of trajectory
-
-    Returns
-    =======
-    (2 - average_fibEfficiency_L - average_completion_L) + (2 - average_fibEfficiency_M - average_completion_M)
-    """
-    # para_sci, para_exp, para_n = para
-
-    _tb_tgt = info["tb_tgt"]
-
-    nppc_ = info["nPPC"]
-
-    index_op1 = info["iter"]
-    randomseed = info["randomSeed"]
-
-    TraCollision = info["checkTraCollision"]
-
-    completeMode = info["crMode"]
-
-    # --------------------
-    tem1 = 0
-
-    mfibEff1 = 0
-    CR_fin1 = 0
-
-    n_exptime = len(set(_tb_tgt["exptime"]))
-    n_rank = len(set(_tb_tgt["priority"]))
-    if n_rank <= 1 and n_exptime > 1:
-        para_exp, para_n = para
-        para_sci = 1.5
-        lst_ppc = PPP_centers(
-            _tb_tgt, nppc_, [para_sci, para_exp, para_n], randomseed, True
-        )
-    if n_rank > 1 and n_exptime <= 1:
-        para_sci, para_n = para
-        para_exp = 0
-        lst_ppc = PPP_centers(
-            _tb_tgt, nppc_, [para_sci, para_exp, para_n], randomseed, True
-        )
-    if n_rank > 1 and n_exptime > 1:
-        para_sci, para_exp, para_n = para
-        lst_ppc = PPP_centers(
-            _tb_tgt, nppc_, [para_sci, para_exp, para_n], randomseed, True
-        )
-    if n_rank <= 1 and n_exptime <= 1:
-        para_n = para[0]
-        para_sci = 1.5
-        para_exp = 0
-        lst_ppc = PPP_centers(
-            _tb_tgt, nppc_, [para_sci, para_exp, para_n], randomseed, True
-        )
-        # ppc_id, ppc_ra, ppc_dec, ppc_pa, ppc_weight, ppc_fh, ppc_FE
-
-    tem1 = (
-        len(lst_ppc) / nppc_ + 1.5 - sum(lst_ppc[:, -2]) + 1 - np.mean(lst_ppc[:, -1])
-    )
-    print(len(lst_ppc) / nppc_, 1.5 - sum(lst_ppc[:, -2]), 1 - np.mean(lst_ppc[:, -1]))
-
-    logger.info(
-        f"[S4] Iter {info['iter']+1:.0f}, w_para is [{para_sci:.3f}, {para_exp:.3f}, {para_n:.3f}]; objV is {tem1:.2f}."
-    )
-
-    info["iter"] += 1
-
-    return tem1
-
-
-def iter_weight(_tb_tgt, weight_initialGuess, nppc_, crMode, randomSeed, TraCollision):
-    """optimize the weighting scheme
-
-    Parameters
-    ==========
-    samp: table
-
-    weight_initialGuess: [conta, b, c]
-
-    nppc_l -- number of PPC for low-resolution mode
-    nppc_m -- number of PPC for medium-resolution mode
-
-    randomSeed -- random seed for np.random
-
-    crmode -- the same with complete_ppc
-
-    TraCollision -- boolean; whether or not to allow netflow to check collision of trajectory
-
-    printTF -- boolean; print results or not
-
-    Returns
-    =======
-    the optimal weighting scheme [conta, b, c]
-    """
-    time_s = time.time()
-    logger.info("[S4] Optimization started")
-
-    best_weight = opt.least_squares(
-        fun2opt,
-        weight_initialGuess,
-        xtol=0.05,
-        ftol=0.005,
-        args=(
-            {
-                "tb_tgt": _tb_tgt,
-                "nPPC": nppc_,
-                "crMode": crMode,
-                "iter": 0,
-                "randomSeed": randomSeed,
-                "checkTraCollision": TraCollision,
-            },
-        ),
-        diff_step=4,
-        gtol=0.005,
-        max_nfev=50,
-        # disp=True,
-        # retall=False,
-        # full_output=False,
-        # maxiter=200,
-        # maxfun=200,
-    )
-
-    logger.info(f"[S4] Optimization done (takes {time.time()-time_s:.3f} sec)")
-
-    return best_weight["x"]
-
-
-def optimize(_tb_tgt, nppc_, crMode, randomSeed, TraCollision):
-    n_exptime = len(set(_tb_tgt["exptime"]))
-    n_rank = len(set(_tb_tgt["priority"]))
-    if n_rank <= 1 and n_exptime > 1:
-        weight_guess = [0.1, 0.1]
-        para_sci = 1.5
-        para_exp, para_n = iter_weight(
-            _tb_tgt,
-            weight_guess,
-            nppc_,
-            crMode,
-            randomSeed,
-            TraCollision,
-            # numReservedFibers,
-            # fiberNonAllocationCost,
-        )
-    if n_rank > 1 and n_exptime <= 1:
-        weight_guess = [1.5, 0.1]
-        para_exp = 0
-        para_sci, para_n = iter_weight(
-            _tb_tgt,
-            weight_guess,
-            nppc_,
-            crMode,
-            randomSeed,
-            TraCollision,
-            # numReservedFibers,
-            # fiberNonAllocationCost,
-        )
-    if n_rank > 1 and n_exptime > 1:
-        weight_guess = [1.5, 0.1, 0.1]
-        para_sci, para_exp, para_n = iter_weight(
-            _tb_tgt,
-            weight_guess,
-            nppc_,
-            crMode,
-            randomSeed,
-            TraCollision,
-            # numReservedFibers,
-            # fiberNonAllocationCost,
-        )
-    if n_rank <= 1 and n_exptime <= 1:
-        weight_guess = [-0.1]
-        para_sci = 1.5
-        para_exp = 0
-        para_n = iter_weight(
-            _tb_tgt,
-            weight_guess,
-            nppc_,
-            crMode,
-            randomSeed,
-            TraCollision,
-            # numReservedFibers,
-            # fiberNonAllocationCost,
-        )
-    return para_sci, para_exp, para_n
 
 
 def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
@@ -3589,95 +3268,6 @@ def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/"):
     )
 
     np.save(os.path.join(dirName, "obj_allo_tot.npy"), _tb_ppc_tot)
-
-
-def plotCR(CR, sub_lst, _tb_ppc_tot, dirName="output/", show_plots=False):
-    # plot completion rate and fiber allocation efficiency
-
-    plt.figure(figsize=(13, 5))
-
-    plt.subplot(121)
-
-    plt.bar(
-        np.arange(1, len(CR) + 1, 1),
-        100 * CR[:, -2],
-        width=0.8,
-        fc="tomato",
-        ec="none",
-        alpha=0.6,
-        zorder=10,
-    )
-
-    plt.plot([0, len(CR) + 1], [80, 80], "k--", lw=2, zorder=11)
-    plt.plot(
-        [0, len(CR) + 1],
-        [100 * np.mean(CR[:, -2]), 100 * np.mean(CR[:, -2])],
-        "--",
-        color="tomato",
-        lw=2,
-        zorder=11,
-    )
-    plt.text(
-        (len(CR) + 1) * 0.85,
-        100 * np.mean(CR[:, -2]),
-        "{:2.2f}%".format(100 * np.mean(CR[:, -2])),
-        color="r",
-        fontsize=12,
-    )
-
-    plt.xlim(0, len(CR) + 1)
-    plt.ylim(0, 100 * CR[:, -2].max() + 5)
-    plt.ylabel("completeness (%)", fontsize=18)
-    plt.xticks(
-        np.arange(1, len(sub_lst) + 1, 1),
-        [str(kk[0])[5:] + "_" + str(kk[1]) for kk in sub_lst],
-        fontsize=12,
-        rotation=90,
-    )
-    plt.yticks(fontsize=16)
-    plt.grid()
-
-    plt.subplot(122)
-
-    _tb_ppc_tot = _tb_ppc_tot[_tb_ppc_tot.argsort(keys="ppc_priority")]
-    fib_eff = _tb_ppc_tot["ppc_fiber_usage_frac"].data
-
-    plt.bar(
-        np.arange(0, len(fib_eff), 1),
-        fib_eff,
-        width=0.8,
-        fc="tomato",
-        ec="none",
-        alpha=0.6,
-        zorder=10,
-    )
-    plt.plot([0, len(fib_eff) + 1], [80, 80], "k--", lw=2, zorder=11)
-    plt.plot(
-        [0, len(fib_eff) + 1],
-        [np.mean(fib_eff), np.mean(fib_eff)],
-        "--",
-        color="tomato",
-        lw=2,
-        zorder=11,
-    )
-    plt.text(
-        len(fib_eff) * 0.85,
-        np.mean(fib_eff),
-        "{:2.2f}%".format(np.mean(fib_eff)),
-        color="r",
-        fontsize=12,
-    )
-
-    plt.xlim(0, len(fib_eff) + 1)
-    plt.ylim(0, max(fib_eff) * 1.1)
-    plt.xlabel("PPC", fontsize=18)
-    plt.ylabel("fiber alloc fraction (%)", fontsize=18)
-    plt.xticks(fontsize=16)
-    plt.yticks(fontsize=16)
-    plt.grid()
-    plt.savefig(os.path.join(dirName, "ppp_result.jpg"), dpi=300, bbox_inches="tight")
-    if show_plots:
-        plt.show()
 
 
 def run(

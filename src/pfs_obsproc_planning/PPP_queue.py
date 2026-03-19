@@ -49,33 +49,14 @@ black_dot_penalty_cost = None
 cobraSafetyMargin = 0.1
 
 
-def DBinfo(para_db):
-    # the link of DB to connect
+def database_info(para_db):
+    # Build the SQLAlchemy-style connection string from the DB config tuple.
     dialect, user, pwd, host, port, dbname = para_db
     return "{0}://{1}:{2}@{3}:{4}/{5}".format(dialect, user, pwd, host, port, dbname)
 
 
-def count_N_overlap(_tb_tgt_psl, _tb_tgt):
-    # calculate local count of targets (bin_width is 1 deg in ra&dec)
-    # lower limit of dec is -40
-    count_bin = [[0 for i in np.arange(0, 361, 1)] for j in np.arange(-40, 91, 1)]
-
-    n_tgt = len(_tb_tgt)
-    for ii in range(n_tgt):
-        m = int(_tb_tgt["ra"][ii])
-        n = int(_tb_tgt["dec"][ii] + 40)  # dec>-40
-        count_bin[n][m] += 1
-    den_local = [
-        count_bin[int(_tb_tgt_psl["dec"][ii] + 40)][int(_tb_tgt_psl["ra"][ii])]
-        for ii in range(len(_tb_tgt_psl))
-    ]
-
-    _tb_tgt_psl["local_count"] = den_local
-
-    return _tb_tgt_psl
-
-
-def removeObjIdDuplication(df):
+def remove_tgt_duplicate(df):
+    # Remove duplicated targets that share the same proposal/object/catalog/resolution key.
     num1 = len(df)
     df = df.drop_duplicates(
         subset=["proposal_id", "obj_id", "input_catalog_id", "resolution"],
@@ -87,7 +68,7 @@ def removeObjIdDuplication(df):
     return df
 
 
-def select_targets_by_visibility_envelope(
+def visibility_checker2(
     tb_tgt,
     date="2026-01-25",
     ra_col="ra",
@@ -133,10 +114,10 @@ def select_targets_by_visibility_envelope(
         RA–Dec envelope mask (for debugging / plotting)
     """
 
-    # --- Observatory ---
+    # Observatory location used to evaluate altitude and moon separation.
     subaru = EarthLocation.of_site("Subaru Telescope")
 
-    # --- Time grid (UTC) ---
+    # Sample the night on a regular UTC grid.
     times = Time(
         [
             f"{date} {h:02d}:{m:02d}:00"
@@ -146,17 +127,17 @@ def select_targets_by_visibility_envelope(
         scale="utc",
     )
 
-    # --- RA–Dec grid ---
+    # Build a coarse RA/Dec grid and evaluate visibility on the grid first.
     ra_grid = np.arange(0, 360 + ra_step_deg, ra_step_deg)
     dec_grid = np.arange(-30, 90 + dec_step_deg, dec_step_deg)
     ra2d, dec2d = np.meshgrid(ra_grid, dec_grid)
 
     skygrid = SkyCoord(ra2d * u.deg, dec2d * u.deg)
 
-    # --- Initialize worst-case envelope ---
+    # Track whether each grid point is visible in any sampled time slot.
     visible_all = np.zeros(ra2d.shape, dtype=bool)
 
-    # --- Loop over time (cheap: grid × time, not targets × time) ---
+    # Evaluate altitude and moon-separation constraints on the grid.
     for t in times:
         with solar_system_ephemeris.set('builtin'):
             moon_icrs = get_body('moon', t)
@@ -176,7 +157,7 @@ def select_targets_by_visibility_envelope(
 
         visible_all |= vis
 
-    # --- Apply envelope to targets (O(N_targets)) ---
+    # Map each target onto the precomputed grid and keep only visible ones.
     ra_idx = np.round(tb_tgt[ra_col]).astype(int) % int(360 / ra_step_deg)
     dec_idx = np.round(
         (tb_tgt[dec_col] - dec_grid[0]) / dec_step_deg
@@ -199,6 +180,7 @@ def select_targets_by_visibility_envelope(
 
 
 def visibility_checker(tb_tgt, obstimes, start_time_list, stop_time_list):
+    # Detailed visibility check against actual observing windows.
     tz_HST = tz.gettz("US/Hawaii")
 
     min_el = 30.0
@@ -206,6 +188,7 @@ def visibility_checker(tb_tgt, obstimes, start_time_list, stop_time_list):
 
     tb_tgt["is_visible"] = False
 
+    # NOTE: this loop is currently limited to the first target only.
     for i in range(1):#len(tb_tgt)):
         target = entity.StaticTarget(
             name=tb_tgt["ob_code"][i],
@@ -213,6 +196,7 @@ def visibility_checker(tb_tgt, obstimes, start_time_list, stop_time_list):
             dec=tb_tgt["dec"][i],
             equinox=2000.0,
         )
+        # Total required observing time includes overhead between exposures.
         total_time = np.ceil(tb_tgt["exptime_usr"][i] / tb_tgt["single_exptime"][i]) * (
             tb_tgt["single_exptime"][i] + 300.0
         )  # SEC
@@ -224,13 +208,14 @@ def visibility_checker(tb_tgt, obstimes, start_time_list, stop_time_list):
         for date_i in obstimes:
             date_t = parser.parse(f"{date_i} 12:00 HST")
             if date_today > date_t:
-                # skip past dates
+                # Skip nights that are already in the past.
                 continue
             
             observer.set_date(date_t)
             default_start_time = observer.evening_twilight_18()
             default_stop_time = observer.morning_twilight_18()
 
+            # Allow user-provided start/stop windows to override twilight limits.
             start_override = None
             stop_override = None
 
@@ -299,6 +284,7 @@ def visibility_checker(tb_tgt, obstimes, start_time_list, stop_time_list):
             if i == 0:
                 logger.info(f"date: {date_i}, start={start_time}, stop={stop_time}")
 
+            # Ask qplan whether the target can be observed long enough on this night.
             key = target
             obs_ok, t_start, t_stop = eph_cache.observable(
                 key,
@@ -329,6 +315,7 @@ def visibility_checker(tb_tgt, obstimes, start_time_list, stop_time_list):
 
     tb_tgt = tb_tgt[tb_tgt["is_visible"]]
 
+    # Check whether each proposal still has enough visible time left.
     psl_id = sorted(set(tb_tgt["proposal_id"]))
 
     for psl_id_ in psl_id:
@@ -341,7 +328,7 @@ def visibility_checker(tb_tgt, obstimes, start_time_list, stop_time_list):
 
     return tb_tgt
 
-def queryQueue(psl_id_list, DBPath_qDB, tb_queuedb_filename):
+def query_queueDB(psl_id_list, DBPath_qDB, tb_queuedb_filename):
     """
     Query queue database for executed observations and exposure times per proposal.
 
@@ -359,7 +346,7 @@ def queryQueue(psl_id_list, DBPath_qDB, tb_queuedb_filename):
     tb_queuedb : astropy.table.Table
         Table containing exposure time information per observation.
     """
-    # --- try reading cached result ---
+    # Reuse a cached queue table when available to avoid repeated DB access.
     if os.path.exists(tb_queuedb_filename):
         try:
             tb_queuedb = Table.read(tb_queuedb_filename)
@@ -368,13 +355,14 @@ def queryQueue(psl_id_list, DBPath_qDB, tb_queuedb_filename):
         except Exception as e:
             logger.info("[S1] Querying the qdb (no cache found)")
 
+    # Otherwise connect to qDB and query proposal-by-proposal.
     qdb = q_db.QueueDatabase(logger_qplan) 
     qdb.read_config(DBPath_qDB) 
     qdb.connect() 
     qa = q_db.QueueAdapter(qdb) 
     qq = q_query.QueueQuery(qa, use_cache=False)
 
-    # --- collect results ---
+    # Collect one row per executed OB with the effective exposure summary.
     results = []
     counter = 0
 
@@ -394,8 +382,7 @@ def queryQueue(psl_id_list, DBPath_qDB, tb_queuedb_filename):
             exptime_m = ex_ob_stats.cum_eff_exp_time_m
             exptime_n = ex_ob_stats.cum_eff_exp_time_n
 
-            # This is the cumulative effective exposure time
-            # corresponding to the "qa_reference_arm" value.
+            # This is the cumulative effective exposure time for the QA reference arm.
             exptime_selected = ex_ob_stats.cum_eff_exp_time
 
             if exptime_selected >= 0:
@@ -417,7 +404,7 @@ def queryQueue(psl_id_list, DBPath_qDB, tb_queuedb_filename):
         logger.warning("No executed observations found in any proposal.")
         return Table()
 
-    # --- create and save table ---
+    # Save the queried summary so the next run can load it directly.
     tb_queuedb = Table(
         np.array(results),
         names=[
@@ -439,7 +426,7 @@ def queryQueue(psl_id_list, DBPath_qDB, tb_queuedb_filename):
     return tb_queuedb
 
 
-def readTarget(mode, para, tb_queuedb):
+def read_target(mode, para, tb_queuedb):
     """Read target list including:
        'ob_code' 'ra' 'dec' 'priority' 'exptime' 'exptime_tac' 'resolution' 'proposal_id' 'rank' 'grade' 'allocated_time'
 
@@ -463,217 +450,122 @@ def readTarget(mode, para, tb_queuedb):
     time_start = time.time()
     logger.info("[S1] Read targets started (PPP)")
 
+    # Shared constants for early returns and column normalization.
+    empty_result = (Table(), Table(), Table(), Table())
+    flux_columns = [
+        "psf_flux_g",
+        "psf_flux_r",
+        "psf_flux_i",
+        "psf_flux_z",
+        "psf_flux_y",
+        "psf_flux_error_g",
+        "psf_flux_error_r",
+        "psf_flux_error_i",
+        "psf_flux_error_z",
+        "psf_flux_error_y",
+        "total_flux_g",
+        "total_flux_r",
+        "total_flux_i",
+        "total_flux_z",
+        "total_flux_y",
+        "total_flux_error_g",
+        "total_flux_error_r",
+        "total_flux_error_i",
+        "total_flux_error_z",
+        "total_flux_error_y",
+    ]
+    filter_columns = ["filter_g", "filter_r", "filter_i", "filter_z", "filter_y"]
+
+    # Step 1: load the raw target table from a local file or from the target DB.
     if len(para["localPath_tgt"]) > 0:
         tb_tgt = Table.read(para["localPath_tgt"])
         logger.info(f"[S1] Target list is read from {para['localPath_tgt']}.")
 
         if len(tb_tgt) == 0:
             logger.warning("[S1] No input targets.")
-            return Table(), Table(), Table(), Table(), Table()
+            return empty_result
 
     elif None in para["DBPath_tgt"]:
         logger.error("[S1] Incorrect connection info to database is provided.")
-        return Table(), Table(), Table(), Table(), Table()
+        return empty_result
 
     else:
         import pandas as pd
-        import psycopg2
         import sqlalchemy as sa
 
-        DBads = DBinfo(para["DBPath_tgt"])
-        tgtDB = sa.create_engine(DBads)
+        db_address = database_info(para["DBPath_tgt"])
+        tgtDB = sa.create_engine(db_address)
 
-        def query_target_from_db(proposalId):
-            sql = f"SELECT ob_code,obj_id,c.input_catalog_id,ra,dec,epoch,priority,pmra,pmdec,parallax,effective_exptime,single_exptime,qa_reference_arm,is_medium_resolution,proposal.proposal_id,rank,grade,allocated_time_lr+allocated_time_mr as \"allocated_time\",allocated_time_lr,allocated_time_mr,filter_g,filter_r,filter_i,filter_z,filter_y,psf_flux_g,psf_flux_r,psf_flux_i,psf_flux_z,psf_flux_y,psf_flux_error_g,psf_flux_error_r,psf_flux_error_i,psf_flux_error_z,psf_flux_error_y,total_flux_g,total_flux_r,total_flux_i,total_flux_z,total_flux_y,total_flux_error_g,total_flux_error_r,total_flux_error_i,total_flux_error_z,total_flux_error_y FROM target JOIN proposal ON target.proposal_id=proposal.proposal_id JOIN input_catalog AS c ON target.input_catalog_id = c.input_catalog_id WHERE proposal.proposal_id in ('{proposalId}') AND c.active;"
+        def query_target_from_db(proposal_ids):
+            # Query all requested proposals at once and convert the DB schema to the internal table schema.
+            sql = sa.text(
+                "SELECT ob_code, obj_id, c.input_catalog_id AS input_catalog_id, ra, dec, epoch, priority, pmra, pmdec, parallax, effective_exptime, single_exptime, qa_reference_arm, is_medium_resolution, proposal.proposal_id AS proposal_id, rank, grade, allocated_time_lr+allocated_time_mr AS allocated_time_tac, allocated_time_lr, allocated_time_mr, filter_g, filter_r, filter_i, filter_z, filter_y, psf_flux_g, psf_flux_r, psf_flux_i, psf_flux_z, psf_flux_y, psf_flux_error_g, psf_flux_error_r, psf_flux_error_i, psf_flux_error_z, psf_flux_error_y, total_flux_g, total_flux_r, total_flux_i, total_flux_z, total_flux_y, total_flux_error_g, total_flux_error_r, total_flux_error_i, total_flux_error_z, total_flux_error_y FROM target JOIN proposal ON target.proposal_id=proposal.proposal_id JOIN input_catalog AS c ON target.input_catalog_id = c.input_catalog_id WHERE proposal.proposal_id IN :proposal_ids AND c.active;"
+            ).bindparams(sa.bindparam("proposal_ids", expanding=True))
 
-            conn = tgtDB.connect()
-            query = conn.execute(sa.sql.text(sql))
+            with tgtDB.connect() as conn:
+                df_tgt = pd.read_sql_query(
+                    sql,
+                    conn,
+                    params={"proposal_ids": list(proposal_ids)},
+                )
 
-            df_tgt = pd.DataFrame(
-                query.fetchall(),
-                columns=[
-                    "ob_code",
-                    "obj_id",
-                    "input_catalog_id",
-                    "ra",
-                    "dec",
-                    "epoch",
-                    "priority",
-                    "pmra",
-                    "pmdec",
-                    "parallax",
-                    "effective_exptime",
-                    "single_exptime",
-                    "qa_reference_arm",
-                    "is_medium_resolution",
-                    "proposal_id",
-                    "rank",
-                    "grade",
-                    "allocated_time_tac",
-                    "allocated_time_lr",
-                    "allocated_time_mr",
-                    "filter_g",
-                    "filter_r",
-                    "filter_i",
-                    "filter_z",
-                    "filter_y",
-                    "psf_flux_g",
-                    "psf_flux_r",
-                    "psf_flux_i",
-                    "psf_flux_z",
-                    "psf_flux_y",
-                    "psf_flux_error_g",
-                    "psf_flux_error_r",
-                    "psf_flux_error_i",
-                    "psf_flux_error_z",
-                    "psf_flux_error_y",
-                    "total_flux_g",
-                    "total_flux_r",
-                    "total_flux_i",
-                    "total_flux_z",
-                    "total_flux_y",
-                    "total_flux_error_g",
-                    "total_flux_error_r",
-                    "total_flux_error_i",
-                    "total_flux_error_z",
-                    "total_flux_error_y",
-                ],
+            df_tgt = df_tgt.rename(
+                columns={
+                    "epoch": "equinox",
+                    "effective_exptime": "exptime_usr",
+                    "is_medium_resolution": "resolution",
+                }
             )
-            # convert column names
-            df_tgt = df_tgt.rename(columns={"epoch": "equinox"})
-            df_tgt = df_tgt.rename(columns={"effective_exptime": "exptime_usr"})
-            df_tgt = df_tgt.rename(columns={"is_medium_resolution": "resolution"})
-
-            # convert Boolean to String
-            df_tgt["resolution"] = [
-                "M" if v else "L" for v in df_tgt["resolution"]
-            ]
-            df_tgt["allocated_time_tac"] = [
-                df_tgt["allocated_time_lr"][ii]
-                if df_tgt["resolution"][ii] == "L"
-                else df_tgt["allocated_time_mr"][ii]
-                for ii in range(len(df_tgt))
-            ]
+            df_tgt["resolution"] = np.where(df_tgt["resolution"], "M", "L")
+            df_tgt["allocated_time_tac"] = np.where(
+                df_tgt["resolution"] == "L",
+                df_tgt["allocated_time_lr"],
+                df_tgt["allocated_time_mr"],
+            )
             df_tgt = df_tgt.drop(columns=["allocated_time_lr", "allocated_time_mr"])
+            df_tgt = remove_tgt_duplicate(df_tgt)
 
-            df_tgt = removeObjIdDuplication(df_tgt)
+            df_tgt[flux_columns] = df_tgt[flux_columns].apply(
+                pd.to_numeric, errors="coerce"
+            )
 
-            df_tgt["psf_flux_g"][df_tgt["psf_flux_g"].isnull()] = np.nan
-            df_tgt["psf_flux_r"][df_tgt["psf_flux_r"].isnull()] = np.nan
-            df_tgt["psf_flux_i"][df_tgt["psf_flux_i"].isnull()] = np.nan
-            df_tgt["psf_flux_z"][df_tgt["psf_flux_z"].isnull()] = np.nan
-            df_tgt["psf_flux_y"][df_tgt["psf_flux_y"].isnull()] = np.nan
+            tb_tgt_from_db = Table.from_pandas(df_tgt)
+            for column in filter_columns:
+                tb_tgt_from_db[column] = tb_tgt_from_db[column].astype("str")
 
-            df_tgt["psf_flux_error_g"][df_tgt["psf_flux_error_g"].isnull()] = np.nan
-            df_tgt["psf_flux_error_r"][df_tgt["psf_flux_error_r"].isnull()] = np.nan
-            df_tgt["psf_flux_error_i"][df_tgt["psf_flux_error_i"].isnull()] = np.nan
-            df_tgt["psf_flux_error_z"][df_tgt["psf_flux_error_z"].isnull()] = np.nan
-            df_tgt["psf_flux_error_y"][df_tgt["psf_flux_error_y"].isnull()] = np.nan
+            return tb_tgt_from_db
 
-            df_tgt["total_flux_g"][df_tgt["total_flux_g"].isnull()] = np.nan
-            df_tgt["total_flux_r"][df_tgt["total_flux_r"].isnull()] = np.nan
-            df_tgt["total_flux_i"][df_tgt["total_flux_i"].isnull()] = np.nan
-            df_tgt["total_flux_z"][df_tgt["total_flux_z"].isnull()] = np.nan
-            df_tgt["total_flux_y"][df_tgt["total_flux_y"].isnull()] = np.nan
+        proposal_ids = para["proposalIds"]
+        tb_tgt = query_target_from_db(proposal_ids)
 
-            df_tgt["total_flux_error_g"][df_tgt["total_flux_error_g"].isnull()] = np.nan
-            df_tgt["total_flux_error_r"][df_tgt["total_flux_error_r"].isnull()] = np.nan
-            df_tgt["total_flux_error_i"][df_tgt["total_flux_error_i"].isnull()] = np.nan
-            df_tgt["total_flux_error_z"][df_tgt["total_flux_error_z"].isnull()] = np.nan
-            df_tgt["total_flux_error_y"][df_tgt["total_flux_error_y"].isnull()] = np.nan
-
-            cols = [
-                "psf_flux_g",
-                "psf_flux_r",
-                "psf_flux_i",
-                "psf_flux_z",
-                "psf_flux_y",
-                "psf_flux_error_g",
-                "psf_flux_error_r",
-                "psf_flux_error_i",
-                "psf_flux_error_z",
-                "psf_flux_error_y",
-                "total_flux_g",
-                "total_flux_r",
-                "total_flux_i",
-                "total_flux_z",
-                "total_flux_y",
-                "total_flux_error_g",
-                "total_flux_error_r",
-                "total_flux_error_i",
-                "total_flux_error_z",
-                "total_flux_error_y",
-            ]
-
-            for col in cols:
-                # Convert the column to numeric; non-convertible values (e.g., "N/A") become np.nan.
-                df_tgt[col] = pd.to_numeric(df_tgt[col], errors="coerce")
-
-            tb_tgt = Table.from_pandas(df_tgt)
-
-            for col in ["filter_g", "filter_r", "filter_i", "filter_z", "filter_y"]:
-                tb_tgt[col] = tb_tgt[col].astype("str")
-
-            if proposalId == "S25B-126QN":
-                tb_tgt = tb_tgt[tb_tgt["priority"] <= 3]
-
-            """
-            for col in ["psf_flux_g","psf_flux_r", "psf_flux_i", "psf_flux_z", "psf_flux_y"]:
-                tb_tgt[col] = tb_tgt[col].astype(float)
-
-            for col in ["psf_flux_error_g","psf_flux_error_r", "psf_flux_error_i", "psf_flux_error_z", "psf_flux_error_y"]:
-                tb_tgt[col] = tb_tgt[col].astype(float)
-            #"""
-
-            conn.close()
-
-            return tb_tgt
-
-    proposalid = para["proposalIds"]
-
-    tb_tgt_lst = []
-    for proposalid_ in proposalid:
-        tb_tgt_lst.append(query_target_from_db(proposalid_))
-    tb_tgt = vstack(tb_tgt_lst)
-
+    # Step 2: standardize core columns used by the rest of the pipeline.
     tb_tgt["ra"] = tb_tgt["ra"].astype(float)
     tb_tgt["dec"] = tb_tgt["dec"].astype(float)
     tb_tgt["ob_code"] = tb_tgt["ob_code"].astype(str)
-    tb_tgt["identify_code"] = [
-        tt["proposal_id"] + "_" + tt["ob_code"]
-        if "proposal_id" in tb_tgt.columns
-        else tt["ob_code"]
-        for tt in tb_tgt
-    ]
+    if "proposal_id" in tb_tgt.columns:
+        tb_tgt["identify_code"] = np.char.add(
+            np.char.add(tb_tgt["proposal_id"].astype(str), "_"),
+            tb_tgt["ob_code"].astype(str),
+        )
+    else:
+        tb_tgt["identify_code"] = tb_tgt["ob_code"].astype(str)
     tb_tgt["exptime_assign"] = 0.0
     tb_tgt["exptime_done"] = 0.0  # observed exptime
-    tb_tgt["exptime"] = tb_tgt["exptime_usr"]
 
-    ## --only for 020QN, need to confirm with Pyo-san-- updated FH (250530): no need as tgt DB has updated allocated_time_tac
-    # """
-    # tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-058QN'] = 19848.75
-    # tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-020QN'] = 3237.25
-    # tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-099QN'] = 6803.00
-    # tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-096QN'] = 2661.00
-    # tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S25A-042QN'] = 18758.75
-    #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S26A-UH010-AQ'] = 1000.0
-    #tb_tgt["allocated_time_tac"][tb_tgt["proposal_id"] == 'S26A-092QN'] = 1000.0
-    # """
-
-    # for grade c programs, set completion rate as 70% as upper limit: no need as tgt DB has updated allocated_time_tac
-    #"""
+    """
     proposalid = ["S25A-043QF", "S25A-119QF", "S25A-111QF", "S25A-116QF", "S25A-126QF", "S25A-017QF", "S25A-019QF", "S25A-112QF", "S25A-030QF", "S25A-034QF"]
     mask = np.isin(tb_tgt["proposal_id"], proposalid)
     tb_tgt["allocated_time_tac"][mask] = 10000.0
     #"""
 
-    if len(set(tb_tgt["single_exptime"])) > 1:
+    single_exptime_values = np.unique(tb_tgt["single_exptime"])
+    if len(single_exptime_values) > 1:
         logger.error(
             "[S1] Multiple single-exptime are given. Not accepted now (240709)."
         )
-        return Table(), Table(), Table(), Table(), Table()
+        return empty_result
 
-    tb_tgt.meta["single_exptime"] = list(set(tb_tgt["single_exptime"]))[0]
+    tb_tgt.meta["single_exptime"] = single_exptime_values[0]
     logger.info(
         f"[S1] The single exptime is set to {tb_tgt.meta['single_exptime']:.2f} sec."
     )
@@ -681,236 +573,194 @@ def readTarget(mode, para, tb_queuedb):
     tb_tgt.meta["PPC"] = np.array([])
     tb_tgt.meta["PPC_origin"] = "auto"
 
-    if mode == "queue":
-        tb_tgt["allocated_time_done"] = 0.0
-        tb_tgt["allocated_time"] = 0.0
+    # Step 3: merge already-observed exposure information from queueDB when available.
+    tb_tgt["allocated_time_done"] = 0.0
+    tb_tgt["allocated_time"] = 0.0
 
-        # list of all psl_id
-        psl_id = sorted(set(tb_tgt["proposal_id"]))
-
-        # """
-        # connect with queueDB
-        # join on the key columns
-        if len(tb_queuedb) > 0:
-            tb_tgt = join(tb_tgt, tb_queuedb,
-                            keys_left=["proposal_id", "ob_code"],
-                            keys_right=["psl_id", "ob_code"],
-                            join_type="left")
-            
-            exptime_usr = np.ma.filled(tb_tgt["exptime_usr"], 0.0)
-            exptime_done_real = np.ma.filled(tb_tgt["eff_exptime_done_real"], 0.0)
-    
-            exptime_usr = exptime_usr.astype(float)
-            exptime_done_real = exptime_done_real.astype(float)
-            
-            tb_tgt["exptime_done"] = np.minimum(exptime_usr, exptime_done_real)
-    
-            tb_tgt.rename_column("ob_code_1", "ob_code")
-            cols_to_remove = [c for c in tb_tgt.colnames if c in tb_queuedb.colnames and "ob_code" not in c]
-            tb_tgt.remove_columns(cols_to_remove)
-            # """
-    
-            tb_tgt["exptime"] = tb_tgt["exptime_usr"] - tb_tgt["exptime_done"]
-    
-            # update allocated time
-            for psl_id_ in psl_id:
-                tb_tgt_tem_l = tb_tgt[
-                    (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "L")
-                ]
-                tb_tgt_tem_m = tb_tgt[
-                    (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "M")
-                ]
-    
-                if len(tb_tgt_tem_l) > 0:
-                    # total observed FH for the proposal (LR)
-                    FH_psl_done = sum(tb_tgt_tem_l["exptime_done"]) / 3600.0
-                    tb_tgt["allocated_time_done"][
-                        (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "L")
-                    ] = FH_psl_done
-                    FH_psl = tb_tgt["allocated_time_tac"][
-                        (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "L")
-                    ].data[0]
-                    FH_comp = tb_tgt["allocated_time_done"][
-                        (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "L")
-                    ].data[0]
-                    logger.info(
-                        f"{psl_id_} (LR): allocated FH = {FH_psl:.2f}, achieved FH = {FH_comp:.2f}, CR = {FH_comp/FH_psl*100.0:.2f}%"
-                    )
-    
-                if len(tb_tgt_tem_m) > 0:
-                    # total observed FH for the proposal (MR)
-                    FH_psl_done = sum(tb_tgt_tem_m["exptime_done"]) / 3600.0
-                    tb_tgt["allocated_time_done"][
-                        (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "M")
-                    ] = FH_psl_done
-                    FH_psl = tb_tgt["allocated_time_tac"][
-                        (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "M")
-                    ].data[0]
-                    FH_comp = tb_tgt["allocated_time_done"][
-                        (tb_tgt["proposal_id"] == psl_id_) & (tb_tgt["resolution"] == "M")
-                    ].data[0]
-                    logger.info(
-                        f"{psl_id_} (MR): allocated FH = {FH_psl:.2f}, achieved FH = {FH_comp:.2f}, CR = {FH_comp/FH_psl*100.0:.2f}%"
-                    )
-
-        tb_tgt["allocated_time"] = (
-            tb_tgt["allocated_time_tac"] - tb_tgt["allocated_time_done"]
-        )
-        tb_tgt["allocated_time"][tb_tgt["allocated_time"] < 0] = 0
-        tb_tgt = tb_tgt[tb_tgt["allocated_time"] > 0]
-        #mask = (
-        #    ((tb_tgt["proposal_id"] == "S25B-049QN") & (tb_tgt["exptime"] <= 900.0) & (tb_tgt["exptime_done"] > 0) & (tb_tgt["ra"] > 100)) |
-        #    (np.isin(tb_tgt["proposal_id"], ["S25B-053QN", "S25B-081QN", "S25B-071QN"]) & (tb_tgt["exptime_done"] > 0)) |
-        #    (np.isin(tb_tgt["proposal_id"], ["S25B-047QN", "S25B-048QN", "S25B-086QN"]))
-        #)
-        #tb_tgt = tb_tgt[mask]
-        #tb_tgt["allocated_time"] = 2000.0
-
-        # remove complete targets
-        n_tgt1 = len(tb_tgt)
-        tb_tgt = tb_tgt[tb_tgt["exptime"] > 0]
-        tb_tgt["exptime_PPP"] = (
-            np.ceil(tb_tgt["exptime"] / 900) * 900
-        )  # exptime needs to be multiples of 900 so netflow can be successfully executed
-        n_tgt2 = len(tb_tgt)
-        logger.info(
-            f"There are {n_tgt2:.0f} (partial-obs: {sum(tb_tgt['exptime_done'] > 0):.0f}) / {n_tgt1:.0f} targets not completed"
+    if len(tb_queuedb) == 0:
+        tb_tgt["exptime"] = tb_tgt["exptime_usr"]
+    else:
+        tb_tgt = join(
+            tb_tgt,
+            tb_queuedb,
+            keys_left=["proposal_id", "ob_code"],
+            keys_right=["psl_id", "ob_code"],
+            join_type="left",
         )
 
-        # only for 064 since too huge list, FIX needed
-        #msk = np.isin(tb_tgt["proposal_id"], ["S25B-049QN"]) * (tb_tgt["ra"] > 100)
-        #tb_tgt = tb_tgt[~msk]
+        exptime_usr = np.ma.filled(tb_tgt["exptime_usr"], 0.0).astype(float)
+        exptime_done_real = np.ma.filled(
+            tb_tgt["eff_exptime_done_real"], 0.0
+        ).astype(float)
+        tb_tgt["exptime_done"] = np.minimum(exptime_usr, exptime_done_real)
 
-        """
-        if proposalId == 'S25B-126QN':
-            tb_tgt = tb_tgt[tb_tgt["priority"]<=3]
+        tb_tgt.rename_column("ob_code_1", "ob_code")
+        queuedb_columns = set(tb_queuedb.colnames)
+        columns_to_remove = [
+            column
+            for column in tb_tgt.colnames
+            if column in queuedb_columns and "ob_code" not in column
+        ]
+        tb_tgt.remove_columns(columns_to_remove)
+        tb_tgt["exptime"] = tb_tgt["exptime_usr"] - tb_tgt["exptime_done"]
 
-        if proposalId in ["S25A-043QF", "S25A-119QF", "S25A-111QF", "S25A-116QF", "S25A-126QF", "S25A-017QF", "S25A-019QF", "S25A-112QF", "S25A-030QF", "S25A-034QF"]:
-            n_tgt1 = len(tb_tgt)
-            tb_tgt = tb_tgt[(tb_tgt["ra"]>280) * (tb_tgt["dec"]<70) * (tb_tgt["dec"]>-20)]
-            n_tgt2 = len(tb_tgt)
-            logger.info(f"Visibility limits: {proposalId} {n_tgt1:.0f} -> {n_tgt2:.0f}")
-    
-        msk = (tb_tgt["priority"] > 3) & (tb_tgt["proposal_id"] == 'S25A-064QN')
-        tb_tgt = tb_tgt[~msk]
+        proposal_ids = sorted(set(tb_tgt["proposal_id"]))
+        for proposal_id in proposal_ids:
+            for resolution in ["L", "M"]:
+                mask = (tb_tgt["proposal_id"] == proposal_id) & (
+                    tb_tgt["resolution"] == resolution
+                )
+                tb_tgt_resolution = tb_tgt[mask]
+                if len(tb_tgt_resolution) == 0:
+                    continue
 
-        for pslid_ in ["S25A-043QF", "S25A-119QF", "S25A-111QF", "S25A-116QF", "S25A-126QF", "S25A-017QF", "S25A-019QF", "S25A-112QF", "S25A-030QF", "S25A-034QF"]:
-            n_tgt1 = len(tb_tgt)
-            msk = ((tb_tgt["ra"] <= 280) | (tb_tgt["dec"] > 5)) & (tb_tgt["proposal_id"] == pslid_)
-            tb_tgt = tb_tgt[~msk]
-            n_tgt2 = len(tb_tgt)
-            logger.info(f"Visibility limits: {pslid_} {n_tgt1:.0f} -> {n_tgt2:.0f}")
-        #"""
+                fh_done = sum(tb_tgt_resolution["exptime_done"]) / 3600.0
+                tb_tgt["allocated_time_done"][mask] = fh_done
+                fh_allocated = tb_tgt["allocated_time_tac"][mask].data[0]
+                fh_completed = tb_tgt["allocated_time_done"][mask].data[0]
+                logger.info(
+                    f"{proposal_id} ({'LR' if resolution == 'L' else 'MR'}): allocated FH = {fh_allocated:.2f}, achieved FH = {fh_completed:.2f}, CR = {fh_completed/fh_allocated*100.0:.2f}%"
+                )
 
-        if para["visibility_check"]:
-            tb_tgt = select_targets_by_visibility_envelope(
-                tb_tgt, #para["obstimes"], para["starttimes"], para["stoptimes"]
-            )
+    # Step 4: remove completed programs and completed targets.
+    tb_tgt["allocated_time"] = (
+        tb_tgt["allocated_time_tac"] - tb_tgt["allocated_time_done"]
+    )
+    tb_tgt["allocated_time"][tb_tgt["allocated_time"] < 0] = 0 
+    tb_tgt = tb_tgt[tb_tgt["allocated_time"] > 0] # remove completed programs
+    """ 
+    mask = (
+        ((tb_tgt["proposal_id"] == "S25B-049QN") & (tb_tgt["exptime"] <= 900.0) & (tb_tgt["exptime_done"] > 0) & (tb_tgt["ra"] > 100)) |
+        (np.isin(tb_tgt["proposal_id"], ["S25B-053QN", "S25B-081QN", "S25B-071QN"]) & (tb_tgt["exptime_done"] > 0)) |
+        (np.isin(tb_tgt["proposal_id"], ["S25B-047QN", "S25B-048QN", "S25B-086QN"]))
+    )
+    tb_tgt = tb_tgt[mask]
+    tb_tgt["allocated_time"] = 2000.0
+    #"""
 
-        # separete the sample by 'resolution' (L/M)
-        tb_tgt_l = tb_tgt[tb_tgt["resolution"] == "L"]
-        tb_tgt_m = tb_tgt[tb_tgt["resolution"] == "M"]
+    # remove complete targets
+    n_tgt1 = len(tb_tgt)
+    tb_tgt = tb_tgt[tb_tgt["exptime"] > 0]
+    tb_tgt["exptime_PPP"] = (
+        np.ceil(tb_tgt["exptime"] / 900) * 900
+    )  # exptime needs to be multiples of 900 so netflow can be successfully executed
+    n_tgt2 = len(tb_tgt)
+    logger.info(
+        f"There are {n_tgt2:.0f} (partial-obs: {sum(tb_tgt['exptime_done'] > 0):.0f}) / {n_tgt1:.0f} targets not completed"
+    )
 
-        logger.info(f"[S1] observation mode = {mode}")
-        logger.info(
-            f"[S1] Read targets done (takes {round(time.time()-time_start,3):.2f} sec)."
+    # Step 5: optionally apply the visibility envelope filter.
+    if para["visibility_check"]:
+        tb_tgt = visibility_checker2(
+            tb_tgt, #para["obstimes"], para["starttimes"], para["stoptimes"]
         )
-        logger.info(f"[S1] There are {len(set(tb_tgt['proposal_id'])):.0f} proposals.")
-        logger.info(
-            f"[S1] n_tgt_low = {len(tb_tgt_l):.0f}, n_tgt_medium = {len(tb_tgt_m):.0f}"
-        )
-        return tb_tgt, tb_tgt_l, tb_tgt_m, tb_queuedb, tb_queuedb
+
+    # Step 6: split the final sample by resolution for downstream processing.
+    # separete the sample by 'resolution' (L/M)
+    tb_tgt_l = tb_tgt[tb_tgt["resolution"] == "L"]
+    tb_tgt_m = tb_tgt[tb_tgt["resolution"] == "M"]
+
+    logger.info(f"[S1] observation mode = {mode}")
+    logger.info(
+        f"[S1] Read targets done (takes {round(time.time()-time_start,3):.2f} sec)."
+    )
+    logger.info(f"[S1] There are {len(set(tb_tgt['proposal_id'])):.0f} proposals.")
+    logger.info(
+        f"[S1] n_tgt_low = {len(tb_tgt_l):.0f}, n_tgt_medium = {len(tb_tgt_m):.0f}"
+    )
+    return tb_tgt, tb_tgt_l, tb_tgt_m, tb_queuedb
 
 
-def count_N(_tb_tgt):
+def count_local_number(_tb_tgt):
     # calculate local count of targets (bin_width is 1 deg in ra&dec)
     # lower limit of dec is -40
     if len(_tb_tgt) == 0:
         return _tb_tgt
 
-    count_bin = [[0 for i in np.arange(0, 361, 1)] for j in np.arange(-40, 91, 1)]
+    ra_index = np.asarray(_tb_tgt["ra"], dtype=float).astype(int)
+    dec_index = (np.asarray(_tb_tgt["dec"], dtype=float) + 40).astype(int)
 
-    n_tgt = len(_tb_tgt)
-    for ii in range(n_tgt):
-        m = int(_tb_tgt["ra"][ii])
-        n = int(_tb_tgt["dec"][ii] + 40)  # dec>-40
-        count_bin[n][m] += 1
-    den_local = [
-        count_bin[int(_tb_tgt["dec"][ii] + 40)][int(_tb_tgt["ra"][ii])]
-        for ii in range(n_tgt)
-    ]
+    count_bin = np.zeros((131, 361), dtype=int)
+    np.add.at(count_bin, (dec_index, ra_index), 1)
 
-    _tb_tgt["local_count"] = den_local
+    _tb_tgt["local_count"] = count_bin[dec_index, ra_index]
 
     return _tb_tgt
 
 
-def sciRank_pri(_tb_tgt):
+def rank_recalculate(_tb_tgt):
     # calculate rank+priority of targets (higher value means more important)
-    # re-order the rank (starting from 0)
+    # Each distinct program rank defines its own priority interval.
+    # Example for distinct ranks [6, 8, 10]:
+    #   rank=10 -> priority ladder 10.0, 9.9, ..., 9.1
+    #   rank=8  -> priority ladder  8.0, 7.9, ..., 7.1
+    #   rank=6  -> priority ladder  6.0, 5.7, ..., 3.3
+    # Programs sharing the same rank use the same interval.
     if len(_tb_tgt) == 0:
         return _tb_tgt
 
-    SciRank = [0.0] + sorted(list(set(_tb_tgt["rank"])))
+    rank_values = np.asarray(_tb_tgt["rank"], dtype=float)
+    priority_values = np.asarray(_tb_tgt["priority"], dtype=int)
 
-    # give each user priority a rank in the interval of the two ranks
-    # (0-9, with 0=rank_i, 9=0.5*(rank_[i-1]+rank_i))
-    SciRank_usrPri = [
-        np.arange(
-            0.55 * SciRank[i1] + 0.45 * SciRank[i1 - 1],
-            1.05 * SciRank[i1] - 0.05 * SciRank[i1 - 1],
-            0.05 * (SciRank[i1] - SciRank[i1 - 1]),
-        )
-        for i1 in range(1, len(SciRank))
-    ]
+    # Targets from different programs can share the same rank value.
+    # Use one interval per distinct rank, then map each target back to that interval.
+    unique_ranks, rank_index = np.unique(rank_values, return_inverse=True)
+    previous_distinct_ranks = np.concatenate(([0.0], unique_ranks[:-1]))
 
-    SciUsr_Ranktot = np.array(
-        [
-            SciRank_usrPri[i2 - 1][9 - j2]
-            for s_tem in _tb_tgt
-            for i2 in range(1, len(SciRank))
-            for j2 in range(0, 10, 1)
-            if s_tem["rank"] == SciRank[i2] and s_tem["priority"] == j2
-        ]
+    interval_lower = 0.55 * unique_ranks + 0.45 * previous_distinct_ranks
+    interval_step = 0.05 * (unique_ranks - previous_distinct_ranks)
+
+    sci_usr_ranktot = (
+        interval_lower[rank_index]
+        + (9 - priority_values) * interval_step[rank_index]
     )
 
-    _tb_tgt["rank_fin"] = np.exp(SciUsr_Ranktot)
+    _tb_tgt["rank_fin"] = np.exp(sci_usr_ranktot)
 
     return _tb_tgt
 
-
-#"""
 def weight(_tb_tgt, para_sci, para_exp, para_n):
     # calculate weights of targets (higher weights mean more important)
     if len(_tb_tgt) == 0:
         return _tb_tgt
 
-    weight_t = (
-        pow(_tb_tgt["rank_fin"], para_sci)
-        * pow(_tb_tgt["exptime_PPP"] / _tb_tgt.meta["single_exptime"], para_exp)
-        * pow(_tb_tgt["local_count"], para_n)
+    rank_fin = np.asarray(_tb_tgt["rank_fin"], dtype=float)
+    exptime_ppp = np.asarray(_tb_tgt["exptime_PPP"], dtype=float)
+    exptime = np.asarray(_tb_tgt["exptime"], dtype=float)
+    exptime_done = np.asarray(_tb_tgt["exptime_done"], dtype=float)
+    local_count = np.asarray(_tb_tgt["local_count"], dtype=float)
+    single_exptime = float(_tb_tgt.meta["single_exptime"])
+
+    weight_values = (
+        np.power(rank_fin, para_sci)
+        * np.power(exptime_ppp / single_exptime, para_exp)
+        * np.power(local_count, para_n)
     )
+    weight_values = np.nan_to_num(weight_values, nan=0.0)
 
-    _tb_tgt["weight"] = weight_t
-    _tb_tgt["weight"][np.isnan(_tb_tgt["weight"])] = 0
+    observed_mask = (exptime_done > 0) | (exptime_ppp < exptime)
 
-    weight_max = max(_tb_tgt["weight"])
-    _tb_tgt["weight"][
-        (_tb_tgt["exptime_done"] > 0) | (_tb_tgt["exptime_PPP"] < _tb_tgt["exptime"])
-    ] += weight_max
+    weight_max = np.max(weight_values)
+    if np.any(observed_mask):
+        weight_values[observed_mask] += weight_max
 
-    weight_max = max(_tb_tgt["rank_fin"])
-    _tb_tgt["rank_fin"][
-        (_tb_tgt["exptime_done"] > 0) | (_tb_tgt["exptime_PPP"] < _tb_tgt["exptime"])
-    ] += weight_max
+    rank_fin_updated = rank_fin.copy()
+    rank_fin_max = np.max(rank_fin_updated)
+    if np.any(observed_mask):
+        rank_fin_updated[observed_mask] += rank_fin_max
+
+    _tb_tgt["weight"] = weight_values
+    _tb_tgt["rank_fin"] = rank_fin_updated
 
     return _tb_tgt
-#"""
 
 
-def target_DBSCAN(_tb_tgt, sep=1.38):
+def target_clustering(_tb_tgt, sep=1.38):
     # separate targets into different groups
     # haversine uses (dec,ra) in radian;
+    if len(_tb_tgt) == 0:
+        return []
+
     """
     if len(_tb_tgt) < 2:
         db = DBSCAN(eps=np.radians(sep), min_samples=1, metric="haversine").fit(
@@ -924,25 +774,25 @@ def target_DBSCAN(_tb_tgt, sep=1.38):
         labels = db.dbscan_clustering(np.radians(sep), min_cluster_size=1)
     #"""
 
+    target_coordinates = np.radians(
+        np.column_stack((np.asarray(_tb_tgt["dec"], dtype=float), np.asarray(_tb_tgt["ra"], dtype=float)))
+    )
     db = DBSCAN(eps=np.radians(sep), min_samples=1, metric="haversine").fit(
-        np.radians([_tb_tgt["dec"], _tb_tgt["ra"]]).T
+        target_coordinates
     )
     labels = db.labels_
 
-    unique_labels = set(labels)
-    n_clusters = len(unique_labels)
+    unique_labels, inverse_labels = np.unique(labels, return_inverse=True)
+    cluster_weights = np.bincount(
+        inverse_labels,
+        weights=np.asarray(_tb_tgt["rank_fin"], dtype=float),
+    )
+    ordered_clusters = unique_labels[np.argsort(cluster_weights)[::-1]]
 
     tgt_group = []
-    tgt_pri_ord = []
 
-    for ii in range(n_clusters):
-        tgt_t_pri_tot = sum(_tb_tgt[labels == ii]["rank_fin"])
-        tgt_pri_ord.append([ii, tgt_t_pri_tot])
-
-    tgt_pri_ord.sort(key=lambda x: x[1], reverse=True)
-
-    for ii in np.array(tgt_pri_ord)[:, 0]:
-        tgt_t = _tb_tgt[labels == ii]
+    for cluster_label in ordered_clusters:
+        tgt_t = _tb_tgt[labels == cluster_label]
         tgt_group.append(tgt_t)
         psl_ids_str = ", ".join(map(str, set(tgt_t["proposal_id"])))
         print(
@@ -1139,8 +989,8 @@ def PPP_centers(
         logger.warning(f"[S2] no PPC to be determined")
         return np.array(ppc_lst), Table()
 
-    _tb_tgt = sciRank_pri(_tb_tgt)
-    _tb_tgt = count_N(_tb_tgt)
+    _tb_tgt = rank_recalculate(_tb_tgt)
+    _tb_tgt = count_local_number(_tb_tgt)
     para_sci, para_exp, para_n = weight_para
     _tb_tgt = weight(_tb_tgt, para_sci, para_exp, para_n)
 
@@ -1188,7 +1038,7 @@ def PPP_centers(
         ]  # targets not finished
         _tb_tgt_["priority"][_tb_tgt_["exptime_done"] > 0] = 999
 
-        tb_tgt_t_group = target_DBSCAN(_tb_tgt_, 1.38)
+        tb_tgt_t_group = target_clustering(_tb_tgt_, 1.38)
 
         _tb_tgt_t_ = tb_tgt_t_group[0]
 
@@ -1660,7 +1510,9 @@ def netflowRun_single(
     import pfs.utils
     
     p = Path(pfs.utils.__path__[0])
-    p_fiberdata = p.parent.parent.parent / "data" / "fiberids" 
+    p_fiberdata = p.parent.parent.parent / "data" / "fiberids"
+    if not p_fiberdata.exists():
+        p_fiberdata = p / "data" / "fiberids"
     
     cobra_idx_n2 = FiberIds(path=p_fiberdata).cobrasForSpectrograph(spectrographId=2)
     cobra_idx_n2 = cobra_idx_n2[cobra_idx_n2<=2394]
@@ -2778,9 +2630,9 @@ def run(
     today = date.today().strftime("%Y%m%d")
     tb_queuedb_filename = os.path.join(dirName, f"tgt_queueDB_{today}.csv")
     psl_id = conf["ppp"]["proposalIds"] + conf["ppp"]["proposalIds_backup"]
-    tb_queuedb = queryQueue(psl_id, conf["queuedb"]["filepath"], tb_queuedb_filename)
+    tb_queuedb = query_queueDB(psl_id, conf["queuedb"]["filepath"], tb_queuedb_filename)
 
-    tb_tgt, tb_tgt_l, tb_tgt_m, tb_queuedb, tb_queuedb = readTarget(
+    tb_tgt, tb_tgt_l, tb_tgt_m, tb_queuedb = read_target(
         readtgt_con["mode_readtgt"], readtgt_con["para_readtgt"], tb_queuedb
     )
 
@@ -2800,7 +2652,7 @@ def run(
     tb_tgt_l1 = Table.copy(tb_tgt_l)
     tb_tgt_l1.meta["PPC"] = ppc_lst_l
 
-    tb_tgt_l1 = sciRank_pri(tb_tgt_l1)
+    tb_tgt_l1 = rank_recalculate(tb_tgt_l1)
 
     tb_ppc_l = netflowRun(
         tb_tgt_l1,
@@ -2822,7 +2674,7 @@ def run(
     tb_tgt_m1 = Table.copy(tb_tgt_m)
     tb_tgt_m1.meta["PPC"] = ppc_lst_m
 
-    tb_tgt_m1 = sciRank_pri(tb_tgt_m1)
+    tb_tgt_m1 = rank_recalculate(tb_tgt_m1)
 
     tb_ppc_m = netflowRun(
         tb_tgt_m1,
