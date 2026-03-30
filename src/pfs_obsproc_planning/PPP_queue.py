@@ -8,7 +8,6 @@ import warnings
 
 import matplotlib.pyplot as plt
 import numpy as np
-import scipy.optimize as opt
 from scipy.optimize import minimize
 
 from astropy import units as u
@@ -30,8 +29,6 @@ from datetime import datetime, timedelta, timezone, date
 from ginga.misc.log import get_logger
 import ets_fiber_assigner.netflow as nf
 from ics.cobraOps.Bench import Bench
-from ics.cobraOps.CollisionSimulator import CollisionSimulator
-from ics.cobraOps.TargetGroup import TargetGroup
 
 warnings.filterwarnings("ignore")
 
@@ -47,7 +44,42 @@ min_sky_targets_per_instrument_region = None
 instrument_region_penalty = None
 black_dot_penalty_cost = None
 cobraSafetyMargin = 0.1
+_COBRA_FEATURE_FLAGS = None
 
+_NETFLOW_PRIORITY_COSTS = {
+    999: 200,
+    0: 100,
+    1: 90,
+    2: 80,
+    3: 70,
+    4: 60,
+    5: 50,
+    6: 40,
+    7: 30,
+    8: 20,
+    9: 10,
+}
+
+_NETFLOW_CLASSDICT_TEMPLATE = {
+    **{
+        f"sci_P{priority}": {
+            "nonObservationCost": non_observation_cost,
+            "partialObservationCost": 200,
+            "calib": False,
+        }
+        for priority, non_observation_cost in _NETFLOW_PRIORITY_COSTS.items()
+    },
+    "cal": {
+        "numRequired": 200,
+        "nonObservationCost": 200,
+        "calib": True,
+    },
+    "sky": {
+        "numRequired": 400,
+        "nonObservationCost": 200,
+        "calib": True,
+    },
+}
 
 def database_info(para_db):
     # Build the SQLAlchemy-style connection string from the DB config tuple.
@@ -803,55 +835,69 @@ def target_clustering(_tb_tgt, sep=1.38):
 
 
 def PFS_FoV(ppc_ra, ppc_dec, PA, _tb_tgt):
-    # pick up targets in the ppcs
-    tgt_lst = np.vstack((_tb_tgt["ra"], _tb_tgt["dec"])).T
-    ppc_lst = SkyCoord(ppc_ra * u.deg, ppc_dec * u.deg)
+    # Pick up targets that fall inside the hexagonal PFS field of view.
+    if len(_tb_tgt) == 0:
+        return np.array([], dtype=int)
+
+    target_coordinates = np.column_stack(
+        (np.asarray(_tb_tgt["ra"], dtype=float), np.asarray(_tb_tgt["dec"], dtype=float))
+    )
+    ppc_center = SkyCoord(ppc_ra * u.deg, ppc_dec * u.deg)
 
     # PA=0 along y-axis, PA=90 along x-axis, PA=180 along -y-axis...
-    hexagon = ppc_lst.directional_offset_by(
+    # Build the 6 corners plus the closing point of the hexagon on the sky.
+    hexagon = ppc_center.directional_offset_by(
         [30 + PA, 90 + PA, 150 + PA, 210 + PA, 270 + PA, 330 + PA, 30 + PA] * u.deg,
         1.38 / 2.0 * u.deg,
     )
     ra_h = hexagon.ra.deg
     dec_h = hexagon.dec.deg
 
-    # for pointings around RA~0 or 360, parts of it will move to the opposite side (e.g., [[1,0],[-1,0]] -->[[1,0],[359,0]])
-    # correct for it
-    ra_h_in = np.where(np.fabs(ra_h - ppc_ra) > 180)
-    if len(ra_h_in[0]) > 0:
-        if ra_h[ra_h_in[0][0]] > 180:
-            ra_h[ra_h_in[0]] -= 360
-        elif ra_h[ra_h_in[0][0]] < 180:
-            ra_h[ra_h_in[0]] += 360
+    # For pointings around RA~0 or 360, shift wrapped vertices to the same
+    # side as the PPC center before testing polygon containment.
+    wrap_mask = np.fabs(ra_h - ppc_ra) > 180
+    if np.any(wrap_mask):
+        if ra_h[wrap_mask][0] > 180:
+            ra_h[wrap_mask] -= 360
+        else:
+            ra_h[wrap_mask] += 360
 
-    polygon = Path([(ra_h[t], dec_h[t]) for t in range(len(ra_h))])
-    index_ = np.where(polygon.contains_points(tgt_lst))[0]
+    polygon = Path(np.column_stack((ra_h, dec_h)))
+    index_ = np.where(polygon.contains_points(target_coordinates))[0]
 
     return index_
 
 def KDE_xy(_tb_tgt, X, Y):
-    # calculate a single KDE
-    tgt_values = np.vstack((np.deg2rad(_tb_tgt["dec"]), np.deg2rad(_tb_tgt["ra"])))
+    # Calculate KDE on one target subset over the given RA/Dec grid.
+    target_values = np.deg2rad(
+        np.column_stack(
+            (
+                np.asarray(_tb_tgt["dec"], dtype=float),
+                np.asarray(_tb_tgt["ra"], dtype=float),
+            )
+        )
+    )
     kde = KernelDensity(
         bandwidth=np.deg2rad(1.38 / 2.0),
         kernel="linear",
         algorithm="ball_tree",
         metric="haversine",
     )
-    kde.fit(tgt_values.T, sample_weight=_tb_tgt["weight"])
+    kde.fit(target_values, sample_weight=np.asarray(_tb_tgt["weight"], dtype=float))
 
-    X1 = np.deg2rad(X)
-    Y1 = np.deg2rad(Y)
-    positions = np.vstack([Y1.ravel(), X1.ravel()])
-    Z = np.reshape(np.exp(kde.score_samples(positions.T)), Y.shape)
+    grid_positions = np.deg2rad(np.column_stack((Y.ravel(), X.ravel())))
+    Z = np.reshape(np.exp(kde.score_samples(grid_positions)), Y.shape)
 
     return Z
 
 
 def KDE(_tb_tgt, multiProcesing):
-    # define binning and calculate KDE
+    # Define the RA/Dec grid and calculate the KDE significance map.
+    if len(_tb_tgt) == 0:
+        return np.nan, np.nan, np.nan, np.nan, np.nan
+
     if len(_tb_tgt) == 1:
-        # if only one target, set it as the peak
+        # If only one target is available, use its coordinate as the peak.
         return (
             _tb_tgt["ra"].data[0],
             _tb_tgt["dec"].data[0],
@@ -859,106 +905,119 @@ def KDE(_tb_tgt, multiProcesing):
             _tb_tgt["ra"].data[0],
             _tb_tgt["dec"].data[0],
         )
+
+    # Determine the KDE grid. Keep some margin around the target sample so the
+    # KDE is not artificially clipped near the boundaries.
+    ra_values = np.asarray(_tb_tgt["ra"], dtype=float)
+    dec_values = np.asarray(_tb_tgt["dec"], dtype=float)
+
+    ra_min = np.min(ra_values)
+    ra_max = np.max(ra_values)
+    dec_min = np.min(dec_values)
+    dec_max = np.max(dec_values)
+
+    ra_low = min(ra_min * 0.9, ra_min - 1)
+    ra_up = max(ra_max * 1.1, ra_max + 1)
+    dec_low = min(dec_min * 0.9, dec_min - 1)
+    dec_up = max(dec_max * 1.1, dec_max + 1)
+
+    ra_step = (ra_max - ra_min) / 100
+    dec_step = (dec_max - dec_min) / 100
+
+    # Use a local grid when the targets already span a compact region in both
+    # RA and Dec, so the KDE stays focused around the sample.
+    if ra_step < 0.5 and dec_step < 0.5:
+        X_, Y_ = np.mgrid[ra_low:ra_up:101j, dec_low:dec_up:101j]
+    # If the Dec range is compact but RA is broad, keep full-sky RA coverage
+    # while preserving a fine local Dec grid.
+    elif dec_step < 0.5:
+        X_, Y_ = np.mgrid[0:360:721j, dec_low:dec_up:101j]
+    # If the RA range is compact but Dec is broad, keep a local RA window and
+    # fall back to the standard full Dec search range.
+    elif ra_step < 0.5:
+        X_, Y_ = np.mgrid[ra_low:ra_up:101j, -40:90:261j]
+    # Otherwise search the default full survey footprint in both coordinates.
     else:
-        # determine the binning for the KDE cal.
-        # set a bin width of 0.5 deg in ra&dec if the sample spans over a wide area (>50 degree)
-        # give some blank spaces in binning, otherwide KDE will be wrongly calculated
-        ra_low = min(min(_tb_tgt["ra"]) * 0.9, min(_tb_tgt["ra"]) - 1)
-        ra_up = max(max(_tb_tgt["ra"]) * 1.1, max(_tb_tgt["ra"]) + 1)
-        dec_up = max(max(_tb_tgt["dec"]) * 1.1, max(_tb_tgt["dec"]) + 1)
-        dec_low = min(min(_tb_tgt["dec"]) * 0.9, min(_tb_tgt["dec"]) - 1)
+        X_, Y_ = np.mgrid[0:360:721j, -40:90:261j]
 
-        if (max(_tb_tgt["ra"]) - min(_tb_tgt["ra"])) / 100 < 0.5 and (
-            max(_tb_tgt["dec"]) - min(_tb_tgt["dec"])
-        ) / 100 < 0.5:
-            X_, Y_ = np.mgrid[ra_low:ra_up:101j, dec_low:dec_up:101j]
-        elif (max(_tb_tgt["dec"]) - min(_tb_tgt["dec"])) / 100 < 0.5:
-            X_, Y_ = np.mgrid[0:360:721j, dec_low:dec_up:101j]
-        elif (max(_tb_tgt["ra"]) - min(_tb_tgt["ra"])) / 100 < 0.5:
-            X_, Y_ = np.mgrid[ra_low:ra_up:101j, -40:90:261j]
-        else:
-            X_, Y_ = np.mgrid[0:360:721j, -40:90:261j]
-        positions1 = np.vstack([Y_.ravel(), X_.ravel()])
+    if multiProcesing:
+        threads_count = 4  # round(multiprocessing.cpu_count() / 2)
+        thread_n = min(threads_count, round(len(_tb_tgt) * 0.5))
 
-        if multiProcesing:
-            threads_count = 4  # round(multiprocessing.cpu_count() / 2)
-            thread_n = min(
-                threads_count, round(len(_tb_tgt) * 0.5)
-            )  # threads_count=10 in this machine
+        with multiprocessing.Pool(thread_n) as pool:
+            kde_maps = pool.map(
+                partial(KDE_xy, X=X_, Y=Y_), np.array_split(_tb_tgt, thread_n)
+            )
 
-            with multiprocessing.Pool(thread_n) as p:
-                dMap_ = p.map(
-                    partial(KDE_xy, X=X_, Y=Y_), np.array_split(_tb_tgt, thread_n)
-                )
+        Z = np.sum(kde_maps, axis=0)
+    else:
+        Z = KDE_xy(_tb_tgt, X_, Y_)
 
-            Z = sum(dMap_)
+    # Convert the KDE map into a significance map and pick the central maximum
+    # when several grid cells share the same peak value.
+    obj_dis_sig_ = (Z - np.mean(Z)) / np.std(Z)
+    peak_pos = np.where(obj_dis_sig_ == obj_dis_sig_.max())
 
-        else:
-            Z = KDE_xy(_tb_tgt, X_, Y_)
+    if len(peak_pos[0]) == 0 or len(peak_pos[1]) == 0:
+        peak_x = _tb_tgt["ra"].data[0]
+        peak_y = _tb_tgt["dec"].data[0]
+    else:
+        peak_row = peak_pos[0][round(len(peak_pos[0]) * 0.5)]
+        peak_col = peak_pos[1][round(len(peak_pos[1]) * 0.5)]
+        peak_x = np.unique(X_)[peak_row]
+        peak_y = np.unique(Y_)[peak_col]
 
-        # calculate significance level of KDE
-        obj_dis_sig_ = (Z - np.mean(Z)) / np.std(Z)
-        peak_pos = np.where(obj_dis_sig_ == obj_dis_sig_.max())
-
-        if len(peak_pos[0]) == 0 or len(peak_pos[1]) == 0:
-            peak_x = _tb_tgt["ra"].data[0]
-            peak_y = _tb_tgt["dec"].data[0]
-        else:
-            peak_y = positions1[0, peak_pos[1][round(len(peak_pos[1]) * 0.5)]]
-            peak_x = sorted(set(positions1[1, :]))[
-                peak_pos[0][round(len(peak_pos[0]) * 0.5)]
-            ]
-
-        return X_, Y_, obj_dis_sig_, peak_x, peak_y
+    return X_, Y_, obj_dis_sig_, peak_x, peak_y
 
 
-def objective1(params, _tb_tgt):
+def objective_ppc_assignment(trial_ppc, _tb_tgt, ppc_pa=0.0):
     """
-    Objective function to optimize the PPC parameters.
+    Objective function used to optimize the PPC center.
 
-    Parameters:
-      params: list or array-like of [ppc_ra, ppc_dec, ppc_pa]
-      tb: pandas DataFrame containing target information, including 'i2_mag'
+    Parameters
+    ----------
+    trial_ppc : sequence
+        Trial PPC center as ``[ppc_ra, ppc_dec]`` in degrees.
+    _tb_tgt : table-like
+        Target sample used to evaluate the PPC.
+    ppc_pa : float, optional
+        Fixed PPC position angle in degrees. This parameter is passed through
+        to the evaluator but is not included in the optimization vector.
 
-    Returns:
-      Negative of the weighted sum of bright and faint counts (since we minimize).
+    Returns
+    -------
+    float
+        Negative utility score for the optimizer to minimize.
     """
-    ra, dec = params
-    pa = 0.0
-    lst_tgtID_assign = netflowRun4PPC(_tb_tgt, ra, dec, pa)
-    #index_ = PFS_FoV(ra, dec, pa, _tb_tgt)
-    #lst_tgtID_assign = _tb_tgt["identify_code"][index_]
+    ppc_ra, ppc_dec = trial_ppc
+    assigned_target_ids = fiber_allocate(
+        _tb_tgt,
+        single_ppc_mode=True,
+        ppc_candidate=(ppc_ra, ppc_dec, ppc_pa),
+    )
+    #index_ = PFS_FoV(ppc_ra, ppc_dec, ppc_pa, _tb_tgt)
+    #assigned_target_ids = _tb_tgt["identify_code"][index_]
 
-    index_assign = np.isin(_tb_tgt["identify_code"], lst_tgtID_assign)
+    assigned_mask = np.isin(_tb_tgt["identify_code"], assigned_target_ids)
 
-    N_P0 = sum(index_assign * (_tb_tgt["priority"] == 0))
-    N_P1 = sum(index_assign * (_tb_tgt["priority"] == 1))
-    N_P2 = sum(index_assign * (_tb_tgt["priority"] == 2))
-    N_P3 = sum(index_assign * (_tb_tgt["priority"] == 3))
-    N_P4 = sum(index_assign * (_tb_tgt["priority"] == 4))
-    N_P5 = sum(index_assign * (_tb_tgt["priority"] == 5))
-    N_P6 = sum(index_assign * (_tb_tgt["priority"] == 6))
-    N_P7 = sum(index_assign * (_tb_tgt["priority"] == 7))
-    N_P8 = sum(index_assign * (_tb_tgt["priority"] == 8))
-    N_P9 = sum(index_assign * (_tb_tgt["priority"] == 9))
-    N_P999 = sum(index_assign * (_tb_tgt["priority"] == 999))
+    priority_values = np.asarray(_tb_tgt["priority"])
+    tracked_priorities = list(range(10)) + [999] # track priorities 0-9 and 999 (observed targets)
+    assigned_counts = {}
+    total_counts = {}
+    for priority in tracked_priorities:
+        priority_mask = priority_values == priority
+        assigned_counts[priority] = int(np.sum(assigned_mask & priority_mask))
+        total_counts[priority] = int(np.sum(priority_mask))
 
-    N_P0_ = sum((_tb_tgt["priority"] == 0))
-    N_P1_ = sum((_tb_tgt["priority"] == 1))
-    N_P2_ = sum((_tb_tgt["priority"] == 2))
-    N_P3_ = sum((_tb_tgt["priority"] == 3))
-    N_P4_ = sum((_tb_tgt["priority"] == 4))
-    N_P5_ = sum((_tb_tgt["priority"] == 5))
-    N_P6_ = sum((_tb_tgt["priority"] == 6))
-    N_P7_ = sum((_tb_tgt["priority"] == 7))
-    N_P8_ = sum((_tb_tgt["priority"] == 8))
-    N_P9_ = sum((_tb_tgt["priority"] == 9))
-    N_P999_ = sum((_tb_tgt["priority"] == 999))
-
-    N_Pall = len(lst_tgtID_assign)
+    n_assigned_total = len(assigned_target_ids)
+    priority_summary = ", ".join(
+        f"N{priority} = {assigned_counts[priority]}/{total_counts[priority]}"
+        for priority in tracked_priorities
+    )
 
     print(
-        f"{ra}, {dec}, {pa}, {N_Pall}/{len(_tb_tgt)}, {N_P0}/{N_P0_}, {N_P1}/{N_P1_}, {N_P2}/{N_P2_}, {N_P3}/{N_P3_}, {N_P4}/{N_P4_}, {N_P5}/{N_P5_}, {N_P6}/{N_P6_}, {N_P7}/{N_P7_}, {N_P8}/{N_P8_}, {N_P9}/{N_P9_}, {N_P999}/{N_P999_}"
+        f"{ppc_ra}, {ppc_dec}, {ppc_pa}, "
+        f"Nall = {n_assigned_total}/{len(_tb_tgt)}, {priority_summary}"
     )
 
     # Define weights: you can adjust these based on your priorities.
@@ -968,254 +1027,176 @@ def objective1(params, _tb_tgt):
 
     # We want to maximize the weighted sum; since the optimizer minimizes,
     # we return the negative of the weighted sum.
-    score = weight_pall * N_Pall + weight_p0 * N_P0 + weight_p999 * N_P999
+    score = (
+        weight_pall * n_assigned_total
+        + weight_p0 * assigned_counts[0] # assigned targets with priority 0
+        + weight_p999 * assigned_counts[999] # assigned targets with priority 999 (already observed)
+    )
     return -score
 
 
-def PPP_centers(
-    _tb_tgt, nPPC, weight_para=[3, 0, 0], randomseed=0, mutiPro=True, backup=False
-):
-    # determine pointing centers
-    time_start = time.time()
-    logger.info("[S2] Determine pointing centers started")
-
-    ppc_lst = []
-
-    if len(_tb_tgt) == 0:
-        logger.warning(f"[S2] no targets")
-        return np.array(ppc_lst), Table()
-
-    if nPPC == 0:
-        logger.warning(f"[S2] no PPC to be determined")
-        return np.array(ppc_lst), Table()
-
+def _prepare_tb_tgt_for_ppc(_tb_tgt, weight_params):
+    # Recompute the target ranking metrics used by clustering and PPC scoring.
+    science_weight, exposure_weight, density_weight = weight_params
     _tb_tgt = rank_recalculate(_tb_tgt)
     _tb_tgt = count_local_number(_tb_tgt)
-    para_sci, para_exp, para_n = weight_para
-    _tb_tgt = weight(_tb_tgt, para_sci, para_exp, para_n)
+    _tb_tgt = weight(_tb_tgt, science_weight, exposure_weight, density_weight)
 
-    single_exptime_ = _tb_tgt.meta["single_exptime"]
+    return _tb_tgt
 
-    _tb_tgt_ = _tb_tgt[_tb_tgt["exptime_PPP"] > 0]
 
-    pslID_ = sorted(set(_tb_tgt_["proposal_id"]))
+def _select_tb_tgt_remaining(_tb_tgt, proposal_ids=None):
+    # Build the current working subset from the single source-of-truth target table.
+    tb_tgt_remaining = _tb_tgt[_tb_tgt["exptime_PPP"] > 0]
 
-    FH_goal = [
-        _tb_tgt_["allocated_time"][_tb_tgt_["proposal_id"] == tt][0] for tt in pslID_
+    if proposal_ids is not None:
+        tb_tgt_remaining = tb_tgt_remaining[
+            np.isin(tb_tgt_remaining["proposal_id"], proposal_ids)
+        ]
+
+    return tb_tgt_remaining
+
+
+def _initialize_tb_proposal_progress(_tb_tgt):
+    # Initialize proposal-level FH accounting for the PPC search loop.
+    tb_tgt_remaining = _select_tb_tgt_remaining(_tb_tgt)
+    proposal_ids = sorted(set(tb_tgt_remaining["proposal_id"]))
+    proposal_fh_goal = [
+        tb_tgt_remaining["allocated_time"][tb_tgt_remaining["proposal_id"] == proposal_id][0]
+        for proposal_id in proposal_ids
     ]
 
-    tb_fh = Table([pslID_, FH_goal], names=["proposal_id", "FH_goal"])
-    tb_fh["FH_done"] = 0.0
-    tb_fh["N_done"] = 0.0
-    tb_fh["N_obs"] = 0.0
-    tb_fh["N_psl"] = 0.0
+    tb_proposal_progress = Table(
+        [proposal_ids, proposal_fh_goal], names=["proposal_id", "FH_goal"]
+    )
+    tb_proposal_progress["FH_done"] = 0.0
+    tb_proposal_progress["N_done"] = 0.0
+    tb_proposal_progress["N_obs"] = 0.0
+    tb_proposal_progress["N_psl"] = 0.0
 
-    while (
-        (
-            sum((tb_fh["FH_done"] >= tb_fh["FH_goal"]) * (tb_fh["N_done"] > 0.0))
-            < len(tb_fh)
+    return tb_proposal_progress, proposal_fh_goal
+
+
+def _sample_tb_tgt_rows(tb_tgt_input, max_rows, rng):
+    # Sample rows directly from the Astropy table to avoid pandas conversion.
+    if len(tb_tgt_input) <= max_rows:
+        return tb_tgt_input
+
+    sample_indices = rng.choice(len(tb_tgt_input), size=max_rows, replace=False)
+    return tb_tgt_input[np.sort(sample_indices)]
+
+
+def _select_ppc_seed(tb_tgt_remaining, rng, use_multiprocessing):
+    # Cluster the sky distribution, then use KDE on the top cluster for the initial PPC guess.
+    tb_tgt_groups = target_clustering(tb_tgt_remaining, 1.38)
+    tb_tgt_group_primary = tb_tgt_groups[0]
+    tb_tgt_group_sampled = _sample_tb_tgt_rows(tb_tgt_group_primary, 200, rng)
+
+    _, _, _, initial_ra, initial_dec = KDE(tb_tgt_group_sampled, use_multiprocessing)
+
+    return tb_tgt_group_primary, initial_ra, initial_dec
+
+
+def _calculate_tb_tgt_credit_seconds(tb_tgt_assigned):
+    # Cap credited FH at the requested exposure once exptime_done exceeds exptime.
+    requested_exptime = np.asarray(tb_tgt_assigned["exptime"], dtype=float)
+    exptime_done = np.asarray(tb_tgt_assigned["exptime_done"], dtype=float)
+    credited_exptime = exptime_done.copy()
+    overdone_mask = exptime_done > requested_exptime
+    credited_exptime[overdone_mask] = requested_exptime[overdone_mask]
+
+    return credited_exptime
+
+
+def _calculate_fh_done_by_proposal(_tb_tgt):
+    # Recompute credited FH directly from the current exptime_done state.
+    credited_exptime = _calculate_tb_tgt_credit_seconds(_tb_tgt)
+    proposal_ids = np.asarray(_tb_tgt["proposal_id"], dtype=str)
+    unique_proposal_ids, inverse_indices = np.unique(proposal_ids, return_inverse=True)
+    credited_fh = np.bincount(inverse_indices, weights=credited_exptime) / 3600.0
+
+    return {
+        proposal_id: fh_done
+        for proposal_id, fh_done in zip(unique_proposal_ids, credited_fh)
+    }
+
+
+def _summarize_tb_tgt_assignment(_tb_tgt, tb_tgt_assigned_mask):
+    # Summarize the newly assigned targets for PPC bookkeeping.
+    tb_tgt_assigned = _tb_tgt[tb_tgt_assigned_mask]
+    assigned_credit_seconds = _calculate_tb_tgt_credit_seconds(tb_tgt_assigned)
+    total_assigned_weight = float(np.sum(np.asarray(tb_tgt_assigned["rank_fin"], dtype=float)))
+
+    proposal_ids = np.asarray(tb_tgt_assigned["proposal_id"], dtype=str)
+    unique_proposal_ids, inverse_indices = np.unique(proposal_ids, return_inverse=True)
+    credited_fh = np.bincount(inverse_indices, weights=assigned_credit_seconds) / 3600.0
+    assigned_fh_by_proposal = {
+        proposal_id: fh_done
+        for proposal_id, fh_done in zip(unique_proposal_ids, credited_fh)
+    }
+
+    return tb_tgt_assigned, assigned_credit_seconds, total_assigned_weight, assigned_fh_by_proposal
+
+
+def _update_tb_proposal_progress(
+    tb_proposal_progress,
+    _tb_tgt,
+):
+    # Update proposal-level completion metrics after one PPC assignment.
+    fh_done_by_proposal = _calculate_fh_done_by_proposal(_tb_tgt)
+
+    for proposal_id in tb_proposal_progress["proposal_id"]:
+        proposal_progress_mask = tb_proposal_progress["proposal_id"] == proposal_id
+        proposal_mask = _tb_tgt["proposal_id"] == proposal_id
+
+        tb_proposal_progress["N_psl"].data[proposal_progress_mask] = np.sum(
+            proposal_mask
         )
-        and len(_tb_tgt_) > 0
-        and len(ppc_lst) < nPPC
-    ):
-        psl_id_undone = list(
-            set(
-                tb_fh["proposal_id"][
-                    (tb_fh["FH_done"] < tb_fh["FH_goal"]) | (tb_fh["N_done"] == 0.0)
-                ]
-            )
+        tb_proposal_progress["FH_done"].data[proposal_progress_mask] = fh_done_by_proposal.get(
+            proposal_id, 0.0
         )
-        if psl_id_undone:
-            undone_str = ", ".join(map(str, psl_id_undone))
-            print("-----------------------------------------")
-            print(f"The non-complete proposals: {undone_str}")
-        else:
-            print("All proposals complete.")
-
-        _tb_tgt_ = _tb_tgt_[
-            (_tb_tgt_["exptime_PPP"] > 0)
-            * np.isin(_tb_tgt_["proposal_id"], psl_id_undone)
-        ]  # targets not finished
-        _tb_tgt_["priority"][_tb_tgt_["exptime_done"] > 0] = 999
-
-        tb_tgt_t_group = target_clustering(_tb_tgt_, 1.38)
-
-        _tb_tgt_t_ = tb_tgt_t_group[0]
-
-        #"""
-        _df_tgt_t = Table.to_pandas(_tb_tgt_t_)
-        n_tgt = min(200, len(_tb_tgt_t_))
-        _df_tgt_t = _df_tgt_t.sample(n_tgt, ignore_index=True, random_state=1)
-        _tb_tgt_t_1 = Table.from_pandas(_df_tgt_t)  
-
-        _, _, _, peak_x, peak_y = KDE(_tb_tgt_t_1, False)
-
-        #"""
-
-        #initial_guess = [_tb_tgt_t_["ra"][0], _tb_tgt_t_["dec"][0]]
-        initial_guess = [peak_x, peak_y]
-        result = minimize(
-            objective1,
-            initial_guess,
-            args=(_tb_tgt_t_,),
-            method="Nelder-Mead",
-            options={
-                "xatol": 0.1,
-                "fatol": 0.1,
-                "maxiter": 25,   # stop early
-                "maxfev": 25,   # limit function evaluations
-            },
+        tb_proposal_progress["N_done"].data[proposal_progress_mask] = np.sum(
+            _tb_tgt["exptime_PPP"][proposal_mask] <= 0
         )
-        print(f"The optimal PPC center: {result.x}")
-        ppc_ra_, ppc_dec_ = result.x[0], result.x[1]
-        ppc_pa_ = 0.0
-
-        #index_ = PFS_FoV(ppc_ra_, ppc_dec_, ppc_pa_, _tb_tgt_)
-
-        lst_tgtID_assign = netflowRun4PPC(
-            #_tb_tgt_[list(index_)], ppc_ra_, ppc_dec_, ppc_pa_
-            _tb_tgt_, ppc_ra_, ppc_dec_, ppc_pa_
+        tb_proposal_progress["N_obs"].data[proposal_progress_mask] = np.sum(
+            _tb_tgt["exptime_PPP"][proposal_mask] < _tb_tgt["exptime"][proposal_mask]
         )
 
-        iter_tem = 0
-        while len(lst_tgtID_assign) == 0 and iter_tem < 2:
-            ppc_ra_ += np.random.uniform(-0.15, 0.15, 1)[0]
-            ppc_dec_ += np.random.uniform(-0.15, 0.15, 1)[0]
-            lst_tgtID_assign = netflowRun4PPC(
-                _tb_tgt_[list(index_)],
-                ppc_ra_,
-                ppc_dec_,
-                ppc_pa_,
-                otime="2026-01-10T10:00:00Z",
-            )
-            iter_tem += 1
 
-        index_assign = np.isin(_tb_tgt_["identify_code"], lst_tgtID_assign)
-        weight_tem_tot = sum(_tb_tgt_["rank_fin"][index_assign])
+def _build_ppc_list_table(final_ppc_records, _tb_tgt, backup):
+    # Convert the legacy PPC record array into the output table used downstream.
+    ppc_weights = final_ppc_records[:, 4]
+    weight_for_qplan = np.arange(1, len(final_ppc_records) + 1, dtype=int)
 
-        lst_pslID_assign = [ii.split("_")[0] for ii in lst_tgtID_assign]
-        pslID_ = sorted(set(lst_pslID_assign))
-        pslID_n = {
-            tt: lst_pslID_assign.count(tt) * single_exptime_ / 3600.0 for tt in pslID_
-        }
-
-        print(f"{ppc_ra_}, {ppc_dec_}, {len(lst_pslID_assign)}")
-
-        ppc_lst.append(
-            np.array(
-                [
-                    len(ppc_lst),
-                    ppc_ra_,
-                    ppc_dec_,
-                    ppc_pa_,
-                    weight_tem_tot,
-                    sum(pslID_n.values()) / sum(FH_goal),
-                    len(lst_pslID_assign) / 2394.0,
-                    lst_tgtID_assign,
-                ],
-                dtype=object,
-            ),
-        )
-        # ppc_id, ppc_ra, ppc_dec, ppc_pa, ppc_weight, ppc_fh, ppc_FE
-
-        _tb_tgt_["exptime_PPP"][
-            index_assign
-        ] -= single_exptime_  # targets in the PPC observed with single_exptime sec
-
-        _tb_tgt_["exptime_done"][index_assign] += single_exptime_
-
-        _tb_tgt_["priority"][_tb_tgt_["exptime_done"] > 0] = 999
-
-        for tt in list(pslID_n.keys()):
-            tb_fh["N_psl"].data[tb_fh["proposal_id"] == tt] = sum(
-                _tb_tgt["proposal_id"] == tt
-            )
-            tb_fh["FH_done"].data[tb_fh["proposal_id"] == tt] += pslID_n[tt]
-            tb_fh["N_done"].data[tb_fh["proposal_id"] == tt] += sum(
-                (_tb_tgt_["exptime_PPP"] <= 0) * (_tb_tgt_["proposal_id"] == tt)
-            )
-            tb_fh["N_obs"].data[tb_fh["proposal_id"] == tt] = sum(
-                (_tb_tgt_["exptime_PPP"] < _tb_tgt_["exptime"])
-                * (_tb_tgt_["proposal_id"] == tt)
-            )
-
-        n_uncom1 = sum(_tb_tgt_["exptime_done"] > 0)
-        _tb_tgt_ = _tb_tgt_[_tb_tgt_["exptime_PPP"] > 0]  # targets not finished
-        n_uncom2 = sum(_tb_tgt_["exptime_done"] > 0)
-
-        print(
-            f"PPC_{len(ppc_lst):3d}: {len(_tb_tgt)-len(_tb_tgt_):5d}/{len(_tb_tgt):10d} targets are finished (w={weight_tem_tot:.2f}). (partial = {n_uncom1}, {n_uncom2})"
-        )
-        Table.pprint_all(tb_fh)
-
-    if len(ppc_lst) > nPPC:
-        ppc_lst_fin = sorted(ppc_lst, key=lambda x: x[4], reverse=True)[:nPPC]
-
-    else:
-        ppc_lst_fin = ppc_lst[:]
-
-    #ppc_lst_fin = np.array(ppc_lst_fin)
-    #epsilon = 1e-3  # small number to avoid divide-by-zero
-    #col = np.where(ppc_lst_fin[:, 4] == 0, epsilon, ppc_lst_fin[:, 4])
-    #recip = 1 / col
-    #weight_for_qplan = 1000.0 #(recip / recip.max()) * 1000.0
-
-    ppc_lst_fin = np.asarray(ppc_lst_fin, dtype=object)
-
-    if ppc_lst_fin.ndim == 1:
-        # single PPC → force row shape
-        ppc_lst_fin = ppc_lst_fin.reshape(1, -1)
-    
-    v = ppc_lst_fin[:, 4]   # unchanged
-    order = np.argsort(-v)  # descending importance
-    weight_for_qplan = np.empty(len(v), dtype=int)
-    weight_for_qplan[order] = np.arange(1, len(v) + 1)
-
-    # write
-    nPPC = len(ppc_lst_fin)
-    resol = _tb_tgt["resolution"][0]
-
-    #if resol == "M":
-    #    weight_for_qplan = np.linspace(2.0, 10.0, nPPC) # FIX needed!!
+    n_ppc_final = len(final_ppc_records)
+    resolution = _tb_tgt["resolution"][0]
 
     if backup:
-        ppc_code = [
-            f"que_{resol}_{datetime.now().strftime('%y%m%d')}_{int(nn + 1)}_backup"
-            for nn in range(nPPC)
+        ppc_codes = [
+            f"que_{resolution}_{datetime.now().strftime('%y%m%d')}_{int(index + 1)}_backup"
+            for index in range(n_ppc_final)
         ]
     else:
-        ppc_code = [
-            f"que_{resol}_{datetime.now().strftime('%y%m%d')}_{int(nn + 1)}"
-            for nn in range(nPPC)
+        ppc_codes = [
+            f"que_{resolution}_{datetime.now().strftime('%y%m%d')}_{int(index + 1)}"
+            for index in range(n_ppc_final)
         ]
-    ppc_ra = ppc_lst_fin[:, 1]
-    ppc_dec = ppc_lst_fin[:, 2]
-    ppc_pa = ppc_lst_fin[:, 3]
-    ppc_equinox = ["J2000"] * nPPC
-    ppc_priority = weight_for_qplan
-    ppc_priority_usr = weight_for_qplan
-    ppc_exptime = [900.0] * nPPC
-    ppc_totaltime = [1200.0] * nPPC
-    ppc_resolution = [resol] * nPPC
-    ppc_fibAlloFrac = ppc_lst_fin[:, -2]
-    ppc_tgtAllo = ppc_lst_fin[:, -1]
-    ppc_comment = [""] * nPPC
 
-    ppcList = Table(
+    return Table(
         [
-            ppc_code,
-            ppc_ra,
-            ppc_dec,
-            ppc_pa,
-            ppc_equinox,
-            ppc_priority,
-            ppc_priority_usr,
-            ppc_exptime,
-            ppc_totaltime,
-            ppc_resolution,
-            ppc_fibAlloFrac,
-            ppc_tgtAllo,
-            ppc_comment,
+            ppc_codes,
+            final_ppc_records[:, 1],
+            final_ppc_records[:, 2],
+            final_ppc_records[:, 3],
+            ["J2000"] * n_ppc_final,
+            weight_for_qplan,
+            ppc_weights,
+            [900.0] * n_ppc_final,
+            [1200.0] * n_ppc_final,
+            [resolution] * n_ppc_final,
+            final_ppc_records[:, -2],
+            final_ppc_records[:, -1],
+            [""] * n_ppc_final,
         ],
         names=[
             "ppc_code",
@@ -1249,249 +1230,336 @@ def PPP_centers(
         ],
     )
 
+
+def PPP_centers(
+    _tb_tgt,
+    n_ppc,
+    weight_params=[2, 0, 0],
+    random_seed=0,
+    use_multiprocessing=True,
+    backup=False,
+    fixed_ppc_pa=0.0,
+):
+    """Determine PPC centers from the remaining target sample.
+
+    The optimizer only searches in RA/Dec. The PPC position angle is kept fixed
+    through ``fixed_ppc_pa`` and passed to the evaluator unchanged.
+    """
+    start_time = time.time()
+    rng = np.random.default_rng(random_seed)
+    logger.info("[S2] Determine pointing centers started")
+
+    ppc_records = []
+
+    # If there are no targets or no PPC to be determined, skip the optimization and return empty results.
+    if len(_tb_tgt) == 0:
+        logger.warning(f"[S2] no targets")
+        return np.array(ppc_records), Table()
+
+    # If the number of PPC to be determined is set to zero, skip the optimization and return empty results.
+    if n_ppc == 0:
+        logger.warning(f"[S2] no PPC to be determined")
+        return np.array(ppc_records), Table()
+
+    single_exptime = _tb_tgt.meta["single_exptime"]
+
+    # Recompute the target weights and proposal-level FH goals based on the current state of the source-of-truth table.
+    _tb_tgt = _prepare_tb_tgt_for_ppc(_tb_tgt, weight_params) 
+
+    # Set up the proposal progress tracking table to monitor completion status during the PPC search loop
+    tb_proposal_progress, proposal_fh_goal = _initialize_tb_proposal_progress(_tb_tgt)
+    total_fh_goal = float(np.sum(proposal_fh_goal))
+
+    # Keep only incomplete targets and proposals.
+    incomplete_proposal_ids = list(tb_proposal_progress["proposal_id"])
+    tb_tgt_remaining = _select_tb_tgt_remaining(_tb_tgt, incomplete_proposal_ids)
+
+    while (
+        (
+            sum(
+                (tb_proposal_progress["FH_done"] >= tb_proposal_progress["FH_goal"])
+                * (tb_proposal_progress["N_done"] > 0.0)
+            )
+            < len(tb_proposal_progress)
+        )
+        and len(tb_tgt_remaining) > 0
+        and len(ppc_records) < n_ppc
+    ):
+        if incomplete_proposal_ids:
+            undone_str = ", ".join(map(str, incomplete_proposal_ids))
+            print("-----------------------------------------")
+            print(f"The non-complete proposals: {undone_str}")
+        else:
+            print("All proposals complete.")
+
+        # Comfirm partial observed targets are prioritized in the PPC optimization by setting their priority to 999.
+        _tb_tgt["priority"][_tb_tgt["exptime_done"] > 0] = 999
+
+        # Group targets to save running time. The top cluster is used to determine the initial PPC center for optimization.
+        tb_tgt_group_primary, initial_ra, initial_dec = _select_ppc_seed(
+            tb_tgt_remaining, rng, use_multiprocessing
+        )
+
+        # Optimize only the PPC center; keep position angle fixed.
+        initial_ppc = [initial_ra, initial_dec]
+        optimization_result = minimize(
+            objective_ppc_assignment,
+            initial_ppc,
+            args=(tb_tgt_group_primary, fixed_ppc_pa),
+            method="Nelder-Mead",
+            options={
+                "xatol": 0.1,
+                "fatol": 0.1,
+                "maxiter": 25, # limit the number of function evaluations to 25
+                "maxfev": 25, # set maxfev to 25 to ensure the optimization stops after 25 evaluations even if it hasn't converged yet
+            },
+        )
+        print(f"The optimal PPC center: {optimization_result.x}")
+        best_ppc_ra, best_ppc_dec = optimization_result.x[0], optimization_result.x[1]
+        best_ppc_pa = fixed_ppc_pa
+
+        assigned_target_ids = fiber_allocate(
+            tb_tgt_remaining,
+            single_ppc_mode=True,
+            ppc_candidate=(best_ppc_ra, best_ppc_dec, best_ppc_pa),
+        )
+
+        # Retry a couple of small center shifts if the first netflow attempt allocates no targets.
+        retry_count = 0
+        while len(assigned_target_ids) == 0 and retry_count < 2:
+            best_ppc_ra += rng.uniform(-0.15, 0.15)
+            best_ppc_dec += rng.uniform(-0.15, 0.15)
+            assigned_target_ids = fiber_allocate(
+                tb_tgt_remaining,
+                single_ppc_mode=True,
+                ppc_candidate=(best_ppc_ra, best_ppc_dec, best_ppc_pa),
+                observation_time="2026-01-10T10:00:00Z",
+            )
+            retry_count += 1
+
+        # Update exptime_PPP and exptime_done and FH in tb_tgt for the assigned targets
+        tb_tgt_assigned_mask = np.isin(_tb_tgt["identify_code"], assigned_target_ids)
+        # Consume one full frame in assigned time, while FH accounting stays capped by exptime.
+        _tb_tgt["exptime_PPP"][tb_tgt_assigned_mask] -= single_exptime
+        _tb_tgt["exptime_done"][tb_tgt_assigned_mask] += single_exptime
+        _tb_tgt["priority"][_tb_tgt["exptime_done"] > 0] = 999
+
+        (
+            tb_tgt_assigned,
+            assigned_credit_seconds,
+            total_assigned_weight,
+            assigned_fh_by_proposal,
+        ) = _summarize_tb_tgt_assignment(_tb_tgt, tb_tgt_assigned_mask)
+
+        print(f"{best_ppc_ra}, {best_ppc_dec}, {len(tb_tgt_assigned)}")
+
+        # Store PPC metadata in the legacy array layout expected by downstream code.
+        ppc_records.append(
+            np.array(
+                [
+                    len(ppc_records),
+                    best_ppc_ra,
+                    best_ppc_dec,
+                    best_ppc_pa,
+                    total_assigned_weight,
+                    sum(assigned_fh_by_proposal.values()) / total_fh_goal,
+                    len(tb_tgt_assigned) / 2394.0,
+                    assigned_target_ids,
+                ],
+                dtype=object,
+            ),
+        )
+
+        # Update the proposal progress tracking table and the working target subset for the next iteration of the PPC search loop.
+        proposal_mask = np.isin(_tb_tgt["proposal_id"], incomplete_proposal_ids)
+        n_partially_observed_before_filter = sum(
+            (_tb_tgt["exptime_done"] > 0) * proposal_mask
+        )
+
+        _update_tb_proposal_progress(
+            tb_proposal_progress,
+            _tb_tgt,
+        )
+
+        incomplete_proposal_ids = list(
+            set(
+                tb_proposal_progress["proposal_id"][
+                    (tb_proposal_progress["FH_done"] < tb_proposal_progress["FH_goal"])
+                    | (tb_proposal_progress["N_done"] == 0.0)
+                ]
+            )
+        )
+        tb_tgt_remaining = _select_tb_tgt_remaining(_tb_tgt, incomplete_proposal_ids)
+        n_partially_observed_after_filter = sum(tb_tgt_remaining["exptime_done"] > 0)
+
+        print(
+            f"PPC_{len(ppc_records):3d}: {len(_tb_tgt)-len(tb_tgt_remaining):5d}/{len(_tb_tgt):10d} targets are finished (w={total_assigned_weight:.2f}). (partial = {n_partially_observed_before_filter}, {n_partially_observed_after_filter})"
+        )
+        Table.pprint_all(tb_proposal_progress)
+
+    # Reformat the PPC records and build the output table for the final set of PPC centers.
+    if len(ppc_records) == 0:
+        logger.warning("[S2] No valid PPC centers were determined")
+        return np.array(ppc_records), Table()
+    elif len(ppc_records) > n_ppc:
+        final_ppc_records = sorted(ppc_records, key=lambda x: x[4], reverse=True)[:n_ppc]
+    else:
+        final_ppc_records = sorted(ppc_records, key=lambda x: x[4], reverse=True)
+
+    final_ppc_records = np.asarray(final_ppc_records, dtype=object)
+
+    if final_ppc_records.ndim == 1:
+        # Preserve a 2D shape when only one PPC was generated.
+        final_ppc_records = final_ppc_records.reshape(1, -1)
+    else:
+        sort_order = np.argsort(-np.asarray(final_ppc_records[:, 4], dtype=float))
+        final_ppc_records = final_ppc_records[sort_order]
+
+    ppc_list_table = _build_ppc_list_table(final_ppc_records, _tb_tgt, backup)
+
     logger.info(
-        f"[S2] Determine pointing centers done ( nppc = {len(ppc_lst_fin):.0f}; takes {round(time.time()-time_start,3)} sec)"
+        f"[S2] Determine pointing centers done ( nppc = {len(final_ppc_records):.0f}; takes {round(time.time()-start_time,3)} sec)"
     )
 
-    return ppc_lst_fin, ppcList
+    return final_ppc_records, ppc_list_table
 
 
-def ppc_DBSCAN(_tb_tgt):
-    # separate pointings into different group (skip due to FH upper limit -24-02-07; NEED TO FIX)
-    ppc_xy = _tb_tgt.meta["PPC"]
-    """
-    # haversine uses (dec,ra) in radian;
-    ppc_cluster = DBSCAN(eps=np.radians(1.38), min_samples=1, metric="haversine").fit(
-        np.fliplr(np.radians(ppc_xy[:, [1, 2]]))
-    )
+def build_netflow_targets(tb_tgt, for_single_ppc=False):
+    # Convert the target table into the netflow target list and FH budget bundle.
+    #
+    # When evaluating a single PPC candidate, every target is passed to netflow
+    # with one single exposure.
+    netflow_targets = []
+    proposal_class_keys = []
+    single_exptime = tb_tgt.meta["single_exptime"]
+    exposure_column = "exptime_PPP"
+    use_cobra_feature_flag = tb_tgt.meta.get("cobra_feature_flag", True)
 
-    labels = ppc_cluster.labels_
-    unique_labels = set(labels)
-    n_clusters = len(unique_labels)
-
-    logger.info(f"[S3] There are {len(ppc_xy):5d} pointings, they are grouped into {n_clusters:5d} clusters.")
-
-    for ii in range(n_clusters):
-        ppc_t = ppc_xy[labels == ii]
-        ppc_group.append(ppc_t)
-
-    ppc_group.sort(key=lambda x: len(x), reverse=True)
-    #"""
-
-    return np.array([ppc_xy])
-
-
-def sam2netflow(_tb_tgt, for_ppc=False):
-    # put targets to the format which can be read by netflow
-    tgt_lst_netflow = []
-    _tgt_lst_psl_id = []
-    single_exptime_ = _tb_tgt.meta["single_exptime"]
-
-    int_ = 0
-    for tt in _tb_tgt:
-        if for_ppc:
-            # set exptime = single_exptime_ if running netflow to determine PPC
-            tgt_id_, tgt_ra_, tgt_dec_, tgt_exptime_, tgt_proposal_id_, tgt_pri_, ref_arm_ = (
-                tt["identify_code"],
-                tt["ra"],
-                tt["dec"],
-                single_exptime_,
-                tt["proposal_id"],
-                int(tt["priority"]),
-                tt["qa_reference_arm"],
-            )
-        else:
-            tgt_id_, tgt_ra_, tgt_dec_, tgt_exptime_, tgt_proposal_id_, tgt_pri_, ref_arm_ = (
-                tt["identify_code"],
-                tt["ra"],
-                tt["dec"],
-                tt["exptime_PPP"],
-                tt["proposal_id"],
-                int(tt["priority"]),
-                tt["qa_reference_arm"],
-            )
-        """  
-        tgt_lst_netflow.append(
-            nf.ScienceTarget(
-                tgt_id_,
-                tgt_ra_,
-                tgt_dec_,
-                tgt_exptime_,
-                int_,
-                "sci_" + tgt_proposal_id_,
-            )
+    for tb_tgt_row in tb_tgt:
+        target_exptime = (
+            single_exptime if for_single_ppc else tb_tgt_row[exposure_column]
         )
-        _tgt_lst_psl_id.append("sci_" + tgt_proposal_id_ + "_P" + str(int(int_)))
-        int_ += 1
-        #"""
+        target_priority = int(tb_tgt_row["priority"])
+        qa_reference_arm = tb_tgt_row["qa_reference_arm"]
 
-        if ref_arm_ == "n":
-            req_flags_ = 0 # targets requesting NIR
-        else:
-            req_flags_ = 1 # targets no requesting NIR
+        # Module-2 cobras cannot provide NIR, so NIR targets must carry the
+        # special netflow request flag.
+        request_flags = 0
+        if use_cobra_feature_flag:
+            request_flags = 0 if qa_reference_arm == "n" else 1
 
-        tgt_lst_netflow.append(
+        netflow_targets.append(
             nf.ScienceTarget(
-                tgt_id_,
-                tgt_ra_,
-                tgt_dec_,
-                tgt_exptime_,
-                tgt_pri_,
+                tb_tgt_row["identify_code"],
+                tb_tgt_row["ra"],
+                tb_tgt_row["dec"],
+                target_exptime,
+                target_priority,
                 "sci",
-                req_flags=req_flags_,
+                req_flags=request_flags,
             )
         )
-        _tgt_lst_psl_id.append("sci_P" + str(int(tgt_pri_)))
+        proposal_class_keys.append(f"sci_P{target_priority}")
 
-    # set FH limit bundle
-    tgt_psl_FH_tac_ = {}
+    # Keep the proposal FH budget bundle in the legacy format expected by the
+    # downstream netflow setup.
+    proposal_fh_limits = {}
 
-    #'''
-    if not for_ppc:
-        psl_id = sorted(set(_tb_tgt["proposal_id"]))
+    if not for_single_ppc:
+        proposal_ids = sorted(set(tb_tgt["proposal_id"]))
 
-        for psl_id_ in psl_id:
-            tt_ = tuple([tt for tt in _tgt_lst_psl_id if psl_id_ in tt])
-            fh_ = _tb_tgt[_tb_tgt["proposal_id"] == psl_id_]["allocated_time"][0]
-            tgt_psl_FH_tac_[tt_] = fh_
+        for proposal_id in proposal_ids:
+            class_key_bundle = tuple(
+                class_key for class_key in proposal_class_keys if proposal_id in class_key
+            )
+            fh_limit = tb_tgt[tb_tgt["proposal_id"] == proposal_id]["allocated_time"][0]
+            proposal_fh_limits[class_key_bundle] = fh_limit
 
-            print(f"{psl_id_}: FH_limit = {tgt_psl_FH_tac_[tt_]:.2f}")
-    #'''
+            print(f"{proposal_id}: FH_limit = {proposal_fh_limits[class_key_bundle]:.2f}")
 
-    return tgt_lst_netflow, tgt_psl_FH_tac_
+    return netflow_targets, proposal_fh_limits
 
 
-def NetflowPreparation(_tb_tgt):
-    """
-    # assign cost to each target
-    classdict = {}
-
-    int_ = 0
-    for tt in _tb_tgt:
-        classdict["sci_" + tt["proposal_id"] + "_P" + str(int_)] = {
-            "nonObservationCost": tt["weight"],
-            "partialObservationCost": tt["weight"] * 1.5,
-            "calib": False,
-        }
-        int_ += 1
-    #"""
-    classdict = {
-        # Priorities correspond to the magnitudes of bright stars (in most case for the 2022 June Engineering)
-        "sci_P999": {
-            "nonObservationCost": 200,
-            "partialObservationCost": 200,
-            "calib": False,
-        },
-        "sci_P0": {
-            "nonObservationCost": 100,
-            "partialObservationCost": 200,
-            "calib": False,
-        },
-        "sci_P1": {
-            "nonObservationCost": 90,
-            "partialObservationCost": 200,
-            "calib": False,
-        },
-        "sci_P2": {
-            "nonObservationCost": 80,
-            "partialObservationCost": 200,
-            "calib": False,
-        },
-        "sci_P3": {
-            "nonObservationCost": 70,
-            "partialObservationCost": 200,
-            "calib": False,
-        },
-        "sci_P4": {
-            "nonObservationCost": 60,
-            "partialObservationCost": 200,
-            "calib": False,
-        },
-        "sci_P5": {
-            "nonObservationCost": 50,
-            "partialObservationCost": 200,
-            "calib": False,
-        },
-        "sci_P6": {
-            "nonObservationCost": 40,
-            "partialObservationCost": 200,
-            "calib": False,
-        },
-        "sci_P7": {
-            "nonObservationCost": 30,
-            "partialObservationCost": 200,
-            "calib": False,
-        },
-        "sci_P8": {
-            "nonObservationCost": 20,
-            "partialObservationCost": 200,
-            "calib": False,
-        },
-        "sci_P9": {
-            "nonObservationCost": 10,
-            "partialObservationCost": 200,
-            "calib": False,
-        },
-        "cal": {
-            "numRequired": 200,
-            "nonObservationCost": 200,
-            "calib": True,
-        },
-        "sky": {
-            "numRequired": 400,
-            "nonObservationCost": 200,
-            "calib": True,
-        },
+def build_classdict():
+    # Build the netflow class-cost mapping used by the optimizer.
+    return {
+        class_key: class_config.copy()
+        for class_key, class_config in _NETFLOW_CLASSDICT_TEMPLATE.items()
     }
 
-    return classdict
 
-
-def cobraMoveCost(dist):
+def cobra_move_cost(dist):
     # optional: penalize assignments where the cobra has to move far out
     return 0.1 * dist
 
 
-def netflowRun_single(
-    ppc_lst,
-    _tb_tgt,
-    TraCollision=False,
-    numReservedFibers=0,
-    fiberNonAllocationCost=0.0,
-    otime="2026-01-10T10:00:00Z",
-    for_ppc=False,
+def _get_cobra_feature_flags():
+    global _COBRA_FEATURE_FLAGS
+
+    if _COBRA_FEATURE_FLAGS is not None:
+        return _COBRA_FEATURE_FLAGS
+
+    from pathlib import Path
+    from pfs.utils.fiberids import FiberIds
+    import pfs.utils
+
+    pfs_utils_path = Path(pfs.utils.__path__[0])
+    fiber_data_path = pfs_utils_path.parent.parent.parent / "data" / "fiberids"
+    if not fiber_data_path.exists():
+        fiber_data_path = pfs_utils_path / "data" / "fiberids"
+
+    cobra_indices_module2 = FiberIds(path=fiber_data_path).cobrasForSpectrograph(
+        spectrographId=2
+    )
+    cobra_indices_module2 = np.asarray(cobra_indices_module2)
+    cobra_indices_module2 = cobra_indices_module2[cobra_indices_module2 <= 2394]
+
+    module2_mask = np.zeros(2394, dtype=bool)
+    module2_mask[cobra_indices_module2] = True
+
+    cobra_feature_flags = np.zeros(2394, dtype=int)
+    cobra_feature_flags[module2_mask] = 1
+    cobra_feature_flags.setflags(write=False)
+    _COBRA_FEATURE_FLAGS = cobra_feature_flags
+
+    return _COBRA_FEATURE_FLAGS
+
+
+def run_netflow(
+    ppc_list,
+    tb_tgt,
+    num_reserved_fibers=0,
+    fiber_non_allocation_cost=0.0,
+    observation_time="2026-01-10T10:00:00Z",
+    for_single_ppc=False,
 ):
-    # run netflow (without iteration)
-    Telra = ppc_lst[:, 1]
-    Teldec = ppc_lst[:, 2]
-    Telpa = ppc_lst[:, 3]
-    Telweight = ppc_lst[:, 4]
+    # Run netflow once for the given PPC list.
+    telescope_ra = ppc_list[:, 1]
+    telescope_dec = ppc_list[:, 2]
+    telescope_pa = ppc_list[:, 3]
 
-    tgt_lst_netflow, tgt_psl_FH_tac = sam2netflow(_tb_tgt, for_ppc)
-    classdict = NetflowPreparation(_tb_tgt)
+    netflow_targets, proposal_fh_limits = build_netflow_targets(
+        tb_tgt, for_single_ppc=for_single_ppc
+    )
+    class_dict = build_classdict()
 
-    telescopes = []
+    telescopes = [
+        nf.Telescope(telescope_ra[index], telescope_dec[index], telescope_pa[index], observation_time)
+        for index in range(len(telescope_ra))
+    ]
+    focal_plane_positions = [
+        telescope.get_fp_positions(netflow_targets) for telescope in telescopes
+    ]
 
-    nvisit = len(Telra)
-    for ii in range(nvisit):
-        telescopes.append(nf.Telescope(Telra[ii], Teldec[ii], Telpa[ii], otime))
-    tpos = [tele.get_fp_positions(tgt_lst_netflow) for tele in telescopes]
-
-    single_exptime_ = _tb_tgt.meta["single_exptime"]
+    n_visit = len(telescope_ra)
+    single_exptime = tb_tgt.meta["single_exptime"]
 
     # optional: slightly increase the cost for later observations,
     # to observe as early as possible
-    vis_cost = [0] * nvisit
-    # positions = {e: i for i, e in enumerate(sorted(Telweight, reverse = True), 0)}
-    # vis_cost = [positions[e] for e in Telweight]
-    # vis_cost_upper = min(_tb_tgt["weight"])*0.3
-    # if len(vis_cost)>1:
-    #    vis_cost = np.array(vis_cost)/max(vis_cost)*vis_cost_upper
-    # else:
-    #    vis_cost = [0]*nvisit
-    # print(vis_cost_upper,vis_cost)
+    visit_costs = [0] * n_visit
 
-    gurobiOptions = dict(
+    # Set up Gurobi parameters for netflow optimization. These can be tuned for performance and solution quality.
+    gurobi_options = dict(
         seed=0,
         presolve=1,
         method=4,
@@ -1502,1219 +1570,507 @@ def netflowRun_single(
         LogToConsole=0,
     )
 
-    forbiddenPairs = [[] for i in range(nvisit)]
-    alreadyObserved = {}
-
-    from pfs.utils.fiberids import FiberIds
-    from pathlib import Path
-    import pfs.utils
-    
-    p = Path(pfs.utils.__path__[0])
-    p_fiberdata = p.parent.parent.parent / "data" / "fiberids"
-    if not p_fiberdata.exists():
-        p_fiberdata = p / "data" / "fiberids"
-    
-    cobra_idx_n2 = FiberIds(path=p_fiberdata).cobrasForSpectrograph(spectrographId=2)
-    cobra_idx_n2 = cobra_idx_n2[cobra_idx_n2<=2394]
-
-    cobra_idx_n2 = np.array(cobra_idx_n2)
-    mask_n2 = np.zeros(2394, dtype=bool)
-    mask_n2[cobra_idx_n2] = True
-    flag_n2 = np.array([0] * 2394)
-    flag_n2[mask_n2] = 1 # cobras of module 2 can not provide NIR
-
-    if TraCollision:
-        done = False
-        while not done:
-            # compute observation strategy
-            prob = nf.buildProblem(
-                bench,
-                tgt_lst_netflow,
-                tpos,
-                classdict,
-                single_exptime_,
-                vis_cost,
-                cobraMoveCost=cobraMoveCost,
-                collision_distance=2.0,
-                elbow_collisions=True,
-                gurobi=True,
-                gurobiOptions=gurobiOptions,
-                alreadyObserved=alreadyObserved,
-                forbiddenPairs=forbiddenPairs,
-                cobraLocationGroup=cobra_location_group,
-                minSkyTargetsPerLocation=min_sky_targets_per_location,
-                locationGroupPenalty=location_group_penalty,
-                cobraInstrumentRegion=cobra_instrument_region,
-                minSkyTargetsPerInstrumentRegion=min_sky_targets_per_instrument_region,
-                instrumentRegionPenalty=instrument_region_penalty,
-                blackDotPenalty=black_dot_penalty_cost,
-                numReservedFibers=numReservedFibers,
-                fiberNonAllocationCost=fiberNonAllocationCost,
-                obsprog_time_budget=tgt_psl_FH_tac,
-                cobraSafetyMargin=cobraSafetyMargin,
-                cobraFeatureFlags=flag_n2,
-            )
-
-            prob.solve()
-
-            status = prob._prob.status  # or prob.getStatus() / prob.solverStatus, etc.
-            print("Model status:", status)
-
-            res = [{} for _ in range(min(nvisit, len(Telra)))]
-            for k1, v1 in prob._vardict.items():
-                if k1.startswith("Tv_Cv_"):
-                    visited = prob.value(v1) > 0
-                    if visited:
-                        _, _, tidx, cidx, ivis = k1.split("_")
-                        res[int(ivis)][int(tidx)] = int(cidx)
-
-            ncoll = 0
-            for ivis, (vis, tp) in enumerate(zip(res, tpos)):
-                selectedTargets = np.full(
-                    len(bench.cobras.centers), TargetGroup.NULL_TARGET_POSITION
-                )
-                ids = np.full(len(bench.cobras.centers), TargetGroup.NULL_TARGET_ID)
-                for tidx, cidx in vis.items():
-                    selectedTargets[cidx] = tp[tidx]
-                    ids[cidx] = ""
-                for i in range(selectedTargets.size):
-                    if selectedTargets[i] != TargetGroup.NULL_TARGET_POSITION:
-                        dist = np.abs(selectedTargets[i] - bench.cobras.centers[i])
-
-                simulator = CollisionSimulator(bench, TargetGroup(selectedTargets, ids))
-                simulator.run()
-                if np.any(simulator.endPointCollisions):
-                    logger.error(
-                        "ERROR: detected end point collision, which should be impossible"
-                    )
-                coll_tidx = []
-                for tidx, cidx in vis.items():
-                    if simulator.collisions[cidx]:  # type: ignore[index]
-                        coll_tidx.append(tidx)
-                ncoll += len(coll_tidx)
-                for i1 in range(0, len(coll_tidx)):
-                    for i2 in range(i1 + 1, len(coll_tidx)):
-                        if np.abs(tp[coll_tidx[i1]] - tp[coll_tidx[i2]]) < 10:
-                            forbiddenPairs[ivis].append((coll_tidx[i1], coll_tidx[i2]))
-        done = ncoll == 0
-
+    forbidden_pairs = [[] for _ in range(n_visit)]
+    already_observed = {}
+    if tb_tgt.meta.get("cobra_feature_flag", True):
+        # Build the cobra feature flags lazily once per process, then reuse them
+        # across subsequent netflow runs.
+        cobra_feature_flags = _get_cobra_feature_flags()
     else:
-        # compute observation strategy
-        prob = nf.buildProblem(
-            bench,
-            tgt_lst_netflow,
-            tpos,
-            classdict,
-            single_exptime_,
-            vis_cost,
-            cobraMoveCost=cobraMoveCost,
-            collision_distance=2.0,
-            elbow_collisions=True,
-            gurobi=True,
-            gurobiOptions=gurobiOptions,
-            alreadyObserved=alreadyObserved,
-            forbiddenPairs=forbiddenPairs,
-            cobraLocationGroup=cobra_location_group,
-            minSkyTargetsPerLocation=min_sky_targets_per_location,
-            locationGroupPenalty=location_group_penalty,
-            cobraInstrumentRegion=cobra_instrument_region,
-            minSkyTargetsPerInstrumentRegion=min_sky_targets_per_instrument_region,
-            instrumentRegionPenalty=instrument_region_penalty,
-            blackDotPenalty=black_dot_penalty_cost,
-            numReservedFibers=numReservedFibers,
-            fiberNonAllocationCost=fiberNonAllocationCost,
-            obsprog_time_budget=tgt_psl_FH_tac,
-            cobraSafetyMargin=cobraSafetyMargin,
-            cobraFeatureFlags=flag_n2,
-        )
+        cobra_feature_flags = None
 
-        prob.solve()
-
-        # status = prob._prob.status  # or prob.getStatus() / prob.solverStatus, etc.
-        # print("Model status:", status)
-
-        res = [{} for _ in range(min(nvisit, len(Telra)))]
-        for k1, v1 in prob._vardict.items():
-            if k1.startswith("Tv_Cv_"):
-                visited = prob.value(v1) > 0
-                if visited:
-                    _, _, tidx, cidx, ivis = k1.split("_")
-                    res[int(ivis)][int(tidx)] = int(cidx)
-
-    return res, telescopes, tgt_lst_netflow
-
-
-def netflowRun_nofibAssign(
-    ppc_lst,
-    _tb_tgt,
-    for_ppc=False,
-    randomseed=0,
-    TraCollision=False,
-    numReservedFibers=0,
-    fiberNonAllocationCost=0.0,
-    otime="2026-01-10T10:00:00Z",
-):
-    # run netflow (with iteration)
-    #    if no fiber assignment in some PPCs, shift these PPCs with 0.15 deg
-    # (skip due to FH upper limit -24-02-07; NEED TO FIX)
-
-    res, telescope, tgt_lst_netflow = netflowRun_single(
-        ppc_lst,
-        _tb_tgt,
-        TraCollision,
-        numReservedFibers,
-        fiberNonAllocationCost,
-        otime,
-        for_ppc,
+    # Set up the netflow problem
+    problem = nf.buildProblem(
+        bench,
+        netflow_targets,
+        focal_plane_positions,
+        class_dict,
+        single_exptime,
+        visit_costs,
+        cobraMoveCost=cobra_move_cost,
+        collision_distance=2.0,
+        elbow_collisions=True,
+        gurobi=True,
+        gurobiOptions=gurobi_options,
+        alreadyObserved=already_observed,
+        forbiddenPairs=forbidden_pairs,
+        cobraLocationGroup=cobra_location_group,
+        minSkyTargetsPerLocation=min_sky_targets_per_location,
+        locationGroupPenalty=location_group_penalty,
+        cobraInstrumentRegion=cobra_instrument_region,
+        minSkyTargetsPerInstrumentRegion=min_sky_targets_per_instrument_region,
+        instrumentRegionPenalty=instrument_region_penalty,
+        blackDotPenalty=black_dot_penalty_cost,
+        numReservedFibers=num_reserved_fibers,
+        fiberNonAllocationCost=fiber_non_allocation_cost,
+        obsprog_time_budget=proposal_fh_limits,
+        cobraSafetyMargin=cobraSafetyMargin,
+        cobraFeatureFlags=cobra_feature_flags,
     )
-    return res, telescope, tgt_lst_netflow
+
+    problem.solve()
+
+    # status = prob._prob.status  # or prob.getStatus() / prob.solverStatus, etc.
+    # print("Model status:", status)
+
+    # Extract the assigned targets for each pointing from the optimization result.
+    res = [{} for _ in range(min(n_visit, len(telescope_ra)))]
+    for k1, v1 in problem._vardict.items():
+        if k1.startswith("Tv_Cv_"):
+            visited = problem.value(v1) > 0
+            if visited:
+                _, _, tidx, cidx, ivis = k1.split("_")
+                res[int(ivis)][int(tidx)] = int(cidx)
+
+    return res, telescopes, netflow_targets
 
 
-def netflowRun(
-    _tb_tgt,
-    randomseed=0,
-    TraCollision=False,
-    numReservedFibers=0,
-    fiberNonAllocationCost=0.0,
+def fiber_allocate(
+    tb_tgt,
+    single_ppc_mode=False,
+    ppc_candidate=None,
+    observation_time="2026-01-10T10:00:00Z",
+    num_reserved_fibers=0,
+    fiber_non_allocation_cost=0.0,
     backup=False,
 ):
-    # run netflow (with iteration and DBSCAN)
-
+    # Run fiber allocation either for all stored PPCs or for one PPC candidate.
     time_start = time.time()
     logger.info("[S3] Run netflow started")
 
-    if ("PPC" not in _tb_tgt.meta.keys()) or (len(_tb_tgt.meta["PPC"]) == 0):
-        logger.warning("[S3] No PPC has been determined")
-        ppc_lst = []
-        return ppc_lst
-
-    if len(_tb_tgt) == 0:
-        logger.warning("[S3] No targets")
-        ppc_lst = []
-        return ppc_lst
-
-    ppc_g = ppc_DBSCAN(_tb_tgt)  # separate ppc into different groups
-
-    ppc_lst = []
-
-    for uu in range(len(ppc_g)):  # run netflow for each ppc group
-        # only consider sample in the group
-        _index = list(
-            chain.from_iterable(
-                [
-                    list(
-                        PFS_FoV(
-                            ppc_g[uu][iii, 1],
-                            ppc_g[uu][iii, 2],
-                            ppc_g[uu][iii, 3],
-                            _tb_tgt,
-                        )
-                    )
-                    for iii in range(len(ppc_g[uu]))
-                ]
+    # Run for one PPC 
+    if single_ppc_mode:
+        if ppc_candidate is None: # no PPC candidate provided 
+            raise ValueError(
+                "ppc_candidate must be provided when single_ppc_mode=True"
             )
+
+        ppc_ra, ppc_dec, ppc_pa = ppc_candidate
+        ppc_list = np.array([[0, ppc_ra, ppc_dec, ppc_pa, 0]], dtype=object)
+
+        # Run netflow
+        assignments, telescopes, netflow_targets = run_netflow(
+            ppc_list,
+            tb_tgt,
+            for_single_ppc=True,
+            observation_time=observation_time,
         )
 
-        if len(_index) == 0:
-            continue
-        _tb_tgt_inuse = _tb_tgt[list(set(_index))]
+        # return the assigned target IDs for the single PPC candidate
+        return [
+            netflow_targets[target_idx].ID
+            for assignment_map in assignments
+            for target_idx in assignment_map
+        ]
 
-        logger.info(
-            f"[S3] Group {uu + 1:3d}: nppc = {len(ppc_g[uu]):5d}, n_tgt = {len(_tb_tgt_inuse):6d}"
-        )
+    # Skip if no ppc
+    elif ("PPC" not in tb_tgt.meta) or (len(tb_tgt.meta["PPC"]) == 0):
+        logger.warning("[S3] No PPC has been determined")
+        return []
+    
+    # Skip if no target
+    elif len(tb_tgt) == 0:
+        logger.warning("[S3] No targets")
+        return []
 
-        res, telescope, tgt_lst_netflow = netflowRun_nofibAssign(
-            ppc_g[uu],
-            _tb_tgt_inuse,
-            False,
-            randomseed,
-            TraCollision,
-            numReservedFibers,
-            fiberNonAllocationCost,
-        )
+    # Run for all PPCs in the list
+    else:
+        ppc_records = []
 
-        for i, (vis, tel) in enumerate(zip(res, telescope)):
-            ppc_fib_eff = len(vis) / 2394.0 * 100
+        ppc_list = tb_tgt.meta["PPC"]
+        today_date = datetime.now().strftime("%y%m%d")
+        resolution = tb_tgt["resolution"][0]
+
+        target_indices_in_group = set()
+        for ppc_row in ppc_list:
+            # pick up targets in the FoV of each PPC candidate to form the input target sample for netflow, so that netflow can run faster with a smaller target sample.
+            target_indices_in_group.update(
+                PFS_FoV(ppc_row[1], ppc_row[2], ppc_row[3], tb_tgt)
+            )
+
+        if len(target_indices_in_group) > 0:
+            tb_tgt_in_group = tb_tgt[sorted(target_indices_in_group)]
 
             logger.info(
-                f"PPC {i:4d}: {len(vis):.0f}/2394={ppc_fib_eff:.2f}% assigned Cobras"
+                f"[S3] Group {1:3d}: nppc = {len(ppc_list):5d}, n_tgt = {len(tb_tgt_in_group):6d}"
             )
 
-            # assigned targets in each ppc
-            tgt_assign_id_lst = []
-            for tidx, cidx in vis.items():
-                tgt_assign_id_lst.append(tgt_lst_netflow[tidx].ID)
+            # run netflow
+            assignments, telescopes, netflow_targets = run_netflow(
+                ppc_list,
+                tb_tgt_in_group,
+                num_reserved_fibers=num_reserved_fibers,
+                fiber_non_allocation_cost=fiber_non_allocation_cost,
+            )
 
-            # calculate the total weights in each ppc (smaller value means more important)
-            if len(vis) == 0:
-                ppc_tot_weight = np.nan
+            # Extract the assigned targets for each pointing
+            for pointing_index, (assignment_map, telescope) in enumerate(
+                zip(assignments, telescopes), start=1
+            ):
+                ppc_fiber_usage_frac = len(assignment_map) / 2394.0 * 100
 
-            else:
-                ppc_tot_weight = 1 / sum(
-                    _tb_tgt[np.isin(_tb_tgt["identify_code"], tgt_assign_id_lst)][
-                        "rank_fin"
+                logger.info(
+                    f"PPC {pointing_index - 1:4d}: {len(assignment_map):.0f}/2394={ppc_fiber_usage_frac:.2f}% assigned Cobras"
+                )
+
+                assigned_target_ids = [
+                    netflow_targets[target_idx].ID for target_idx in assignment_map
+                ]
+
+                if len(assigned_target_ids) == 0:
+                    # priority is nan if no target is assigned
+                    ppc_priority = np.nan
+                else:
+                    # priority is the sum of the rank_fin of the assigned targets
+                    ppc_priority = float(
+                        np.sum(
+                            tb_tgt["rank_fin"][
+                                np.isin(tb_tgt["identify_code"], assigned_target_ids)
+                            ]
+                        )
+                    )
+
+                ppc_records.append(
+                    [
+                        telescope._ra,
+                        telescope._dec,
+                        telescope._posang,
+                        ppc_priority,
+                        ppc_fiber_usage_frac,
+                        assigned_target_ids,
+                        resolution,
                     ]
                 )
 
-            if backup:
-                ppc_code_ = f"que_{_tb_tgt['resolution'][0]}_{datetime.now().strftime('%y%m%d')}_{int(i + 1)}_backup"
-            else:
-                ppc_code_ = f"que_{_tb_tgt['resolution'][0]}_{datetime.now().strftime('%y%m%d')}_{int(i + 1)}"
+        # Skip if no PPC has any assigned targets
+        if len(ppc_records) == 0:
+            logger.warning("[S3] Netflow returned no PPC allocations")
+            return []
 
-            ppc_lst.append(
-                [
-                    ppc_code_,
-                    "Group_" + str(uu + 1),
-                    tel._ra,
-                    tel._dec,
-                    tel._posang,
-                    ppc_tot_weight,
-                    ppc_fib_eff,
-                    tgt_assign_id_lst,
-                    _tb_tgt["resolution"][0],
-                ]
-            )
-
-    tb_ppc_netflow = Table(
-        np.array(ppc_lst, dtype=object),
-        names=[
-            "ppc_code",
-            "group_id",
-            "ppc_ra",
-            "ppc_dec",
-            "ppc_pa",
-            "ppc_priority",
-            "ppc_fiber_usage_frac",
-            "ppc_allocated_targets",
-            "ppc_resolution",
-        ],
-        dtype=[
-            np.str_,
-            np.str_,
-            np.float64,
-            np.float64,
-            np.float64,
-            np.float64,
-            np.float64,
-            object,
-            np.str_,
-        ],
-    )
-
-    tb_ppc_netflow["ppc_priority"] = (
-        tb_ppc_netflow["ppc_priority"] / max(tb_ppc_netflow["ppc_priority"]) * 1e3
-    )
-
-    if _tb_tgt.meta["PPC_origin"] == "usr":
-        lst_ppc_usr = _tb_tgt.meta["PPC"]
-        tb_ppc_usr = Table(
-            lst_ppc_usr[:, 1:],
-            names=["ppc_ra", "ppc_dec", "ppc_pa", "ppc_priority_usr"],
-        )
-        df_ppc_usr = Table.to_pandas(tb_ppc_usr)
-        df_ppc_usr = df_ppc_usr.drop_duplicates(
-            subset=["ppc_ra", "ppc_dec", "ppc_pa"],
-            inplace=False,
-            ignore_index=True,
-        )
-        tb_ppc_usr = Table.from_pandas(df_ppc_usr)
-        tb_ppc_netflow = join(
-            tb_ppc_netflow, tb_ppc_usr, keys=["ppc_ra", "ppc_dec", "ppc_pa"]
-        )
-    else:
-        tb_ppc_netflow["ppc_priority_usr"] = tb_ppc_netflow["ppc_priority"]
-
-    logger.info(
-        f"[S3] Run netflow done (takes {round(time.time() - time_start, 3)} sec)"
-    )
-
-    return tb_ppc_netflow
-
-
-def netflowRun4PPC(
-    _tb_tgt_inuse,
-    ppc_x,
-    ppc_y,
-    ppc_pa,
-    otime="2026-01-10T10:00:00Z",
-):
-    # run netflow (for PPP_centers)
-    ppc_lst = np.array([[0, ppc_x, ppc_y, ppc_pa, 0]])
-
-    res, telescope, tgt_lst_netflow = netflowRun_nofibAssign(
-        ppc_lst,
-        _tb_tgt_inuse,
-        True,
-        otime=otime,
-    )
-
-    for i, (vis, tel) in enumerate(zip(res, telescope)):
-        # assigned targets in each ppc
-        tgt_assign_id_lst = []
-        for tidx, cidx in vis.items():
-            tgt_assign_id_lst.append(tgt_lst_netflow[tidx].ID)
-
-    return tgt_assign_id_lst
-
-
-def netflowAssign(_tb_tgt, _tb_ppc):
-    # check fiber assignment of targets
-    if len(_tb_ppc) == 0:
-        # no ppc
-        return _tb_tgt
-
-    _tb_tgt["exptime_assign"] = 0
-
-    # sort ppc by its total priority == sum(weights of the assigned targets in ppc)
-    _tb_ppc_pri = _tb_ppc[_tb_ppc.argsort(keys="ppc_priority")]
-
-    # targets with allocated fiber
-    for ppc_t in _tb_ppc_pri:
-        lst = np.where(
-            np.isin(_tb_tgt["identify_code"], ppc_t["ppc_allocated_targets"]) == True
-        )[0]
-        _tb_tgt["exptime_assign"].data[lst] += int(_tb_tgt.meta["single_exptime"])
-
-    return _tb_tgt
-
-
-def netflow_iter(
-    _tb_tgt,
-    _tb_ppc_netflow,
-    weight_para,
-    nPPC,
-    randomseed=0,
-    TraCollision=False,
-    numReservedFibers=0,
-    fiberNonAllocationCost=0.0,
-    mode="queue",
-):
-    # iterate the total procedure to re-assign fibers to targets which have not been assigned in the previous/first iteration
-    # note that some targets in the dense region may need very long time to be assigned with fibers
-    # if targets can not be successfully assigned with fibers in >10 iterations, then directly stop
-    # if total number of ppc > nPPC, then directly stop
-
-    if len(_tb_tgt) == 0 or len(_tb_ppc_netflow) == 0:
-        return _tb_ppc_netflow
-
-    if _tb_tgt.meta["PPC_origin"] == "usr":
-        return _tb_ppc_netflow
-
-    # """
-    FH_goal = _tb_tgt["allocated_time"].data[0]
-    FH_done = sum(_tb_tgt["exptime_assign"]) / 3600.0
-    print(f"FH_goal = {FH_goal}, FH_done = {FH_done}")
-    while FH_done > FH_goal and mode == "queue":  # reduce Nppc only for queue modes
-        ppc_lst = [
-            [0, tt["ppc_ra"], tt["ppc_dec"], tt["ppc_pa"], tt["ppc_fiber_usage_frac"]]
-            for tt in _tb_ppc_netflow
-        ]  # ppc_id, ppc_ra, ppc_dec, ppc_pa, ppc_FE
-
-        ppc_lst_new = sorted(ppc_lst, key=lambda x: x[-1])[1:]
-
-        _tb_tgt.meta["PPC"] = ppc_lst_new
-
-        _tb_ppc_netflow_ = netflowRun(
-            _tb_tgt,
-            randomseed,
-            TraCollision,
-            numReservedFibers,
-            fiberNonAllocationCost,
+        # Convert the PPC records into the output table format, sorting by ppc_priority
+        tb_ppc_netflow = Table(
+            np.array(ppc_records, dtype=object),
+            names=[
+                "ppc_ra",
+                "ppc_dec",
+                "ppc_pa",
+                "ppc_priority_usr",
+                "ppc_fiber_usage_frac",
+                "ppc_allocated_targets",
+                "ppc_resolution",
+            ],
+            dtype=[
+                np.float64,
+                np.float64,
+                np.float64,
+                np.float64,
+                np.float64,
+                object,
+                np.str_,
+            ],
         )
 
-        _tb_tgt = netflowAssign(_tb_tgt, _tb_ppc_netflow_)
+        # Sort the PPCs by their priority (sum of rank_fin of assigned targets) in descending order, so that the PPC with the highest priority lists first in the output 
+        tb_ppc_netflow = tb_ppc_netflow[
+            np.argsort(np.asarray(tb_ppc_netflow["ppc_priority_usr"], dtype=float))[::-1]
+        ]
 
-        FH_done = sum(_tb_tgt["exptime_assign"]) / 3600.0
-
-        print(FH_done, np.mean(_tb_ppc_netflow_["ppc_fiber_usage_frac"]))
-
-        if FH_done > FH_goal * 0.95:
-            _tb_ppc_netflow = _tb_ppc_netflow_
-    # """
-
-    """ skip due to FH upper limit -24-02-07 NEED TO FIX
-    #  select non-assigned targets --> PPC determination --> netflow --> if no fibre assigned: shift PPC
-    iter_m2 = 0
-
-    while any(_tb_tgt["exptime_assign"] < _tb_tgt["exptime_PPP"]):
-        _tb_tgt_t1 = _tb_tgt[_tb_tgt["exptime_assign"] < _tb_tgt["exptime_PPP"]]
-        _tb_tgt_t1["exptime_PPP"] = (
-            _tb_tgt_t1["exptime_PPP"] - _tb_tgt_t1["exptime_assign"]
-        )  # remained exposure time
-
-        _tb_ppc_netflow.remove_rows(np.where(_tb_ppc_netflow["ppc_fiber_usage_frac"] == 0)[0])
-        _tb_tgt_t2 = PPP_centers(
-            _tb_tgt_t1,
-            nPPC - len(_tb_ppc_netflow),
-            weight_para,
-            randomseed,
-        )
-
-        _tb_ppc_netflow_t = netflowRun(
-            _tb_tgt_t2, 
-            randomseed, 
-            TraCollision, 
-            numReservedFibers, 
-            fiberNonAllocationCost, 
-        )
-
-        if len(_tb_ppc_netflow) >= nPPC or iter_m2 >= 10:
-            # stop if n_ppc exceeds the requirment
-            return _tb_ppc_netflow
-
+        # Set ppc_code
+        if backup:
+            tb_ppc_netflow["ppc_code"] = [
+                f"que_{resolution}_{today_date}_{index + 1}_backup"
+                for index in range(len(tb_ppc_netflow))
+            ]
         else:
-            _tb_ppc_netflow = vstack([_tb_ppc_netflow, _tb_ppc_netflow_t])
-            _tb_ppc_netflow.remove_rows(np.where(_tb_ppc_netflow["ppc_fiber_usage_frac"] == 0)[0])
-            _tb_tgt = netflowAssign(_tb_tgt, _tb_ppc_netflow)
+            tb_ppc_netflow["ppc_code"] = [
+                f"que_{resolution}_{today_date}_{index + 1}"
+                for index in range(len(tb_ppc_netflow))
+            ]
 
-            iter_m2 += 1
+        tb_ppc_netflow["ppc_priority"] = np.arange(1, len(tb_ppc_netflow)+1, dtype=int)
 
-    return _tb_ppc_netflow 
-    #"""
-    return _tb_ppc_netflow
+        logger.info(
+            f"[S3] Run netflow done (takes {round(time.time() - time_start, 3)} sec)"
+        )
+
+        return tb_ppc_netflow
 
 
-def complete_ppc(_tb_tgt, mode):
-    """check completion rate
+def check_netflow_assign_exptime(tb_tgt, tb_ppc_netflow):
+    # Update assigned exposure time from the PPC netflow allocation result.
+
+    # Skip if no PPC has any assigned targets
+    if len(tb_ppc_netflow) == 0:
+        return tb_tgt
+
+    tb_tgt["exptime_assign"] = 0
+    single_exptime = int(tb_tgt.meta["single_exptime"])
+    target_index_by_id = {
+        identify_code: index
+        for index, identify_code in enumerate(np.asarray(tb_tgt["identify_code"], dtype=str))
+    }
+
+    # For each PPC, add the single_exptime to the assigned targets in tb_tgt based on the netflow allocation result
+    for ppc_row in tb_ppc_netflow:
+        assigned_indices = [
+            target_index_by_id[target_id]
+            for target_id in ppc_row["ppc_allocated_targets"]
+            if target_id in target_index_by_id
+        ]
+        if assigned_indices:
+            tb_tgt["exptime_assign"].data[assigned_indices] += single_exptime
+
+    return tb_tgt
+
+
+def export_output_tables(tb_ppc, tb_tgt, output_dir="output/", backup=False):
+    """Write PPC and target export tables to disk.
 
     Parameters
     ==========
-    _tb_tgt : sample
-
-    mode :
-        "compOFtgt_weighted" -- completion = (weight(finished) + 0.5 * weight(partial)) / weight(tgt_all)
-
-        "compOFtgt_n"          -- completion = (N(finished) + 0.5 * N(partial)) / N(tgt_all)
-
-        "compOFpsl_n"       -- completion in count, completion in ratio, list of (psl_id, rank) ordered by rank
-
-    Returns
-    =======
-    completion rates
+    tb_ppc : astropy.table.Table
+        Final PPC table to export.
+    tb_tgt : astropy.table.Table
+        Final target table to export.
+    output_dir : str
+        Output directory path.
+    backup : bool
+        Whether to write backup filenames.
     """
+    # The PPC table already matches the export schema, so write a shallow copy
+    # directly instead of rebuilding the table column-by-column.
+    tb_ppc_export = tb_ppc.copy(copy_data=True)
+    tb_ppc_export.write(
+        os.path.join(output_dir, "ppcList_all.ecsv"),
+        format="ascii.ecsv",
+        overwrite=True,
+    )
 
-    if mode == "compOFtgt_weighted":
-        # finished
-        index_allo = np.where(_tb_tgt["exptime_PPP"] == _tb_tgt["exptime_assign"])[0]
+    # Build the OB export table from a compact source->destination column map
+    # to keep the schema explicit while avoiding repetitive boilerplate.
+    target_column_map = [
+        ("ob_code", "ob_code"),
+        ("obj_id", "ob_obj_id"),
+        ("input_catalog_id", "ob_cat_id"),
+        ("ra", "ob_ra"),
+        ("dec", "ob_dec"),
+        (None, "ob_equinox"),
+        ("pmra", "ob_pmra"),
+        ("pmdec", "ob_pmdec"),
+        ("parallax", "ob_parallax"),
+        ("priority", "ob_priority"),
+        ("exptime", "ob_exptime"),
+        ("exptime_usr", "ob_exptime_usr"),
+        ("single_exptime", "ob_single_exptime"),
+        ("resolution", "ob_resolution"),
+        ("proposal_id", "proposal_id"),
+        ("rank", "proposal_rank"),
+        ("allocated_time_tac", "allocated_time_tac"),
+        ("qa_reference_arm", "qa_reference_arm"),
+        ("rank_fin", "ob_weight_best"),
+        ("exptime_assign", "ob_exptime_assign"),
+        ("filter_g", "ob_filter_g"),
+        ("filter_r", "ob_filter_r"),
+        ("filter_i", "ob_filter_i"),
+        ("filter_z", "ob_filter_z"),
+        ("filter_y", "ob_filter_y"),
+        ("psf_flux_g", "ob_psf_flux_g"),
+        ("psf_flux_r", "ob_psf_flux_r"),
+        ("psf_flux_i", "ob_psf_flux_i"),
+        ("psf_flux_z", "ob_psf_flux_z"),
+        ("psf_flux_y", "ob_psf_flux_y"),
+        ("psf_flux_error_g", "ob_psf_flux_error_g"),
+        ("psf_flux_error_r", "ob_psf_flux_error_r"),
+        ("psf_flux_error_i", "ob_psf_flux_error_i"),
+        ("psf_flux_error_z", "ob_psf_flux_error_z"),
+        ("psf_flux_error_y", "ob_psf_flux_error_y"),
+        ("total_flux_g", "ob_total_flux_g"),
+        ("total_flux_r", "ob_total_flux_r"),
+        ("total_flux_i", "ob_total_flux_i"),
+        ("total_flux_z", "ob_total_flux_z"),
+        ("total_flux_y", "ob_total_flux_y"),
+        ("total_flux_error_g", "ob_total_flux_error_g"),
+        ("total_flux_error_r", "ob_total_flux_error_r"),
+        ("total_flux_error_i", "ob_total_flux_error_i"),
+        ("total_flux_error_z", "ob_total_flux_error_z"),
+        ("total_flux_error_y", "ob_total_flux_error_y"),
+        ("identify_code", "ob_identify_code"),
+    ]
 
-        if len(index_allo) == 0:
-            weight_allo = 0
-
+    target_export_columns = []
+    target_export_names = []
+    for source_name, export_name in target_column_map:
+        if source_name is None:
+            target_export_columns.append(["J2000"] * len(tb_tgt))
         else:
-            weight_allo = sum(_tb_tgt[index_allo]["rank_fin"])
+            target_export_columns.append(tb_tgt[source_name].data)
+        target_export_names.append(export_name)
 
-        # patrly observed
-        index_part = np.where(
-            (_tb_tgt["exptime_PPP"] > _tb_tgt["exptime_assign"])
-            & (_tb_tgt["exptime_assign"] > 0)
-        )[0]
-
-        if len(index_part) > 0:
-            weight_allo += 0.5 * sum(_tb_tgt[index_part]["rank_fin"])
-
-        weight_tot = sum(_tb_tgt["rank_fin"])
-
-        comp = weight_allo / weight_tot
-
-        return comp
-
-    elif mode == "compOFtgt_n":
-        # finished
-        index_allo = np.where(_tb_tgt["exptime_PPP"] == _tb_tgt["exptime_assign"])[0]
-        weight_allo = len(index_allo)
-
-        # patrly observed
-        index_part = np.where(
-            (_tb_tgt["exptime_PPP"] > _tb_tgt["exptime_assign"])
-            & (_tb_tgt["exptime_assign"] > 0)
-        )[0]
-        weight_allo += 0.5 * len(index_part)
-
-        comp = weight_allo / len(_tb_tgt)
-
-        return comp
-
-    elif mode == "compOFpsl_n":
-        # proposal list
-        listPsl_ = list(set(_tb_tgt["proposal_id"]))
-
-        PslRank_ = [_tb_tgt[_tb_tgt["proposal_id"] == kk]["rank"][0] for kk in listPsl_]
-        rank_index = reversed(np.argsort(PslRank_))
-
-        listPsl = [
-            [listPsl_[ll], PslRank_[ll]] for ll in rank_index
-        ]  # proposal list ordered by rank
-
-        n_psl = len(listPsl)
-
-        # user priority
-        sub_l = np.arange(0, 9.1, 1)
-
-        # completion rate in each proposal (each user-defined priority, each proposal, all input targets)
-        comN_sub_psl = []
-        comRatio_sub_psl = []
-
-        comp_tot = 0
-        for jj in range(n_psl):
-            _tb_tgt_t = _tb_tgt[_tb_tgt["proposal_id"] == listPsl[jj][0]]
-
-            count_sub = (
-                [sum(_tb_tgt_t["priority"] == ll) for ll in sub_l]
-                + [len(_tb_tgt_t)]
-                + [len(_tb_tgt)]
-            )
-
-            comp_psl = np.where(
-                _tb_tgt_t["exptime_PPP"] == _tb_tgt_t["exptime_assign"]
-            )[0]
-            comp_tot += len(comp_psl)
-            comT_t = (
-                [sum(_tb_tgt_t["priority"][comp_psl] == ll) for ll in sub_l]
-                + [len(comp_psl)]
-                + [comp_tot]
-            )
-            comN_sub_psl.append(comT_t)
-
-            comRatio_sub_psl.append(
-                [comT_t[oo] / count_sub[oo] for oo in range(len(count_sub))]
-            )
-
-        return np.array(comN_sub_psl), np.array(comRatio_sub_psl), np.array(listPsl)
-
-
-def PPC_efficiency(tb_ppc_netflow):
-    # calculate fiber allocation efficiency
-
-    fib_eff = tb_ppc_netflow["ppc_fiber_usage_frac"].data  # unit --> %
-
-    if max(fib_eff) == 0:
-        return fib_eff, 0, 0
-
-    else:
-        fib_eff_mean1 = np.mean(fib_eff / max(fib_eff))
-        fib_eff_mean2 = np.mean(fib_eff) * 0.01  # unit --> fraction without %
-        return fib_eff, fib_eff_mean1, fib_eff_mean2
-
-
-def fun2opt(para, info):
-    """function to be optimized
-
-    Parameters
-    ==========
-    para: float
-        conta,b,c -- weighting scheme
-
-    info:
-        samp -- input sample (all, low-mode, medium-mode)
-
-        nPPC_L -- number of PPC for low-resolution mode
-        nPPC_M -- number of PPC for medium-resolution mode
-
-        randomSeed -- random seed for np.random
-
-        crMode -- the same with complete_ppc
-
-        checkTraCollision -- boolean; whether or not to allow netflow to check collision of trajectory
-
-    Returns
-    =======
-    (2 - average_fibEfficiency_L - average_completion_L) + (2 - average_fibEfficiency_M - average_completion_M)
-    """
-    # para_sci, para_exp, para_n = para
-
-    _tb_tgt = info["tb_tgt"]
-
-    nppc_ = info["nPPC"]
-
-    index_op1 = info["iter"]
-    randomseed = info["randomSeed"]
-
-    TraCollision = info["checkTraCollision"]
-
-    completeMode = info["crMode"]
-
-    # --------------------
-    tem1 = 0
-
-    mfibEff1 = 0
-    CR_fin1 = 0
-
-    n_exptime = len(set(_tb_tgt["exptime"]))
-    n_rank = len(set(_tb_tgt["priority"]))
-    if n_rank <= 1 and n_exptime > 1:
-        para_exp, para_n = para
-        para_sci = 1.5
-        lst_ppc = PPP_centers(
-            _tb_tgt, nppc_, [para_sci, para_exp, para_n], randomseed, True
-        )[0]
-    if n_rank > 1 and n_exptime <= 1:
-        para_sci, para_n = para
-        para_exp = 0
-        lst_ppc = PPP_centers(
-            _tb_tgt, nppc_, [para_sci, para_exp, para_n], randomseed, True
-        )[0]
-    if n_rank > 1 and n_exptime > 1:
-        para_sci, para_exp, para_n = para
-        lst_ppc = PPP_centers(
-            _tb_tgt, nppc_, [para_sci, para_exp, para_n], randomseed, True
-        )[0]
-    if n_rank <= 1 and n_exptime <= 1:
-        para_n = para[0]
-        para_sci = 1.5
-        para_exp = 0
-        lst_ppc = PPP_centers(
-            _tb_tgt, nppc_, [para_sci, para_exp, para_n], randomseed, True
-        )[0]
-        # ppc_id, ppc_ra, ppc_dec, ppc_pa, ppc_weight, ppc_fh, ppc_FE
-
-    tem1 = (
-        len(lst_ppc) / nppc_ + 1.5 - sum(lst_ppc[:, -2]) + 1 - np.mean(lst_ppc[:, -1])
-    )
-    print(len(lst_ppc) / nppc_, 1.5 - sum(lst_ppc[:, -2]), 1 - np.mean(lst_ppc[:, -1]))
-
-    logger.info(
-        f"[S4] Iter {info['iter']+1:.0f}, w_para is [{para_sci:.3f}, {para_exp:.3f}, {para_n:.3f}]; objV is {tem1:.2f}."
-    )
-
-    info["iter"] += 1
-
-    return tem1
-
-
-def iter_weight(_tb_tgt, weight_initialGuess, nppc_, crMode, randomSeed, TraCollision):
-    """optimize the weighting scheme
-
-    Parameters
-    ==========
-    samp: table
-
-    weight_initialGuess: [conta, b, c]
-
-    nppc_l -- number of PPC for low-resolution mode
-    nppc_m -- number of PPC for medium-resolution mode
-
-    randomSeed -- random seed for np.random
-
-    crmode -- the same with complete_ppc
-
-    TraCollision -- boolean; whether or not to allow netflow to check collision of trajectory
-
-    printTF -- boolean; print results or not
-
-    Returns
-    =======
-    the optimal weighting scheme [conta, b, c]
-    """
-    time_s = time.time()
-    logger.info("[S4] Optimization started")
-
-    best_weight = opt.least_squares(
-        fun2opt,
-        weight_initialGuess,
-        xtol=0.05,
-        ftol=0.005,
-        args=(
-            {
-                "tb_tgt": _tb_tgt,
-                "nPPC": nppc_,
-                "crMode": crMode,
-                "iter": 0,
-                "randomSeed": randomSeed,
-                "checkTraCollision": TraCollision,
-            },
-        ),
-        diff_step=4,
-        gtol=0.005,
-        max_nfev=50,
-        # disp=True,
-        # retall=False,
-        # full_output=False,
-        # maxiter=200,
-        # maxfun=200,
-    )
-
-    logger.info(f"[S4] Optimization done (takes {time.time()-time_s:.3f} sec)")
-
-    return best_weight["x"]
-
-
-def optimize(_tb_tgt, nppc_, crMode, randomSeed, TraCollision):
-    n_exptime = len(set(_tb_tgt["exptime"]))
-    n_rank = len(set(_tb_tgt["priority"]))
-    if n_rank <= 1 and n_exptime > 1:
-        weight_guess = [0.1, 0.1]
-        para_sci = 1.5
-        para_exp, para_n = iter_weight(
-            _tb_tgt,
-            weight_guess,
-            nppc_,
-            crMode,
-            randomSeed,
-            TraCollision,
-            # numReservedFibers,
-            # fiberNonAllocationCost,
-        )
-    if n_rank > 1 and n_exptime <= 1:
-        weight_guess = [1.5, 0.1]
-        para_exp = 0
-        para_sci, para_n = iter_weight(
-            _tb_tgt,
-            weight_guess,
-            nppc_,
-            crMode,
-            randomSeed,
-            TraCollision,
-            # numReservedFibers,
-            # fiberNonAllocationCost,
-        )
-    if n_rank > 1 and n_exptime > 1:
-        weight_guess = [1.5, 0.1, 0.1]
-        para_sci, para_exp, para_n = iter_weight(
-            _tb_tgt,
-            weight_guess,
-            nppc_,
-            crMode,
-            randomSeed,
-            TraCollision,
-            # numReservedFibers,
-            # fiberNonAllocationCost,
-        )
-    if n_rank <= 1 and n_exptime <= 1:
-        weight_guess = [-0.1]
-        para_sci = 1.5
-        para_exp = 0
-        para_n = iter_weight(
-            _tb_tgt,
-            weight_guess,
-            nppc_,
-            crMode,
-            randomSeed,
-            TraCollision,
-            # numReservedFibers,
-            # fiberNonAllocationCost,
-        )
-    return para_sci, para_exp, para_n
-
-
-def output(_tb_ppc_tot, _tb_tgt_tot, dirName="output/", backup=False):
-    """write outputs into ecsv files
-
-    Parameters
-    ==========
-    _tb_ppc_tot: table of ppc information
-    _tb_tgt_tot: table of targets
-
-    Returns
-    =======
-    ppcList & obList in output/ folder
-    """
-    ppc_code = _tb_ppc_tot["ppc_code"].data
-    ppc_ra = _tb_ppc_tot["ppc_ra"].data
-    ppc_dec = _tb_ppc_tot["ppc_dec"].data
-    ppc_pa = _tb_ppc_tot["ppc_pa"].data
-    ppc_equinox = ["J2000"] * len(_tb_ppc_tot)
-    ppc_priority = _tb_ppc_tot["ppc_priority"].data
-    ppc_priority_usr = _tb_ppc_tot["ppc_priority_usr"].data
-    ppc_exptime = [_tb_tgt_tot.meta["single_exptime"]] * len(_tb_ppc_tot)
-    ppc_totaltime = [_tb_tgt_tot.meta["single_exptime"] + 300] * len(_tb_ppc_tot)
-    ppc_resolution = _tb_ppc_tot["ppc_resolution"].data
-    ppc_fibAlloFrac = _tb_ppc_tot["ppc_fiber_usage_frac"].data
-    ppc_tgtAllo = _tb_ppc_tot["ppc_allocated_targets"].data
-    ppc_comment = [" "] * len(_tb_ppc_tot)
-
-    ppcList = Table(
-        [
-            ppc_code,
-            ppc_ra,
-            ppc_dec,
-            ppc_pa,
-            ppc_equinox,
-            ppc_priority,
-            ppc_priority_usr,
-            ppc_exptime,
-            ppc_totaltime,
-            ppc_resolution,
-            ppc_fibAlloFrac,
-            ppc_tgtAllo,
-            ppc_comment,
-        ],
-        names=[
-            "ppc_code",
-            "ppc_ra",
-            "ppc_dec",
-            "ppc_pa",
-            "ppc_equinox",
-            "ppc_priority",
-            "ppc_priority_usr",
-            "ppc_exptime",
-            "ppc_totaltime",
-            "ppc_resolution",
-            "ppc_fiber_usage_frac",
-            "ppc_allocated_targets",
-            "ppc_comment",
-        ],
-    )
-
-    # ppcList.write(
-    #    os.path.join(dirName, "ppcList.ecsv"), format="ascii.ecsv", overwrite=True
-    # )
-
-    ob_code = _tb_tgt_tot["ob_code"].data
-    ob_obj_id = _tb_tgt_tot["obj_id"].data
-    ob_cat_id = _tb_tgt_tot["input_catalog_id"].data
-    ob_ra = _tb_tgt_tot["ra"].data
-    ob_dec = _tb_tgt_tot["dec"].data
-    ob_equinox = ["J2000"] * len(_tb_tgt_tot)
-    ob_pmras = _tb_tgt_tot["pmra"].data
-    ob_pmdecs = _tb_tgt_tot["pmdec"].data
-    ob_parallaxs = _tb_tgt_tot["parallax"].data
-    ob_priority = _tb_tgt_tot["priority"].data
-    ob_exptime = _tb_tgt_tot["exptime"].data
-    ob_exptime_usr = _tb_tgt_tot["exptime_usr"].data
-    ob_single_exptime = _tb_tgt_tot["single_exptime"].data
-    ob_resolution = _tb_tgt_tot["resolution"].data
-    proposal_id = _tb_tgt_tot["proposal_id"].data
-    proposal_rank = _tb_tgt_tot["rank"].data
-    proposal_FH = _tb_tgt_tot["allocated_time_tac"].data
-    ob_qa_reference_arm = _tb_tgt_tot["qa_reference_arm"].data
-    ob_weight_best = _tb_tgt_tot["rank_fin"].data
-    ob_allocate_time_netflow = _tb_tgt_tot["exptime_assign"].data
-    ob_filter_g = _tb_tgt_tot["filter_g"].data
-    ob_filter_r = _tb_tgt_tot["filter_r"].data
-    ob_filter_i = _tb_tgt_tot["filter_i"].data
-    ob_filter_z = _tb_tgt_tot["filter_z"].data
-    ob_filter_y = _tb_tgt_tot["filter_y"].data
-    ob_psf_flux_g = _tb_tgt_tot["psf_flux_g"].data
-    ob_psf_flux_r = _tb_tgt_tot["psf_flux_r"].data
-    ob_psf_flux_i = _tb_tgt_tot["psf_flux_i"].data
-    ob_psf_flux_z = _tb_tgt_tot["psf_flux_z"].data
-    ob_psf_flux_y = _tb_tgt_tot["psf_flux_y"].data
-    ob_psf_flux_error_g = _tb_tgt_tot["psf_flux_error_g"].data
-    ob_psf_flux_error_r = _tb_tgt_tot["psf_flux_error_r"].data
-    ob_psf_flux_error_i = _tb_tgt_tot["psf_flux_error_i"].data
-    ob_psf_flux_error_z = _tb_tgt_tot["psf_flux_error_z"].data
-    ob_psf_flux_error_y = _tb_tgt_tot["psf_flux_error_y"].data
-    ob_total_flux_g = _tb_tgt_tot["total_flux_g"].data
-    ob_total_flux_r = _tb_tgt_tot["total_flux_r"].data
-    ob_total_flux_i = _tb_tgt_tot["total_flux_i"].data
-    ob_total_flux_z = _tb_tgt_tot["total_flux_z"].data
-    ob_total_flux_y = _tb_tgt_tot["total_flux_y"].data
-    ob_total_flux_error_g = _tb_tgt_tot["total_flux_error_g"].data
-    ob_total_flux_error_r = _tb_tgt_tot["total_flux_error_r"].data
-    ob_total_flux_error_i = _tb_tgt_tot["total_flux_error_i"].data
-    ob_total_flux_error_z = _tb_tgt_tot["total_flux_error_z"].data
-    ob_total_flux_error_y = _tb_tgt_tot["total_flux_error_y"].data
-    ob_identify_code = _tb_tgt_tot["identify_code"].data
-
-    obList = Table(
-        [
-            ob_code,
-            ob_obj_id,
-            ob_cat_id,
-            ob_ra,
-            ob_dec,
-            ob_equinox,
-            ob_pmras,
-            ob_pmdecs,
-            ob_parallaxs,
-            ob_priority,
-            ob_exptime,
-            ob_exptime_usr,
-            ob_single_exptime,
-            ob_resolution,
-            proposal_id,
-            proposal_rank,
-            proposal_FH,
-            ob_qa_reference_arm,
-            ob_weight_best,
-            ob_allocate_time_netflow,
-            ob_filter_g,
-            ob_filter_r,
-            ob_filter_i,
-            ob_filter_z,
-            ob_filter_y,
-            ob_psf_flux_g,
-            ob_psf_flux_r,
-            ob_psf_flux_i,
-            ob_psf_flux_z,
-            ob_psf_flux_y,
-            ob_psf_flux_error_g,
-            ob_psf_flux_error_r,
-            ob_psf_flux_error_i,
-            ob_psf_flux_error_z,
-            ob_psf_flux_error_y,
-            ob_total_flux_g,
-            ob_total_flux_r,
-            ob_total_flux_i,
-            ob_total_flux_z,
-            ob_total_flux_y,
-            ob_total_flux_error_g,
-            ob_total_flux_error_r,
-            ob_total_flux_error_i,
-            ob_total_flux_error_z,
-            ob_total_flux_error_y,
-            ob_identify_code,
-        ],
-        names=[
-            "ob_code",
-            "ob_obj_id",
-            "ob_cat_id",
-            "ob_ra",
-            "ob_dec",
-            "ob_equinox",
-            "ob_pmra",
-            "ob_pmdec",
-            "ob_parallax",
-            "ob_priority",
-            "ob_exptime",
-            "ob_exptime_usr",
-            "ob_single_exptime",
-            "ob_resolution",
-            "proposal_id",
-            "proposal_rank",
-            "allocated_time_tac",
-            "qa_reference_arm",
-            "ob_weight_best",
-            "ob_exptime_assign",
-            "ob_filter_g",
-            "ob_filter_r",
-            "ob_filter_i",
-            "ob_filter_z",
-            "ob_filter_y",
-            "ob_psf_flux_g",
-            "ob_psf_flux_r",
-            "ob_psf_flux_i",
-            "ob_psf_flux_z",
-            "ob_psf_flux_y",
-            "ob_psf_flux_error_g",
-            "ob_psf_flux_error_r",
-            "ob_psf_flux_error_i",
-            "ob_psf_flux_error_z",
-            "ob_psf_flux_error_y",
-            "ob_total_flux_g",
-            "ob_total_flux_r",
-            "ob_total_flux_i",
-            "ob_total_flux_z",
-            "ob_total_flux_y",
-            "ob_total_flux_error_g",
-            "ob_total_flux_error_r",
-            "ob_total_flux_error_i",
-            "ob_total_flux_error_z",
-            "ob_total_flux_error_y",
-            "ob_identify_code",
-        ],
-    )
+    tb_tgt_export = Table(target_export_columns, names=target_export_names)
 
     if not backup:
-        obList.write(
-            os.path.join(dirName, "obList.ecsv"), format="ascii.ecsv", overwrite=True
-        )
-
-        np.save(os.path.join(dirName, "obj_allo_tot.npy"), _tb_ppc_tot)
-    else:
-        obList.write(
-            os.path.join(dirName, "obList_backup.ecsv"),
+        tb_tgt_export.write(
+            os.path.join(output_dir, "obList.ecsv"),
             format="ascii.ecsv",
             overwrite=True,
         )
+        np.save(os.path.join(output_dir, "obj_allo_tot.npy"), tb_ppc)
+    else:
+        tb_tgt_export.write(
+            os.path.join(output_dir, "obList_backup.ecsv"),
+            format="ascii.ecsv",
+            overwrite=True,
+        )
+        np.save(os.path.join(output_dir, "obj_allo_tot_backup.npy"), tb_ppc)
 
-        np.save(os.path.join(dirName, "obj_allo_tot_backup.npy"), _tb_ppc_tot)
 
+def _run_for_resolution(
+    tb_tgt_resolution,
+    n_ppc,
+    num_reserved_fibers=0,
+    fiber_non_allocation_cost=0.0,
+    backup=False,
+):
+    # Run the PPC-center search and the final netflow allocation for one resolution.
+    ppc_records, tb_ppc_list = PPP_centers(tb_tgt_resolution, n_ppc, backup=backup)
 
-def plotCR(CR, sub_lst, _tb_ppc_tot, dirName="output/", show_plots=False):
-    # plot completion rate and fiber allocation efficiency
+    tb_tgt_netflow = Table.copy(tb_tgt_resolution)
+    tb_tgt_netflow.meta["PPC"] = ppc_records
+    tb_tgt_netflow = rank_recalculate(tb_tgt_netflow)
 
-    plt.figure(figsize=(13, 5))
-
-    plt.subplot(121)
-
-    plt.bar(
-        np.arange(1, len(CR) + 1, 1),
-        100 * CR[:, -2],
-        width=0.8,
-        fc="tomato",
-        ec="none",
-        alpha=0.6,
-        zorder=10,
+    tb_ppc_netflow = fiber_allocate(
+        tb_tgt_netflow,
+        num_reserved_fibers=num_reserved_fibers,
+        fiber_non_allocation_cost=fiber_non_allocation_cost,
+        backup=backup,
     )
+    tb_tgt_final = check_netflow_assign_exptime(tb_tgt_netflow, tb_ppc_netflow)
 
-    plt.plot([0, len(CR) + 1], [80, 80], "k--", lw=2, zorder=11)
-    plt.plot(
-        [0, len(CR) + 1],
-        [100 * np.mean(CR[:, -2]), 100 * np.mean(CR[:, -2])],
-        "--",
-        color="tomato",
-        lw=2,
-        zorder=11,
-    )
-    plt.text(
-        (len(CR) + 1) * 0.85,
-        100 * np.mean(CR[:, -2]),
-        "{:2.2f}%".format(100 * np.mean(CR[:, -2])),
-        color="r",
-        fontsize=12,
-    )
+    return tb_ppc_list, tb_tgt_final
 
-    plt.xlim(0, len(CR) + 1)
-    plt.ylim(0, 100 * CR[:, -2].max() + 5)
-    plt.ylabel("completeness (%)", fontsize=18)
-    plt.xticks(
-        np.arange(1, len(sub_lst) + 1, 1),
-        [str(kk[0])[5:] + "_" + str(kk[1]) for kk in sub_lst],
-        fontsize=12,
-        rotation=90,
-    )
-    plt.yticks(fontsize=16)
-    plt.grid()
 
-    plt.subplot(122)
+def _combine_resolution_outputs(
+    n_ppc_l,
+    n_ppc_m,
+    tb_ppc_l,
+    tb_ppc_m,
+    tb_tgt_l,
+    tb_tgt_m,
+    tb_tgt_l_source,
+    tb_tgt_m_source,
+):
+    # Merge LR and MR outputs while preserving the existing warning behavior.
+    if n_ppc_l > 0:
+        if n_ppc_m > 0:
+            return vstack([tb_ppc_l, tb_ppc_m]), vstack([tb_tgt_l, tb_tgt_m])
 
-    _tb_ppc_tot = _tb_ppc_tot[_tb_ppc_tot.argsort(keys="ppc_priority")]
-    fib_eff = _tb_ppc_tot["ppc_fiber_usage_frac"].data
+        if len(tb_tgt_m_source) > 0:
+            logger.warning("no allocated time for MR")
+        return tb_ppc_l.copy(), tb_tgt_l.copy()
 
-    plt.bar(
-        np.arange(0, len(fib_eff), 1),
-        fib_eff,
-        width=0.8,
-        fc="tomato",
-        ec="none",
-        alpha=0.6,
-        zorder=10,
-    )
-    plt.plot([0, len(fib_eff) + 1], [80, 80], "k--", lw=2, zorder=11)
-    plt.plot(
-        [0, len(fib_eff) + 1],
-        [np.mean(fib_eff), np.mean(fib_eff)],
-        "--",
-        color="tomato",
-        lw=2,
-        zorder=11,
-    )
-    plt.text(
-        len(fib_eff) * 0.85,
-        np.mean(fib_eff),
-        "{:2.2f}%".format(np.mean(fib_eff)),
-        color="r",
-        fontsize=12,
-    )
+    if n_ppc_m > 0:
+        if len(tb_tgt_l_source) > 0:
+            logger.warning("no allocated time for LR")
+        return tb_ppc_m.copy(), tb_tgt_m.copy()
 
-    plt.xlim(0, len(fib_eff) + 1)
-    plt.ylim(0, max(fib_eff) * 1.1)
-    plt.xlabel("PPC", fontsize=18)
-    plt.ylabel("fiber alloc fraction (%)", fontsize=18)
-    plt.xticks(fontsize=16)
-    plt.yticks(fontsize=16)
-    plt.grid()
-    plt.savefig(os.path.join(dirName, "ppp_result.jpg"), dpi=300, bbox_inches="tight")
-    if show_plots:
-        plt.show()
+    raise ValueError("Please specify n_pcc_l or n_pcc_m")
 
 
 def run(
-    bench_info,
-    readtgt_con,
-    nppc_l,
-    nppc_m,
-    dirName="output/",
-    numReservedFibers=0,
-    fiberNonAllocationCost=0.0,
-    show_plots=False,
+    bench_model,
+    read_target_config,
+    n_ppc_l,
+    n_ppc_m,
+    output_dir="output/",
+    num_reserved_fibers=0,
+    fiber_non_allocation_cost=0.0,
+    cobra_feature_flag=True,
     backup=False,
-    conf=None,
+    config=None,
+    **legacy_kwargs,
 ):
+    """Run the queue PPC workflow and write the final export tables.
+
+    Legacy keyword aliases are still accepted for external callers:
+    ``dirName``, ``numReservedFibers``, ``fiberNonAllocationCost``, and ``conf``.
+    """
+    if "dirName" in legacy_kwargs:
+        output_dir = legacy_kwargs.pop("dirName")
+    if "numReservedFibers" in legacy_kwargs:
+        num_reserved_fibers = legacy_kwargs.pop("numReservedFibers")
+    if "fiberNonAllocationCost" in legacy_kwargs:
+        fiber_non_allocation_cost = legacy_kwargs.pop("fiberNonAllocationCost")
+    if "conf" in legacy_kwargs:
+        config = legacy_kwargs.pop("conf")
+    if legacy_kwargs:
+        unexpected_keys = ", ".join(sorted(legacy_kwargs))
+        raise TypeError(f"Unexpected keyword argument(s): {unexpected_keys}")
+
     global bench
-    bench = bench_info
-    if conf is None:
-        raise ValueError("conf must not be None")
+    bench = bench_model
+    if config is None:
+        raise ValueError("config must not be None")
 
+    # Read queueDB exposure history first so target ingestion can account for
+    # already completed exposures and remaining proposal time.
     today = date.today().strftime("%Y%m%d")
-    tb_queuedb_filename = os.path.join(dirName, f"tgt_queueDB_{today}.csv")
-    psl_id = conf["ppp"]["proposalIds"] + conf["ppp"]["proposalIds_backup"]
-    tb_queuedb = query_queueDB(psl_id, conf["queuedb"]["filepath"], tb_queuedb_filename)
+    tb_queuedb_filename = os.path.join(output_dir, f"tgt_queueDB_{today}.csv")
+    proposal_ids = config["ppp"]["proposalIds"] + config["ppp"]["proposalIds_backup"]
+    tb_queuedb = query_queueDB(
+        proposal_ids,
+        config["queuedb"]["filepath"],
+        tb_queuedb_filename,
+    )
 
+    # Read and split the full target sample into LR and MR subsets.
     tb_tgt, tb_tgt_l, tb_tgt_m, tb_queuedb = read_target(
-        readtgt_con["mode_readtgt"], readtgt_con["para_readtgt"], tb_queuedb
+        read_target_config["mode_readtgt"],
+        read_target_config["para_readtgt"],
+        tb_queuedb,
     )
 
-    randomseed = 2
+    for tb_tgt_current in (tb_tgt, tb_tgt_l, tb_tgt_m):
+        tb_tgt_current.meta["cobra_feature_flag"] = cobra_feature_flag
 
-    TraCollision = False
-    multiProcess = True
-
-    # """
-    # LR--------------------------------------------
-    # ppc_lst_l = PPP_centers(
-    #    tb_tgt_l, nppc_l, [para_sci_l, para_exp_l, para_n_l], randomseed, multiProcess
-    # )
-
-    ppc_lst_l, tb_ppcList_l = PPP_centers(tb_tgt_l, nppc_l, backup=backup)
-
-    tb_tgt_l1 = Table.copy(tb_tgt_l)
-    tb_tgt_l1.meta["PPC"] = ppc_lst_l
-
-    tb_tgt_l1 = rank_recalculate(tb_tgt_l1)
-
-    tb_ppc_l = netflowRun(
-        tb_tgt_l1,
-        randomseed,
-        TraCollision,
-        numReservedFibers,
-        fiberNonAllocationCost,
+    # Run the same PPC+netflow pipeline independently for LR and MR.
+    tb_ppc_list_l, tb_tgt_l_final = _run_for_resolution(
+        tb_tgt_l,
+        n_ppc_l,
+        num_reserved_fibers=num_reserved_fibers,
+        fiber_non_allocation_cost=fiber_non_allocation_cost,
+        backup=backup,
+    )
+    tb_ppc_list_m, tb_tgt_m_final = _run_for_resolution(
+        tb_tgt_m,
+        n_ppc_m,
+        num_reserved_fibers=num_reserved_fibers,
+        fiber_non_allocation_cost=fiber_non_allocation_cost,
         backup=backup,
     )
 
-    tb_tgt_l_fin = netflowAssign(tb_tgt_l1, tb_ppc_l)
-
-    # MR--------------------------------------------
-    # ppc_lst_m = PPP_centers(
-    #    tb_tgt_m, nppc_m, [para_sci_m, para_exp_m, para_n_m], randomseed, multiProcess
-    # )
-    ppc_lst_m, tb_ppcList_m = PPP_centers(tb_tgt_m, nppc_m, backup=backup)
-
-    tb_tgt_m1 = Table.copy(tb_tgt_m)
-    tb_tgt_m1.meta["PPC"] = ppc_lst_m
-
-    tb_tgt_m1 = rank_recalculate(tb_tgt_m1)
-
-    tb_ppc_m = netflowRun(
-        tb_tgt_m1,
-        randomseed,
-        TraCollision,
-        numReservedFibers,
-        fiberNonAllocationCost,
-        backup=backup,
+    tb_ppc_tot, tb_tgt_tot = _combine_resolution_outputs(
+        n_ppc_l,
+        n_ppc_m,
+        tb_ppc_list_l,
+        tb_ppc_list_m,
+        tb_tgt_l_final,
+        tb_tgt_m_final,
+        tb_tgt_l,
+        tb_tgt_m,
     )
 
-    tb_tgt_m_fin = netflowAssign(tb_tgt_m1, tb_ppc_m)
-
-    if nppc_l > 0:
-        if nppc_m > 0:
-            tb_ppc_tot = vstack([tb_ppcList_l, tb_ppcList_m])
-            tb_tgt_tot = vstack([tb_tgt_l_fin, tb_tgt_m_fin])
-        else:
-            tb_ppc_tot = tb_ppcList_l.copy()
-            tb_tgt_tot = tb_tgt_l_fin.copy()
-            if len(tb_tgt_m) > 0:
-                logger.warning("no allocated time for MR")
-    else:
-        if nppc_m > 0:
-            tb_ppc_tot = tb_ppcList_m.copy()
-            tb_tgt_tot = tb_tgt_m_fin.copy()
-            if len(tb_tgt_l) > 0:
-                logger.warning("no allocated time for LR")
-        else:
-            logger.error("Please specify n_pcc_l or n_pcc_m")
-    # """
-
+    # Keep the legacy standalone PPC export in addition to the consolidated export helper.
     if not backup:
         tb_ppc_tot.write(
-            os.path.join(dirName, "ppcList.ecsv"), format="ascii.ecsv", overwrite=True
+            os.path.join(output_dir, "ppcList.ecsv"),
+            format="ascii.ecsv",
+            overwrite=True,
         )
     else:
         tb_ppc_tot.write(
-            os.path.join(dirName, "ppcList_backup.ecsv"),
+            os.path.join(output_dir, "ppcList_backup.ecsv"),
             format="ascii.ecsv",
             overwrite=True,
         )
 
-    output(tb_ppc_tot, tb_tgt_tot, dirName=dirName, backup=backup)
+    export_output_tables(tb_ppc_tot, tb_tgt_tot, output_dir=output_dir, backup=backup)
