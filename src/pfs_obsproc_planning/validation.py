@@ -22,10 +22,10 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from astropy.coordinates import SkyCoord
+from astropy.table import Table
 from loguru import logger
 from mpl_toolkits.mplot3d import Axes3D
-
-from astropy.table import Table
 
 # from pfs.drp.stella.readLineList import ReadLineListTask,  ReadLineListConfig
 # from pfs.drp.stella import DetectorMap
@@ -34,17 +34,17 @@ from pfs.datamodel.pfsConfig import FiberStatus, PfsDesign
 from pfs.utils.coordinates.CoordTransp import ag_pixel_to_pfimm
 from pfs.utils.coordinates.DistortionCoefficients import radec_to_subaru
 from pfs.utils.fiberids import FiberIds
+from pfs_design_tool import reconfigure_fibers_ppp as sfa
 
 # sys.path.append("/work/moritani/codes/obstools/")
 from . import plotPfsDesign as pldes
-from pfs_design_tool import reconfigure_fibers_ppp as sfa
 
 warnings.filterwarnings("ignore")
 
 
-#from importlib import reload
+# from importlib import reload
 
-#reload(pldes)
+# reload(pldes)
 
 
 def njy_mag(j):
@@ -183,7 +183,9 @@ def _warn_too_bright_guidestars(ppc_ra, ppc_dec, ppc_pa, ppc_obstime_utc, conf):
     return df_guidestars_toobright
 
 
-def _find_unassigned_bright_nearby(pfsDesign0, bench, fibId, ppc_ra, ppc_dec, ppc_pa, conf):
+def _find_unassigned_bright_nearby(
+    pfsDesign0, bench, fibId, ppc_ra, ppc_dec, ppc_pa, conf
+):
     """Search for bright Gaia sources around unassigned fibers.
 
     Returns a DataFrame (possibly empty) with columns matching the original script.
@@ -201,6 +203,8 @@ def _find_unassigned_bright_nearby(pfsDesign0, bench, fibId, ppc_ra, ppc_dec, pp
                 ccenter, pfsDesign0.obstime, ppc_ra, ppc_dec, ppc_pa
             )
 
+            # logger.info(f"Checking for bright stars near unassigned fiber {unfib}")
+
             df_gaia_toobright = sfa.dbutils.generate_targets_from_gaiadb(
                 un_ra,
                 un_dec,
@@ -214,6 +218,14 @@ def _find_unassigned_bright_nearby(pfsDesign0, bench, fibId, ppc_ra, ppc_dec, pp
             )
 
             if not df_gaia_toobright.empty:
+                coord_fiber = SkyCoord(ra=un_ra, dec=un_dec, unit="deg", frame="icrs")
+                coord_gaia = SkyCoord(
+                    ra=df_gaia_toobright["ra"],
+                    dec=df_gaia_toobright["dec"],
+                    unit="deg",
+                    frame="icrs",
+                )
+                sep = coord_fiber.separation(coord_gaia).arcsecond
                 df_tmp = pd.DataFrame(
                     {
                         "fiber_id": [unfib] * len(df_gaia_toobright),
@@ -223,6 +235,7 @@ def _find_unassigned_bright_nearby(pfsDesign0, bench, fibId, ppc_ra, ppc_dec, pp
                         "ra": df_gaia_toobright.ra,
                         "dec": df_gaia_toobright.dec,
                         "magnitude": df_gaia_toobright.phot_g_mean_mag,
+                        "separation_arcsec": sep,
                     }
                 )
                 if len(df_unassigned_toobright) == 0:
@@ -233,7 +246,7 @@ def _find_unassigned_bright_nearby(pfsDesign0, bench, fibId, ppc_ra, ppc_dec, pp
                     )
 
                 logger.warning(
-                    f"[Validation of output] There are {len(df_gaia_toobright)} bright stars nearby fiber {unfib}: {df_tmp}"
+                    f"[Validation of output] There are {len(df_gaia_toobright)} bright stars nearby fiber {unfib}:\n{df_tmp}"
                 )
 
     return df_unassigned_toobright
@@ -256,19 +269,28 @@ def _build_df_fib(pfsDesign0):
         filt = None
 
     for t, fl, a, b in zip(
-        pfsDesign0.targetType, pfsDesign0.filterNames, pfsDesign0.totalFlux, pfsDesign0.psfFlux
+        pfsDesign0.targetType,
+        pfsDesign0.filterNames,
+        pfsDesign0.totalFlux,
+        pfsDesign0.psfFlux,
     ):
-        if t == 3: #TargetType.FLUXSTD
+        if t == 3:  # TargetType.FLUXSTD
             pfsflux_l.append(b[0])
             pfsflux_f.append(fl[0])
-        elif t == 1: #TargetType.SCIENCE
+        elif t == 1:  # TargetType.SCIENCE
             if filt is not None and filt in fl:
                 # Preserve the original branching behaviour (note: original used `if not np.nan`)
-                pfsflux_l.append(a[fl.index(filt)] if not np.isnan(a[fl.index(filt)]) else b[fl.index(filt)])
+                pfsflux_l.append(
+                    a[fl.index(filt)]
+                    if not np.isnan(a[fl.index(filt)])
+                    else b[fl.index(filt)]
+                )
                 pfsflux_f.append(filt)
             else:
                 indices = [i for i, item in enumerate(fl) if item != "none"]
-                pfsflux_l.append(a[indices[0]] if not np.isnan(a[indices[0]]) else b[indices[0]])
+                pfsflux_l.append(
+                    a[indices[0]] if not np.isnan(a[indices[0]]) else b[indices[0]]
+                )
                 pfsflux_f.append(fl[indices[0]])
         else:
             pfsflux_l.append(np.nan)
@@ -406,7 +428,6 @@ def validation(parentPath, figpath, save, show, ssp, conf):
     # Compute InR/El at start and stop times
     df_design = _add_inr_columns(df_design)
 
-
     # InR/El columns were added by _add_inr_columns above.
     # (Kept for backward compatibility and readability.)
 
@@ -434,7 +455,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
     )
 
     cobra_idx_n2 = fibId.cobrasForSpectrograph(spectrographId=2)
-    cobra_idx_n2 = cobra_idx_n2[cobra_idx_n2<=2394]
+    cobra_idx_n2 = cobra_idx_n2[cobra_idx_n2 <= 2394]
     cobra_id_n2 = cobra_idx_n2 + 1
     fiber_id_n2 = fibId.cobraIdToFiberId(cobra_id_n2)
 
@@ -461,7 +482,9 @@ def validation(parentPath, figpath, save, show, ssp, conf):
 
         count += 1
 
-        df_guidestars_toobright = _warn_too_bright_guidestars(ppc_ra, ppc_dec, ppc_pa, ppc_obstime_utc, conf)
+        df_guidestars_toobright = _warn_too_bright_guidestars(
+            ppc_ra, ppc_dec, ppc_pa, ppc_obstime_utc, conf
+        )
 
         # check bright stars nearby unassigned fibers including disabled fibers
         # Use pre-initialized bench and fiber-id mapping created outside the loop.
@@ -515,7 +538,14 @@ def validation(parentPath, figpath, save, show, ssp, conf):
             unfib_bright = []
 
         ppc_code_ = pfsDesign0.designName
-        df = pldes.check_design(designId, ppc_code_, df_fib, df_ag, df_guidestars_toobright, n_unfib_bright=len(unfib_bright))
+        df = pldes.check_design(
+            designId,
+            ppc_code_,
+            df_fib,
+            df_ag,
+            df_guidestars_toobright,
+            n_unfib_bright=len(unfib_bright),
+        )
         df_ch = pd.concat([df_ch, df], ignore_index=True)
         title = f"designId=0x{designId:016x} ({pfsDesign0.raBoresight:.2f},{pfsDesign0.decBoresight:.2f},PA={pfsDesign0.posAng:.1f})\n{ppc_code_}"
         fname = f"{figpath}/check_0x{designId:016x}"
@@ -535,7 +565,10 @@ def validation(parentPath, figpath, save, show, ssp, conf):
 
     # After processing all designs, optionally save a single CSV containing
     # all bright sources found near unassigned fibers.
-    if conf["validation"]["save_unassign_toobright"] and not df_all_unassigned_toobright.empty:
+    if (
+        conf["validation"]["save_unassign_toobright"]
+        and not df_all_unassigned_toobright.empty
+    ):
         out_path = os.path.join(figpath, "df_unassign_bright_nearby.csv")
         df_all_unassigned_toobright.to_csv(out_path, index=False)
 
@@ -578,9 +611,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
 
     # """
     styled_html = (
-        df_ch.style.map(
-            pldes.colour_background_warning_sky_min, subset=["sky_min"]
-        )
+        df_ch.style.map(pldes.colour_background_warning_sky_min, subset=["sky_min"])
         .map(pldes.colour_background_warning_std_min, subset=["std_min"])
         .map(pldes.colour_background_warning_sky_tot, subset=["sky_sum"])
         .map(pldes.colour_background_warning_std_tot, subset=["std_sum"])
