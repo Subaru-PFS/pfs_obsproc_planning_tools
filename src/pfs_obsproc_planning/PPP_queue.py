@@ -5,30 +5,37 @@ import os
 import random
 import time
 import warnings
+from datetime import date, datetime, timedelta, timezone
+from functools import partial
+from itertools import chain
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from scipy.optimize import minimize
 
 from astropy import units as u
-from astropy.coordinates import SkyCoord, AltAz, EarthLocation, get_body, solar_system_ephemeris
+from astropy.coordinates import (
+    AltAz,
+    EarthLocation,
+    SkyCoord,
+    get_body,
+    solar_system_ephemeris,
+)
+from astropy.table import Table, join, vstack
 from astropy.time import Time
 from astroplan import Observer
-from astropy.table import Table, vstack, join
 from dateutil import parser, tz
-from functools import partial
-from itertools import chain
+import ets_fiber_assigner.netflow as nf
+from ginga.misc.log import get_logger
+from ics.cobraOps.Bench import Bench
 from loguru import logger
 from matplotlib.path import Path
-from sklearn.cluster import DBSCAN, HDBSCAN, AgglomerativeClustering
-from sklearn.neighbors import KernelDensity
-from qplan import q_db, q_query, entity
-from qplan.util.site import site_subaru as observer
+from qplan import entity, q_db, q_query
 from qplan.util.eph_cache import EphemerisCache
-from datetime import datetime, timedelta, timezone, date
-from ginga.misc.log import get_logger
-import ets_fiber_assigner.netflow as nf
-from ics.cobraOps.Bench import Bench
+from qplan.util.site import site_subaru as observer
+from sklearn.cluster import AgglomerativeClustering, DBSCAN, HDBSCAN
+from sklearn.neighbors import KernelDensity
 
 warnings.filterwarnings("ignore")
 
@@ -81,6 +88,34 @@ _NETFLOW_CLASSDICT_TEMPLATE = {
     },
 }
 
+np.random.seed(0)
+
+
+_TARGET_DB_FLUX_COLUMNS = [
+    "psf_flux_g",
+    "psf_flux_r",
+    "psf_flux_i",
+    "psf_flux_z",
+    "psf_flux_y",
+    "psf_flux_error_g",
+    "psf_flux_error_r",
+    "psf_flux_error_i",
+    "psf_flux_error_z",
+    "psf_flux_error_y",
+    "total_flux_g",
+    "total_flux_r",
+    "total_flux_i",
+    "total_flux_z",
+    "total_flux_y",
+    "total_flux_error_g",
+    "total_flux_error_r",
+    "total_flux_error_i",
+    "total_flux_error_z",
+    "total_flux_error_y",
+]
+
+_TARGET_DB_FILTER_COLUMNS = ["filter_g", "filter_r", "filter_i", "filter_z", "filter_y"]
+
 def database_info(para_db):
     # Build the SQLAlchemy-style connection string from the DB config tuple.
     dialect, user, pwd, host, port, dbname = para_db
@@ -98,6 +133,79 @@ def remove_tgt_duplicate(df):
     num2 = len(df)
     logger.info(f"Duplication removed: {num1} --> {num2}")
     return df
+
+
+def query_target_from_db(tgt_db, proposal_ids):
+    import sqlalchemy as sa
+
+    if isinstance(proposal_ids, str):
+        proposal_ids = [proposal_ids]
+
+    sql = sa.text(
+        "SELECT ob_code, obj_id, c.input_catalog_id AS input_catalog_id, ra, dec, epoch, priority, pmra, pmdec, parallax, effective_exptime, single_exptime, qa_reference_arm, is_medium_resolution, proposal.proposal_id AS proposal_id, rank, grade, allocated_time_lr+allocated_time_mr AS allocated_time_tac, allocated_time_lr, allocated_time_mr, filter_g, filter_r, filter_i, filter_z, filter_y, psf_flux_g, psf_flux_r, psf_flux_i, psf_flux_z, psf_flux_y, psf_flux_error_g, psf_flux_error_r, psf_flux_error_i, psf_flux_error_z, psf_flux_error_y, total_flux_g, total_flux_r, total_flux_i, total_flux_z, total_flux_y, total_flux_error_g, total_flux_error_r, total_flux_error_i, total_flux_error_z, total_flux_error_y FROM target JOIN proposal ON target.proposal_id=proposal.proposal_id JOIN input_catalog AS c ON target.input_catalog_id = c.input_catalog_id WHERE proposal.proposal_id = :proposal_id AND c.active;"
+    )
+
+    query_rows = []
+    with tgt_db.connect() as conn:
+        for proposal_id in proposal_ids:
+            result = conn.execute(sql, {"proposal_id": proposal_id})
+            query_rows.extend(result.mappings().all())
+
+    df_tgt = pd.DataFrame(query_rows)
+    if len(df_tgt) == 0:
+        return Table()
+
+    df_tgt = df_tgt.rename(
+        columns={
+            "epoch": "equinox",
+            "effective_exptime": "exptime_usr",
+            "is_medium_resolution": "resolution",
+        }
+    )
+    df_tgt["resolution"] = np.where(df_tgt["resolution"], "M", "L")
+    df_tgt["allocated_time_tac"] = np.where(
+        df_tgt["resolution"] == "L",
+        df_tgt["allocated_time_lr"],
+        df_tgt["allocated_time_mr"],
+    )
+    df_tgt = df_tgt.drop(columns=["allocated_time_lr", "allocated_time_mr"])
+    df_tgt = remove_tgt_duplicate(df_tgt)
+    df_tgt[_TARGET_DB_FLUX_COLUMNS] = df_tgt[_TARGET_DB_FLUX_COLUMNS].apply(
+        pd.to_numeric, errors="coerce"
+    )
+
+    tb_tgt_from_db = Table.from_pandas(df_tgt)
+    for column in _TARGET_DB_FILTER_COLUMNS:
+        tb_tgt_from_db[column] = tb_tgt_from_db[column].astype("str")
+
+    return tb_tgt_from_db
+
+
+def load_raw_target_table(para):
+    # Load the raw target table either from a local file or from the target DB.
+    if len(para["localPath_tgt"]) > 0:
+        tb_tgt_raw = Table.read(para["localPath_tgt"])
+        logger.info(f"[S1] Target list is read from {para['localPath_tgt']}.")
+
+        if len(tb_tgt_raw) == 0:
+            logger.warning("[S1] No input targets.")
+            return None
+
+        return tb_tgt_raw
+
+    if None in para["DBPath_tgt"]:
+        logger.error("[S1] Incorrect connection info to database is provided.")
+        return None
+
+    import sqlalchemy as sa
+
+    db_address = database_info(para["DBPath_tgt"])
+    tgt_db = sa.create_engine(db_address)
+    try:
+        proposal_ids = para["proposalIds"]
+        return query_target_from_db(tgt_db, proposal_ids)
+    finally:
+        tgt_db.dispose()
 
 
 def visibility_checker2(
@@ -484,98 +592,15 @@ def read_target(mode, para, tb_queuedb):
 
     # Shared constants for early returns and column normalization.
     empty_result = (Table(), Table(), Table(), Table())
-    flux_columns = [
-        "psf_flux_g",
-        "psf_flux_r",
-        "psf_flux_i",
-        "psf_flux_z",
-        "psf_flux_y",
-        "psf_flux_error_g",
-        "psf_flux_error_r",
-        "psf_flux_error_i",
-        "psf_flux_error_z",
-        "psf_flux_error_y",
-        "total_flux_g",
-        "total_flux_r",
-        "total_flux_i",
-        "total_flux_z",
-        "total_flux_y",
-        "total_flux_error_g",
-        "total_flux_error_r",
-        "total_flux_error_i",
-        "total_flux_error_z",
-        "total_flux_error_y",
-    ]
-    filter_columns = ["filter_g", "filter_r", "filter_i", "filter_z", "filter_y"]
 
     # Step 1: load the raw target table from a local file or from the target DB.
-    if len(para["localPath_tgt"]) > 0:
-        tb_tgt = Table.read(para["localPath_tgt"])
-        logger.info(f"[S1] Target list is read from {para['localPath_tgt']}.")
-
-        if len(tb_tgt) == 0:
-            logger.warning("[S1] No input targets.")
-            return empty_result
-
-    elif None in para["DBPath_tgt"]:
-        logger.error("[S1] Incorrect connection info to database is provided.")
+    tb_tgt_raw = load_raw_target_table(para)
+    if tb_tgt_raw is None:
         return empty_result
 
-    else:
-        import pandas as pd
-        import sqlalchemy as sa
+    tb_tgt = tb_tgt_raw
 
-        db_address = database_info(para["DBPath_tgt"])
-        tgtDB = sa.create_engine(db_address)
-
-        def query_target_from_db(proposal_ids):
-            # Query one proposal at a time and collect rows via SQLAlchemy
-            # directly, instead of routing the SQL through pandas.
-            sql = sa.text(
-                "SELECT ob_code, obj_id, c.input_catalog_id AS input_catalog_id, ra, dec, epoch, priority, pmra, pmdec, parallax, effective_exptime, single_exptime, qa_reference_arm, is_medium_resolution, proposal.proposal_id AS proposal_id, rank, grade, allocated_time_lr+allocated_time_mr AS allocated_time_tac, allocated_time_lr, allocated_time_mr, filter_g, filter_r, filter_i, filter_z, filter_y, psf_flux_g, psf_flux_r, psf_flux_i, psf_flux_z, psf_flux_y, psf_flux_error_g, psf_flux_error_r, psf_flux_error_i, psf_flux_error_z, psf_flux_error_y, total_flux_g, total_flux_r, total_flux_i, total_flux_z, total_flux_y, total_flux_error_g, total_flux_error_r, total_flux_error_i, total_flux_error_z, total_flux_error_y FROM target JOIN proposal ON target.proposal_id=proposal.proposal_id JOIN input_catalog AS c ON target.input_catalog_id = c.input_catalog_id WHERE proposal.proposal_id = :proposal_id AND c.active;"
-            )
-
-            query_rows = []
-            with tgtDB.connect() as conn:
-                for proposal_id in proposal_ids:
-                    result = conn.execute(sql, {"proposal_id": proposal_id})
-                    query_rows.extend(result.mappings().all())
-
-            df_tgt = pd.DataFrame(query_rows)
-
-            if len(df_tgt) == 0:
-                return Table()
-
-            df_tgt = df_tgt.rename(
-                columns={
-                    "epoch": "equinox",
-                    "effective_exptime": "exptime_usr",
-                    "is_medium_resolution": "resolution",
-                }
-            )
-            df_tgt["resolution"] = np.where(df_tgt["resolution"], "M", "L")
-            df_tgt["allocated_time_tac"] = np.where(
-                df_tgt["resolution"] == "L",
-                df_tgt["allocated_time_lr"],
-                df_tgt["allocated_time_mr"],
-            )
-            df_tgt = df_tgt.drop(columns=["allocated_time_lr", "allocated_time_mr"])
-            df_tgt = remove_tgt_duplicate(df_tgt)
-
-            df_tgt[flux_columns] = df_tgt[flux_columns].apply(
-                pd.to_numeric, errors="coerce"
-            )
-
-            tb_tgt_from_db = Table.from_pandas(df_tgt)
-            for column in filter_columns:
-                tb_tgt_from_db[column] = tb_tgt_from_db[column].astype("str")
-
-            return tb_tgt_from_db
-
-        proposal_ids = para["proposalIds"]
-        tb_tgt = query_target_from_db(proposal_ids)
-
-    # Step 2: standardize core columns used by the rest of the pipeline.
+    # Step 2: standardize core columns used 
     tb_tgt["ra"] = tb_tgt["ra"].astype(float)
     tb_tgt["dec"] = tb_tgt["dec"].astype(float)
     tb_tgt["ob_code"] = tb_tgt["ob_code"].astype(str)
@@ -1640,8 +1665,6 @@ def fiber_allocate(
     backup=False,
 ):
     # Run fiber allocation either for all stored PPCs or for one PPC candidate.
-    time_start = time.time()
-    logger.info("[S3] Run netflow started")
 
     # Run for one PPC 
     if single_ppc_mode:
@@ -1680,6 +1703,9 @@ def fiber_allocate(
 
     # Run for all PPCs in the list
     else:
+        time_start = time.time()
+        logger.info("[S3] Run netflow started")
+
         ppc_records = []
 
         ppc_list = tb_tgt.meta["PPC"]
