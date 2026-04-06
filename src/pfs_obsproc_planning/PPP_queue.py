@@ -1562,6 +1562,7 @@ def run_netflow(
     fiber_non_allocation_cost=0.0,
     observation_time="2026-01-10T10:00:00Z",
     for_single_ppc=False,
+    classdict_override=None,
 ):
     # Run netflow once for the given PPC list.
     telescope_ra = ppc_list[:, 1]
@@ -1571,7 +1572,9 @@ def run_netflow(
     netflow_targets, proposal_fh_limits = build_netflow_targets(
         tb_tgt, for_single_ppc=for_single_ppc
     )
-    class_dict = build_classdict()
+    class_dict = (
+        classdict_override if classdict_override is not None else build_classdict()
+    )
 
     telescopes = [
         nf.Telescope(telescope_ra[index], telescope_dec[index], telescope_pa[index], observation_time)
@@ -1662,6 +1665,7 @@ def fiber_allocate(
     observation_time="2026-01-10T10:00:00Z",
     num_reserved_fibers=0,
     fiber_non_allocation_cost=0.0,
+    classdict_override=None,
     backup=False,
 ):
     # Run fiber allocation either for all stored PPCs or for one PPC candidate.
@@ -1682,6 +1686,7 @@ def fiber_allocate(
             tb_tgt,
             for_single_ppc=True,
             observation_time=observation_time,
+            classdict_override=classdict_override,
         )
 
         # return the assigned target IDs for the single PPC candidate
@@ -1732,6 +1737,7 @@ def fiber_allocate(
                 tb_tgt_in_group,
                 num_reserved_fibers=num_reserved_fibers,
                 fiber_non_allocation_cost=fiber_non_allocation_cost,
+                classdict_override=classdict_override,
             )
 
             # Extract the assigned targets for each pointing
