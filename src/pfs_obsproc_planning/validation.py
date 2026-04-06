@@ -190,6 +190,24 @@ def _find_unassigned_bright_nearby(pfsDesign0, bench, fibId, ppc_ra, ppc_dec, pp
     """
     unassigened_fibers = pfsDesign0[pfsDesign0.targetType == 4].fiberId
     df_unassigned_toobright = pd.DataFrame()
+
+    df_gaia_toobright_all = sfa.dbutils.generate_targets_from_gaiadb(
+        ppc_ra,
+        ppc_dec,
+        conf=conf,
+        search_radius=1.5,
+        band_select="phot_g_mean_mag",
+        mag_min=-2.0,
+        mag_max=12.0,
+        good_astrometry=False,
+        write_csv=False,
+    )
+
+    if df_gaia_toobright_all.empty:
+        return df_unassigned_toobright
+
+    radius_check = conf["sfa"]["fill_unassign_radius_check"]
+
     for unfib in unassigened_fibers:
         if (
             pfsDesign0[pfsDesign0.fiberId == unfib].fiberStatus
@@ -201,17 +219,13 @@ def _find_unassigned_bright_nearby(pfsDesign0, bench, fibId, ppc_ra, ppc_dec, pp
                 ccenter, pfsDesign0.obstime, ppc_ra, ppc_dec, ppc_pa
             )
 
-            df_gaia_toobright = sfa.dbutils.generate_targets_from_gaiadb(
-                un_ra,
-                un_dec,
-                conf=conf,
-                search_radius=conf["sfa"]["fill_unassign_radius_check"],
-                band_select="phot_g_mean_mag",
-                mag_min=-2.0,
-                mag_max=12.0,
-                good_astrometry=False,
-                write_csv=False,
+            diff = np.hypot(
+                (df_gaia_toobright_all["ra"] - un_ra) * np.cos(np.deg2rad(un_dec)),
+                df_gaia_toobright_all["dec"] - un_dec,
             )
+            df_gaia_toobright = df_gaia_toobright_all.loc[
+                diff < radius_check
+            ].reset_index(drop=True)
 
             if not df_gaia_toobright.empty:
                 df_tmp = pd.DataFrame(
