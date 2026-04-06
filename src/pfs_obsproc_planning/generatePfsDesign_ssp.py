@@ -727,7 +727,7 @@ class GeneratePfsDesign_ssp(object):
                 telescope_elevation=None,
                 conf=self.conf,
                 guidestar_mag_min=0,
-                guidestar_mag_max=12,
+                guidestar_mag_max=10,
                 guidestar_neighbor_mag_min=self.conf["sfa"][
                     "guidestar_neighbor_mag_min"
                 ],

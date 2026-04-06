@@ -461,7 +461,14 @@ def validation(parentPath, figpath, save, show, ssp, conf):
 
         count += 1
 
-        df_guidestars_toobright = _warn_too_bright_guidestars(ppc_ra, ppc_dec, ppc_pa, ppc_obstime_utc, conf)
+        if ssp:
+            df_guidestars_toobright = pd.DataFrame(
+                columns=["agId", "objId", "ra", "dec", "magnitude", "passband"]
+            )
+        else:
+            df_guidestars_toobright = _warn_too_bright_guidestars(
+                ppc_ra, ppc_dec, ppc_pa, ppc_obstime_utc, conf
+            )
 
         # check bright stars nearby unassigned fibers including disabled fibers
         # Use pre-initialized bench and fiber-id mapping created outside the loop.
