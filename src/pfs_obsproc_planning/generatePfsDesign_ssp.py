@@ -79,6 +79,8 @@ def read_conf(conf):
     if "guidestar_minsep_deg" not in config["sfa"]:
         config["sfa"]["guidestar_minsep_deg"] = 0.0002778
 
+    config["netflow"]["apply_nir_flag"] = False
+
     return config
 
 

@@ -347,6 +347,7 @@ class GeneratePfsDesign(object):
             dirName=self.outputDirPPP,
             numReservedFibers=num_reserved_fibers,
             fiberNonAllocationCost=fiber_non_allocation_cost,
+            cobra_feature_flag=self.conf["netflow"]["apply_nir_flag"],
             backup=backup,
             conf=self.conf,
         )
