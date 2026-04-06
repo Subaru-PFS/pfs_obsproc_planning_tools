@@ -38,10 +38,14 @@ dependencies = [
   "seaborn>=0.13.2",
   "shapely>=2.0.1",
   "sqlalchemy>=2.0.21",
+  "tomli_w>=1.2.0",
 ]
 requires-python = ">=3.12"
 readme = "README.md"
 license = { text = "MIT" }
+
+[project.scripts]
+pfs-packages = "pfs_obsproc_planning.pfs_packages:main"
 
 [build-system]
 requires = ["pybind11", "setuptools", "setuptools_scm", "wheel"]

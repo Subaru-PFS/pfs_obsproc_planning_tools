@@ -8,29 +8,27 @@ clear inline comments while preserving original behavior.
 
 # import os,sys,re
 # import math as mt
-import numpy as np
+import itertools as it
 import re
-
-# from scipy import ndimage
-# from scipy.optimize import curve_fit
-from scipy.spatial import distance_matrix
-
-# import matplotlib
-# matplotlib.use('agg')
-import matplotlib.pyplot as plt
-from loguru import logger
 
 # event
 # from eventPlot import PointBrowser
 import matplotlib.patches as patches
 
+# import matplotlib
+# matplotlib.use('agg')
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
-import itertools as it
+from loguru import logger
 
 # from scipy import interpolate as ipol
 # from PIL import Image
 from pfs.utils.fiberids import FiberIds
 
+# from scipy import ndimage
+# from scipy.optimize import curve_fit
+from scipy.spatial import distance_matrix
 
 # ----------------------
 # Module-level caches (performance)
@@ -62,6 +60,7 @@ def _get_sector_reference_xy():
         points.append(175.0 * np.stack([np.cos(phi), np.sin(phi)], axis=-1))
         _SECTOR_REFERENCE_XY = np.concatenate(points, axis=0)
     return _SECTOR_REFERENCE_XY
+
 
 """
     TargetType.BLACKSPOT: 10
@@ -114,8 +113,8 @@ def get_ag_counts(df_ag, threshold=19, radius=245.0):
 def _draw_fov_points(ax, df_fib, df_ag, unfib_bright, fiber_id_n2, c, alpha, s):
     """Draw scatter points on the FoV axes (unassigned, sky, std, sci, AGs).
 
-    This consolidates the multiple consecutive scatter() calls into a single
-   , well-named helper for readability.
+     This consolidates the multiple consecutive scatter() calls into a single
+    , well-named helper for readability.
     """
     if sum((df_fib.targetType == 4) * (df_fib.fiberStatus == 1)) > 0:
         # unassigned (targetType == 4)
@@ -335,37 +334,41 @@ def _draw_histograms(ax2, ax3, df_fib, df_ag, conf):
     )
 
     # stacked histogram per proposal/filter
-    df_mags = df_fib[["proposalId", "pfsMag_plot", "pfsflux_plot_filter"]].groupby(by=["proposalId", "pfsflux_plot_filter"], as_index=False)
-    c_list = it.cycle([
-        "#1f77b4",  # blue
-        "#ff7f0e",  # orange
-        "#2ca02c",  # green
-        "#d62728",  # red
-        "#9467bd",  # purple
-        "#8c564b",  # brown
-        "#e377c2",  # pink
-        "#7f7f7f",  # gray
-        "#bcbd22",  # olive
-        "#17becf",  # cyan
-        "#aec7e8",  # light blue
-        "#ffbb78",  # light orange
-        "#98df8a",  # light green
-        "#ff9896",  # light red
-        "#c5b0d5",  # light purple
-    ])
+    df_mags = df_fib[["proposalId", "pfsMag_plot", "pfsflux_plot_filter"]].groupby(
+        by=["proposalId", "pfsflux_plot_filter"], as_index=False
+    )
+    c_list = it.cycle(
+        [
+            "#1f77b4",  # blue
+            "#ff7f0e",  # orange
+            "#2ca02c",  # green
+            "#d62728",  # red
+            "#9467bd",  # purple
+            "#8c564b",  # brown
+            "#e377c2",  # pink
+            "#7f7f7f",  # gray
+            "#bcbd22",  # olive
+            "#17becf",  # cyan
+            "#aec7e8",  # light blue
+            "#ffbb78",  # light orange
+            "#98df8a",  # light green
+            "#ff9896",  # light red
+            "#c5b0d5",  # light purple
+        ]
+    )
 
     mag_lists = []
     label_per_prog = []
     c_sci = []
-    
+
     for k, v in df_mags.groups.items():
-        if k[0] == 'N/A':
+        if k[0] == "N/A":
             continue
-    
+
         mags = df_fib.loc[v, "pfsMag_plot"].values
         n_mags = len(mags)
         n_too_bright = np.sum(mags < 13)
-    
+
         if conf["ppp"]["mode"] == "classic":
             if k[0] in conf["sfa"]["proposalIds_obsFiller"]:
                 label = f"obs. filler ({n_mags}; {n_too_bright}<13mag)"
@@ -375,7 +378,7 @@ def _draw_histograms(ax2, ax3, df_fib, df_ag, conf):
                 label = f"usr filler ({n_mags}; {n_too_bright}<13mag)"
         else:
             label = f"{k[0]} ({k[1]}, {n_mags}; {n_too_bright}<13mag)"
-    
+
         mag_lists.append(mags)
         label_per_prog.append(label)
         c_sci.append(next(c_list))
@@ -391,12 +394,14 @@ def _draw_histograms(ax2, ax3, df_fib, df_ag, conf):
         stacked=True,
     )
 
-    ax2.legend(fontsize=8, loc='upper left', bbox_to_anchor=(0., 1.2), ncol=2)
+    ax2.legend(fontsize=8, loc="upper left", bbox_to_anchor=(0.0, 1.2), ncol=2)
     ax2.set_xlabel("mag", fontsize=12)
     ax2.set_ylabel("N (target or STD)", fontsize=12)
 
     # AG histogram
-    ax3.hist(df_ag["agMag"], bins=bins, range=(mmin, mmax), color=c["ag"], lw=0, alpha=0.4)
+    ax3.hist(
+        df_ag["agMag"], bins=bins, range=(mmin, mmax), color=c["ag"], lw=0, alpha=0.4
+    )
     ax3.set_ylabel("N (AG)", fontsize=12)
     ax3.set_xlabel("mag", fontsize=12)
 
@@ -405,13 +410,13 @@ def _draw_ag_table(ax4, agnum_table, agnum_threshold):
     """Draw the AG count table (2 rows: total and bright<=threshold)"""
     ax4.table(
         agnum_table,
-        loc='center',
-        colLabels=['AG1', 'AG2', 'AG3', 'AG4', 'AG5', 'AG6'],
-        rowLabels=['Total', f"<={agnum_threshold} mag"],
+        loc="center",
+        colLabels=["AG1", "AG2", "AG3", "AG4", "AG5", "AG6"],
+        rowLabels=["Total", f"<={agnum_threshold} mag"],
         colWidths=[0.1] * 6,
     )
     ax4.tick_params(
-        axis='both',
+        axis="both",
         bottom=False,
         top=False,
         left=False,
@@ -423,6 +428,7 @@ def _draw_ag_table(ax4, agnum_table, agnum_threshold):
         labelsize=7,
     )
     ax4.set_frame_on(False)
+
 
 def get_pfs_utils_path():
     try:
@@ -443,12 +449,24 @@ def get_pfs_utils_path():
             import pfs.utils
 
             p = Path(pfs.utils.__path__[0])
-            p_fiberdata = p.parent.parent.parent / "data" / "fiberids"
-            if p_fiberdata.exists():
+
+            p_fiberdata0 = p / "data" / "fiberids"
+            p_fiberdata1 = p.parent.parent.parent / "data" / "fiberids"
+
+            logger.debug(f"{p=}")
+            logger.debug(f"{p_fiberdata0=}")
+            logger.debug(f"{p_fiberdata1=}")
+
+            if p_fiberdata0.exists():
                 logger.info(
-                    f"pfs.utils's fiber data directory {p_fiberdata} was found and will be used."
+                    f"pfs.utils's fiber data directory {p_fiberdata0} was found and will be used."
                 )
-                return p_fiberdata
+                return p_fiberdata0
+            elif p_fiberdata1.exists():  # for backward compatibility
+                logger.info(
+                    f"pfs.utils's fiber data directory {p_fiberdata1} was found and will be used."
+                )
+                return p_fiberdata1
             else:
                 raise FileNotFoundError
         except ModuleNotFoundError as e:
@@ -545,26 +563,23 @@ def plot_FoV(
         edgecolor="k",
     )
     gs = fig.add_gridspec(5, 2)
-    ax1 = fig.add_subplot(gs[:4,0], aspect='equal')
+    ax1 = fig.add_subplot(gs[:4, 0], aspect="equal")
     ax2 = fig.add_subplot(gs[0:2, 1])
     ax3 = fig.add_subplot(gs[2:4, 1], sharex=ax2)
-    ax4 = fig.add_subplot(gs[4,:])
+    ax4 = fig.add_subplot(gs[4, :])
 
     c = {
         # --- UN: highlight ---
-        "un": "tomato",        # darker slate gray (noticeable, calm)
-        "un_brt": "#C62828",    # dark saddle brown (very strong, warning-like)
-
+        "un": "tomato",  # darker slate gray (noticeable, calm)
+        "un_brt": "#C62828",  # dark saddle brown (very strong, warning-like)
         # --- reference / fixed ---
-        "dot": "#1F1F1F",       # near-black (cleaner than pure black)
-        "sky": "deepskyblue",   # KEEP
-        "fstar": "green",       # KEEP
-
+        "dot": "#1F1F1F",  # near-black (cleaner than pure black)
+        "sky": "deepskyblue",  # KEEP
+        "fstar": "green",  # KEEP
         # --- de-emphasized ---
-        "sci": "#F2C6C6",       # faint salmon (soft, background-level)
-
+        "sci": "#F2C6C6",  # faint salmon (soft, background-level)
         # --- others ---
-        "ag": "blueviolet",     # unchanged
+        "ag": "blueviolet",  # unchanged
     }
     c_list = it.cycle(["salmon", "royalblue", "orange", "limegreen", "violet"])
 
@@ -585,7 +600,7 @@ def plot_FoV(
     # transpose table for the Axes.table layout (rows: total, bright<=threshold)
     agnum_table = [list(i) for i in zip(*agnum_table)]
 
-    ax1.legend(fontsize="x-small", loc='upper left', bbox_to_anchor=(0., 1.2), ncol=3)
+    ax1.legend(fontsize="x-small", loc="upper left", bbox_to_anchor=(0.0, 1.2), ncol=3)
     ax1.set_xlim(xmin=-255, xmax=255)
     ax1.set_ylim(ymin=-255, ymax=255)
 
@@ -606,15 +621,27 @@ def plot_FoV(
     _draw_ag_table(ax4, agnum_table, agnum_threshold)
 
     # AG magnitude table
-    ax4.table(agnum_table, loc='center',
-              colLabels=['AG1', 'AG2', 'AG3', 'AG4', 'AG5', 'AG6'],
-              rowLabels=['Total', f"<={agnum_threshold} mag"],
-              colWidths=[0.1, 0.1, 0.1, 0.1, 0.1, 0.1])
-    ax4.tick_params(axis='both', bottom=False, top=False, left=False, right=False,
-                    labelbottom=False, labeltop=False, labelleft=False, labelright=False,
-                     labelsize=7)
+    ax4.table(
+        agnum_table,
+        loc="center",
+        colLabels=["AG1", "AG2", "AG3", "AG4", "AG5", "AG6"],
+        rowLabels=["Total", f"<={agnum_threshold} mag"],
+        colWidths=[0.1, 0.1, 0.1, 0.1, 0.1, 0.1],
+    )
+    ax4.tick_params(
+        axis="both",
+        bottom=False,
+        top=False,
+        left=False,
+        right=False,
+        labelbottom=False,
+        labeltop=False,
+        labelleft=False,
+        labelright=False,
+        labelsize=7,
+    )
     ax4.set_frame_on(False)
-    
+
     fig.suptitle(title, fontsize=12)
 
     if save:
@@ -675,6 +702,7 @@ def colour_background_warning_ag_min(val):
 
     return f"background-color: {colour}"
 
+
 def colour_background_warning_inr(val):
     colour = warning if (float(val) < -174) or (float(val) > 174) else ""
 
@@ -730,22 +758,35 @@ def init_check_design():
     return df
 
 
-def check_design(designId, ppc_code, df_fib, df_ag, df_guidestars_toobright, n_unfib_bright=0):
+def check_design(
+    designId, ppc_code, df_fib, df_ag, df_guidestars_toobright, n_unfib_bright=0
+):
     a, a_ = check_ags(df_ag, df_guidestars_toobright)
-    ag_cols = [
-        f"{ai} ({aj})" if aj > 0 else f"{ai}"
-        for ai, aj in zip(a, a_)
-    ]
-    
+    ag_cols = [f"{ai} ({aj})" if aj > 0 else f"{ai}" for ai, aj in zip(a, a_)]
+
     vals = check_fibers(df_fib)
 
     df_ch = pd.DataFrame(
         data=np.append(vals, ag_cols).reshape(1, len(vals) + len(ag_cols)),
         columns=[
-                "sky_mean", "sky_std", "sky_min", "sky_max", "sky_sum",
-                "std_mean", "std_std", "std_min", "std_max", "std_sum",
-                "ag1", "ag2", "ag3", "ag4", "ag5", "ag6", "ag_sum",
-            ],
+            "sky_mean",
+            "sky_std",
+            "sky_min",
+            "sky_max",
+            "sky_sum",
+            "std_mean",
+            "std_std",
+            "std_min",
+            "std_max",
+            "std_sum",
+            "ag1",
+            "ag2",
+            "ag3",
+            "ag4",
+            "ag5",
+            "ag6",
+            "ag_sum",
+        ],
     )
 
     df_ch["designId"] = f"0x{designId:016x}"
