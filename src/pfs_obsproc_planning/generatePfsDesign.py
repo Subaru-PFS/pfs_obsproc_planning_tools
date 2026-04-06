@@ -7,6 +7,7 @@ import sys
 import time
 import warnings
 from datetime import timedelta, datetime, date
+from pathlib import Path
 
 import git
 import numpy as np
@@ -29,10 +30,39 @@ warnings.filterwarnings("ignore")
 hawaii_tz = pytz.timezone("Pacific/Honolulu")
 
 
+def merge_nested_dicts(base_config, override_config):
+    merged = dict(base_config)
+
+    for key, value in override_config.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = merge_nested_dicts(merged[key], value)
+        else:
+            merged[key] = value
+
+    return merged
+
+
 def read_conf(conf):
-    with open(conf, "rb") as f:
-        config = tomllib.load(f)
-    return config
+    primary_path = Path(conf).expanduser().resolve()
+
+    with primary_path.open("rb") as f:
+        primary_config = tomllib.load(f)
+
+    packages_config = primary_config.get("packages", {})
+    secondary_config_path = packages_config.get("config_path")
+
+    if not secondary_config_path:
+        return primary_config
+
+    secondary_path = Path(secondary_config_path).expanduser()
+    if not secondary_path.is_absolute():
+        secondary_path = (primary_path.parent / secondary_path).resolve()
+
+    with secondary_path.open("rb") as f:
+        secondary_config = tomllib.load(f)
+
+    logger.info(f"Loaded extra config from {secondary_path}")
+    return merge_nested_dicts(secondary_config, primary_config)
 
 
 def clear_folder(folder):
@@ -243,7 +273,7 @@ class GeneratePfsDesign(object):
             raise ("specify obs_dates as a list")
     #"""
 
-    def runPPP(self, n_pccs_l, n_pccs_m, backup=False, show_plots=False):
+    def runPPP(self, n_pccs_l, n_pccs_m, backup=False):
         if "queue" in self.workDir:
             from . import PPP_queue as PPP
         else:
@@ -317,7 +347,7 @@ class GeneratePfsDesign(object):
             dirName=self.outputDirPPP,
             numReservedFibers=num_reserved_fibers,
             fiberNonAllocationCost=fiber_non_allocation_cost,
-            show_plots=show_plots,
+            cobra_feature_flag=self.conf["netflow"]["apply_nir_flag"],
             backup=backup,
             conf=self.conf,
         )
@@ -447,7 +477,7 @@ class GeneratePfsDesign(object):
                         print(f"Gap: start at {last_stop}, stop at {tw_stop}")
 
                 if len(starttime_backup) > 0:
-                    self.runPPP(100, 100, show_plots=False, backup=True)
+                    self.runPPP(100, 100, backup=True)
 
                     self.df_qplan_, self.sdlr_, self.figs_qplan_ = qPlan.run(
                         self.conf,
@@ -881,12 +911,6 @@ def get_arguments():
         default="2023-05-20",
         help="A list of observation dates (default: 2023-05-20)",
     )
-    # show_plots
-    parser.add_argument(
-        "--show_plots",
-        action="store_true",
-        help="show plots of the PPP results? (default: False)",
-    )
 
     args = parser.parse_args()
 
@@ -901,7 +925,7 @@ def main():
 
     ## run PPP ##
     if args.skip_ppp is False:
-        gpd.runPPP(args.n_pccs_l, args.n_pccs_m, args.show_plots)
+        gpd.runPPP(args.n_pccs_l, args.n_pccs_m)
 
     ## run queuePlanner ##
 
