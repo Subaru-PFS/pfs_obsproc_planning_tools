@@ -149,6 +149,67 @@ def _warn_duplicate_fibers(pfsDesign0):
         )
 
 
+def _warn_patrol_region_violations(pfsDesign0, bench, fibId, designId, ppc_code):
+    """Log warnings for targets placed outside their cobra patrol regions."""
+    fiber_id = np.asarray(pfsDesign0.fiberId, dtype=int)
+    cobra_idx = np.array(
+        [fibId.fiberIdToCobraId(int(fid)) - 1 for fid in fiber_id], dtype=int
+    )
+
+    centers = bench.cobras.centers[cobra_idx]
+    target_pfi = np.asarray(pfsDesign0.pfiNominal, dtype=float)
+    target_pfi_x = target_pfi[:, 0]
+    target_pfi_y = target_pfi[:, 1]
+
+    l1 = np.asarray(bench.cobras.L1, dtype=float)
+    l2 = np.asarray(bench.cobras.L2, dtype=float)
+    if l1.ndim == 0:
+        l1 = np.full(len(cobra_idx), l1, dtype=float)
+    else:
+        l1 = l1[cobra_idx]
+    if l2.ndim == 0:
+        l2 = np.full(len(cobra_idx), l2, dtype=float)
+    else:
+        l2 = l2[cobra_idx]
+
+    outer = l1 + l2
+    inner = np.abs(l1 - l2)
+    fiber_x = centers.real
+    fiber_y = centers.imag
+    r = np.hypot(target_pfi_x - fiber_x, target_pfi_y - fiber_y)
+
+    df_patrol = pd.DataFrame(
+        {
+            "ppc_code": ppc_code,
+            "designId": f"0x{designId:016x}",
+            "fiberId": fiber_id,
+            "fiber_x": fiber_x,
+            "fiber_y": fiber_y,
+            "ob_code": pfsDesign0.obCode,
+            "target_pfi_x": target_pfi_x,
+            "target_pfi_y": target_pfi_y,
+            "r": r,
+            "inner": inner,
+            "outer": outer,
+        }
+    )
+
+    cobra_outer = df_patrol.loc[r > outer].reset_index(drop=True)
+    cobra_inner = df_patrol.loc[r < inner].reset_index(drop=True)
+
+    if not cobra_outer.empty:
+        logger.warning(
+            "[Validation of output] Targets are outside cobra outer patrol regions "
+            f"({ppc_code}, 0x{designId:016x}):\n{cobra_outer.to_string(index=False)}"
+        )
+
+    if not cobra_inner.empty:
+        logger.warning(
+            "[Validation of output] Targets are inside cobra inner patrol regions "
+            f"({ppc_code}, 0x{designId:016x}):\n{cobra_inner.to_string(index=False)}"
+        )
+
+
 def _warn_too_bright_guidestars(ppc_ra, ppc_dec, ppc_pa, ppc_obstime_utc, conf):
     """Query Gaia for very bright guide stars and return a DataFrame of results.
 
@@ -461,8 +522,11 @@ def validation(parentPath, figpath, save, show, ssp, conf):
         pfsDesign0.validate()
         print(f"{pfsDesign0.designName}, {pfsDesign0.arms}")
 
+        ppc_code_ = pfsDesign0.designName
+
         # check fiber duplicates
         _warn_duplicate_fibers(pfsDesign0)
+        _warn_patrol_region_violations(pfsDesign0, bench, fibId, designId, ppc_code_)
 
         # check bright stars in the guiding field
         ppc_ra = pfsDesign0.raBoresight
@@ -535,7 +599,6 @@ def validation(parentPath, figpath, save, show, ssp, conf):
         else:
             unfib_bright = []
 
-        ppc_code_ = pfsDesign0.designName
         df = pldes.check_design(designId, ppc_code_, df_fib, df_ag, df_guidestars_toobright, n_unfib_bright=len(unfib_bright))
         df_ch = pd.concat([df_ch, df], ignore_index=True)
         title = f"designId=0x{designId:016x} ({pfsDesign0.raBoresight:.2f},{pfsDesign0.decBoresight:.2f},PA={pfsDesign0.posAng:.1f})\n{ppc_code_}"
