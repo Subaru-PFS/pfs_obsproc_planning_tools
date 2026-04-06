@@ -38,37 +38,25 @@ def read_conf(conf):
 
     # get some parameters from environmet variables
     # if not in the config file and already set as enviroment variables
-    if ("pfs_utils_dir" not in config["packages"]) and (
-        os.environ.get("PFS_UTILS_DIR") is not None
-    ):
-        config["packages"]["pfs_utils_dir"] = os.environ.get("PFS_UTILS_DIR")
-        logger.info(
-            f"Setting config['packages']['pfs_utils_dir'] from environment as {config['packages']['pfs_utils_dir']}"
-        )
+    config["packages"]["pfs_utils_dir"] = os.environ.get("PFS_UTILS_DIR")
+    logger.info(
+        f"Setting config['packages']['pfs_utils_dir'] from environment as {config['packages']['pfs_utils_dir']}"
+    )
 
-    if ("pfs_instdata_dir" not in config["packages"]) and (
-        os.environ.get("PFS_INSTDATA_DIR") is not None
-    ):
-        config["packages"]["pfs_instdata_dir"] = os.environ.get("PFS_INSTDATA_DIR")
-        logger.info(
-            f"Setting config['packages']['pfs_instdata_dir'] from environment as {config['packages']['pfs_instdata_dir']}"
-        )
+    config["packages"]["pfs_instdata_dir"] = os.environ.get("PFS_INSTDATA_DIR")
+    logger.info(
+        f"Setting config['packages']['pfs_instdata_dir'] from environment as {config['packages']['pfs_instdata_dir']}"
+    )
 
-    if ("cobra_coach_dir" not in config["sfa"]) and (
-        os.environ.get("COBRA_COACH_DIR") is not None
-    ):
-        config["sfa"]["cobra_coach_dir"] = os.environ.get("COBRA_COACH_DIR")
-        logger.info(
-            f"Setting config['sfa']['cobra_coach_dir'] from environment as {config['sfa']['cobra_coach_dir']}"
-        )
+    config["sfa"]["cobra_coach_dir"] = os.environ.get("COBRA_COACH_DIR")
+    logger.info(
+        f"Setting config['sfa']['cobra_coach_dir'] from environment as {config['sfa']['cobra_coach_dir']}"
+    )
 
-    if ("template" not in config["ope"]) and (
-        os.environ.get("OPE_TEMPLATE") is not None
-    ):
-        config["ope"]["template"] = os.environ.get("OPE_TEMPLATE", None)
-        logger.info(
-            f"Setting config['ope']['template'] from environmentas {config['ope']['template']}"
-        )
+    config["ope"]["template"] = os.environ.get("OPE_TEMPLATE", None)
+    logger.info(
+        f"Setting config['ope']['template'] from environmentas {config['ope']['template']}"
+    )
 
     if "guidestar_mag_min" not in config["sfa"]:
         config["sfa"]["guidestar_mag_min"] = 12
