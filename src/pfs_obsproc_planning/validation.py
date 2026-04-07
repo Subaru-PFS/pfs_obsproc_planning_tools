@@ -155,8 +155,8 @@ def _warn_patrol_region_violations(pfsDesign0, bench, fibId, designId, ppc_code)
     cobra_ids_raw = np.array(
         [fibId.fiberIdToCobraId(int(fid)) for fid in fiber_id], dtype=int
     )
-    # cobra IDs >= FiberIds.ENGINEERING (65533) are sentinel values for
-    # engineering/empty/missing fibers; skip them as they have no cobra assignment
+    # Keep only cobra IDs that fall within the bench cobra range before
+    # converting from the 1-based IDs returned by FiberIds to 0-based indices.
     valid_mask = cobra_ids_raw <= len(bench.cobras.centers)
     fiber_id = fiber_id[valid_mask]
     cobra_idx = cobra_ids_raw[valid_mask] - 1

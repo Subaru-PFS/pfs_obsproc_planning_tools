@@ -37,7 +37,7 @@ hawaii_tz = pytz.timezone("Pacific/Honolulu")
 def _resolve_config_from_env(
     config, section, key, env_var, required=True, default=None
 ):
-    """Set config[section][key] from an environment variable, with config-file precedence.
+    """Set config[section][key] from an environment variable, with environment-variable precedence.
 
     Parameters
     ----------
@@ -136,9 +136,20 @@ def read_conf(conf):
     with open(conf, "rb") as f:
         config = tomllib.load(f)
 
+    # ensure required sections exist even if omitted from the TOML file
+    config.setdefault("packages", {})
+    config.setdefault("sfa", {})
+    config.setdefault("ope", {})
+
     # derive pfs_utils_dir from the installed pfs.utils package if not set in config
     if "pfs_utils_dir" not in config["packages"]:
-        config["packages"]["pfs_utils_dir"] = pfs.utils.__path__[0]
+        _p = pathlib.Path(pfs.utils.__path__[0])
+        if (_p / "data" / "fiberids").exists():
+            # pip-installed: data is bundled inside the package directory
+            config["packages"]["pfs_utils_dir"] = str(_p)
+        else:
+            # LSST-style source install: repo root is 3 levels up from python/pfs/utils
+            config["packages"]["pfs_utils_dir"] = str(_p.parent.parent.parent)
         logger.info(
             f"Setting config['packages']['pfs_utils_dir'] from pfs.utils as {config['packages']['pfs_utils_dir']}"
         )
