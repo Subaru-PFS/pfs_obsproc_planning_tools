@@ -172,6 +172,9 @@ class GeneratePfsDesign_ssp(object):
         # cobracoach dir
         self.cobraCoachDir = os.path.join(self.conf["sfa"]["cobra_coach_dir"])
 
+        # set apply_nir_flag for netflow
+        self.apply_nir_flag = self.conf["netflow"]["apply_nir_flag"]
+
         # check versions of dependent packages
         def check_version_pfs(self, package):
             if self.conf["packages"]["check_version"]:
@@ -828,7 +831,7 @@ class GeneratePfsDesign_ssp(object):
                     vis_.update({i: int(df["cidx"].values[i])})
                 return vis_
 
-            target1 = nfutils.register_objects(df_sci, target_class="sci")
+            target1 = nfutils.register_objects(df_sci, target_class="sci", apply_nir_flag=self.apply_nir_flag)
             vis1 = vis_generator(df_sci)
 
             target2 = nfutils.register_objects(df_fluxstds, target_class="cal")
@@ -906,6 +909,7 @@ class GeneratePfsDesign_ssp(object):
                 df_filler=None,
                 force_exptime=900.0,
                 two_stage=self.conf["netflow"]["two_stage"],
+                apply_nir_flag=self.apply_nir_flag,
                 design_ready=True,
             )
             #"""
