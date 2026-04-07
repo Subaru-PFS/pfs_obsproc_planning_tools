@@ -330,6 +330,9 @@ class GeneratePfsDesign_ssp(object):
     def update_config(self):
         self.conf = read_conf(os.path.join(self.workDir, self.config))
 
+    def get_config(self):
+        return self.conf
+
     def ssp_tgt_validate(self, tb, ppc_code, tgt_type):
         validate_success = True
 
