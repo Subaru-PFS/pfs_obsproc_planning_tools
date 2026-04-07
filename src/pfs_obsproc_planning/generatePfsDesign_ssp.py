@@ -3,6 +3,7 @@
 # ruff: noqa: E402  (sys.stdout redirect must precede imports to suppress noisy output)
 
 import os
+import pathlib
 import sys
 
 # skip print out message
@@ -12,16 +13,17 @@ import tomllib
 import warnings
 from datetime import datetime, timedelta, timezone
 
+import astropy.units as u
+import ets_fiber_assigner.netflow as nf
 import git
 import numpy as np
 import pandas as pd
 import pfs.utils
 import pytz
-import astropy.units as u
 from astropy.coordinates import Angle
 from astropy.table import Table, vstack
 from loguru import logger
-import ets_fiber_assigner.netflow as nf
+from pfs.instdata import get_root_path as get_pfs_instdata_root_path
 from pfs_design_tool import reconfigure_fibers_ppp as sfa
 from pfs_design_tool.pointing_utils import nfutils
 
@@ -32,31 +34,126 @@ warnings.filterwarnings("ignore")
 hawaii_tz = pytz.timezone("Pacific/Honolulu")
 
 
+def _resolve_config_from_env(
+    config, section, key, env_var, required=True, default=None
+):
+    """Set config[section][key] from an environment variable, with config-file precedence.
+
+    Parameters
+    ----------
+    config : dict
+        Configuration dictionary loaded from a TOML file.
+    section : str
+        Top-level key in config (e.g. ``"packages"``, ``"sfa"``).
+    key : str
+        Key within config[section] to set.
+    env_var : str
+        Name of the environment variable to read.
+    required : bool, optional
+        If True (default) and the key is absent from config and the environment
+        variable is unset, raise KeyError.
+    default : str or None, optional
+        Fallback value used when required=False and the environment variable is
+        unset. Defaults to None.
+
+    Raises
+    ------
+    KeyError
+        If required=True and neither config nor the environment variable provides
+        a value.
+
+    Notes
+    -----
+    Precedence rules:
+
+    - Key present in config **and** env var set   → overwrite with env var, log warning.
+    - Key present in config **and** env var unset → keep config value (no-op).
+    - Key absent from config **and** env var set  → set from env var, log info.
+    - Key absent from config **and** env var unset, required=True  → raise KeyError.
+    - Key absent from config **and** env var unset, required=False → set to default.
+    """
+    value = os.environ.get(env_var, default)
+    if key in config[section]:
+        if value is not None:
+            logger.warning(
+                f"Overwriting config['{section}']['{key}'] with environment variable {env_var}={value}"
+            )
+            config[section][key] = value
+    else:
+        if value is None and required:
+            logger.error(
+                f"{env_var} is not set in config file or environment variable. Please set it before running."
+            )
+            raise KeyError(
+                f"{env_var} is not set in config file or environment variable."
+            )
+        config[section][key] = value
+        logger.info(f"Setting config['{section}']['{key}'] from environment as {value}")
+
+
 def read_conf(conf):
+    """Load and normalize a TOML configuration file.
+
+    Reads the TOML file at *conf* and fills in any missing entries using
+    installed package metadata or environment variables, so that callers
+    receive a fully populated config dict regardless of how minimal the
+    TOML file is.
+
+    Parameters
+    ----------
+    conf : str or path-like
+        Path to the TOML configuration file.
+
+    Returns
+    -------
+    dict
+        Parsed and normalized configuration dictionary.
+
+    Raises
+    ------
+    KeyError
+        If a required value is absent from both the config file and the
+        corresponding environment variable.
+
+    Notes
+    -----
+    Resolution order for each setting:
+
+    ``packages.pfs_utils_dir``
+        Derived from ``pfs.utils.__path__`` if not present in config.
+
+    ``packages.pfs_instdata_dir``
+        Derived from ``pfs.instdata.get_root_path()`` if not present in config.
+
+    ``sfa.cobra_coach_dir``
+        Resolved from the environment variable ``COBRA_COACH_DIR`` via
+        :func:`_resolve_config_from_env`.
+
+    ``ope.template``
+        Resolved from the environment variable ``OPE_TEMPLATE`` via
+        :func:`_resolve_config_from_env`.
+    """
     with open(conf, "rb") as f:
         config = tomllib.load(f)
 
-    # get some parameters from environmet variables
-    # if not in the config file and already set as enviroment variables
-    config["packages"]["pfs_utils_dir"] = os.environ.get("PFS_UTILS_DIR")
-    logger.info(
-        f"Setting config['packages']['pfs_utils_dir'] from environment as {config['packages']['pfs_utils_dir']}"
-    )
+    # derive pfs_utils_dir from the installed pfs.utils package if not set in config
+    if "pfs_utils_dir" not in config["packages"]:
+        config["packages"]["pfs_utils_dir"] = pfs.utils.__path__[0]
+        logger.info(
+            f"Setting config['packages']['pfs_utils_dir'] from pfs.utils as {config['packages']['pfs_utils_dir']}"
+        )
 
-    config["packages"]["pfs_instdata_dir"] = os.environ.get("PFS_INSTDATA_DIR")
-    logger.info(
-        f"Setting config['packages']['pfs_instdata_dir'] from environment as {config['packages']['pfs_instdata_dir']}"
-    )
+    # derive pfs_instdata_dir from the installed pfs.instdata package if not set in config
+    if "pfs_instdata_dir" not in config["packages"]:
+        config["packages"]["pfs_instdata_dir"] = str(get_pfs_instdata_root_path())
+        logger.info(
+            f"Setting config['packages']['pfs_instdata_dir'] from pfs.instdata as {config['packages']['pfs_instdata_dir']}"
+        )
 
-    config["sfa"]["cobra_coach_dir"] = os.environ.get("COBRA_COACH_DIR")
-    logger.info(
-        f"Setting config['sfa']['cobra_coach_dir'] from environment as {config['sfa']['cobra_coach_dir']}"
-    )
-
-    config["ope"]["template"] = os.environ.get("OPE_TEMPLATE", None)
-    logger.info(
-        f"Setting config['ope']['template'] from environmentas {config['ope']['template']}"
-    )
+    # get some parameters from environment variables
+    # if not in the config file and already set as environment variables
+    _resolve_config_from_env(config, "sfa", "cobra_coach_dir", "COBRA_COACH_DIR")
+    _resolve_config_from_env(config, "ope", "template", "OPE_TEMPLATE")
 
     if "guidestar_mag_min" not in config["sfa"]:
         config["sfa"]["guidestar_mag_min"] = 12
@@ -67,6 +164,8 @@ def read_conf(conf):
     if "guidestar_minsep_deg" not in config["sfa"]:
         config["sfa"]["guidestar_minsep_deg"] = 0.0002778
 
+    if "netflow" not in config:
+        config["netflow"] = {}
     config["netflow"]["apply_nir_flag"] = False
 
     return config
@@ -170,6 +269,7 @@ class GeneratePfsDesign_ssp(object):
         self.conf = read_conf(os.path.join(self.workDir, self.config))
 
         # cobracoach dir
+        logger.debug(f"CobraCoach dir: {self.conf['sfa']['cobra_coach_dir']}")
         self.cobraCoachDir = os.path.join(self.conf["sfa"]["cobra_coach_dir"])
 
         # set apply_nir_flag for netflow
@@ -205,8 +305,14 @@ class GeneratePfsDesign_ssp(object):
         ]:
             check_version_pfs(self, package_)
 
-        repo_path = os.path.join(pfs.utils.__path__[0], "../../../")
-        os.environ["PFS_UTILS_DIR"] = os.path.join(pfs.utils.__path__[0], "../../../")
+        _p = pathlib.Path(pfs.utils.__path__[0])
+        if (_p / "data" / "fiberids").exists():
+            # pip-installed: data is bundled inside the package directory
+            repo_path = str(_p)
+        else:
+            # LSST-style source install: data lives at the repo root (3 levels up)
+            repo_path = str(_p.parent.parent.parent)
+        os.environ["PFS_UTILS_DIR"] = repo_path
 
         return None
 
@@ -505,7 +611,7 @@ class GeneratePfsDesign_ssp(object):
 
             catId = set(tb["input_catalog_id"])
             expected_Ids = set(self.conf["ssp"]["input_catalog_ids_sci"])
-            unexpected_Id = catId - expected_Ids 
+            unexpected_Id = catId - expected_Ids
             if len(unexpected_Id) > 0:
                 validate_success = False
                 logger.error(
@@ -769,7 +875,7 @@ class GeneratePfsDesign_ssp(object):
         except Exception:
             logger.error(f"Missing ppcList.ecsv for WG={WG}: {ppc_path}")
             return Table()
-    
+
         mask = np.array(
             [
                 (isinstance(val, str) and val.strip().lower() != "nan")
@@ -831,7 +937,9 @@ class GeneratePfsDesign_ssp(object):
                     vis_.update({i: int(df["cidx"].values[i])})
                 return vis_
 
-            target1 = nfutils.register_objects(df_sci, target_class="sci", apply_nir_flag=self.apply_nir_flag)
+            target1 = nfutils.register_objects(
+                df_sci, target_class="sci", apply_nir_flag=self.apply_nir_flag
+            )
             vis1 = vis_generator(df_sci)
 
             target2 = nfutils.register_objects(df_fluxstds, target_class="cal")
@@ -1108,7 +1216,7 @@ class GeneratePfsDesign_ssp(object):
             obsdate_ = datetime.strptime(obsdate_utc, "%Y-%m-%d").date()
             if obsdate_ < today_utc:
                 continue
-        
+
             logger.info(f"[Make ope] generating ope file for {obsdate_utc} (UTC)...")
             template_file = (
                 self.conf["ope"]["template"]
@@ -1227,15 +1335,19 @@ class GeneratePfsDesign_ssp(object):
         self.update_config()
 
         for wg_ in self.conf["ssp"]["WG"]:
-            design_sum_path = os.path.join(self.workDir, "pfs_designs", f"{wg_}_summary_reconfigure.csv")
+            design_sum_path = os.path.join(
+                self.workDir, "pfs_designs", f"{wg_}_summary_reconfigure.csv"
+            )
             logger.info(design_sum_path)
 
             if os.path.exists(design_sum_path):
-                parentPath = os.path.join(self.workDir, self.conf["ope"]["designPath"], wg_)
+                parentPath = os.path.join(
+                    self.workDir, self.conf["ope"]["designPath"], wg_
+                )
                 figpath = os.path.join(
                     self.workDir, self.conf["ope"]["validationPath"], wg_
                 )
-    
+
                 validation.validation(
                     parentPath,
                     figpath,
@@ -1244,7 +1356,7 @@ class GeneratePfsDesign_ssp(object):
                     self.conf["ssp"]["ssp"],
                     self.conf,
                 )
-    
+
                 logger.info(f"validation plots saved under {figpath}")
             else:
                 logger.error(

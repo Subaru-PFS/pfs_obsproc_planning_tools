@@ -152,14 +152,20 @@ def _warn_duplicate_fibers(pfsDesign0):
 def _warn_patrol_region_violations(pfsDesign0, bench, fibId, designId, ppc_code):
     """Log warnings for targets placed outside their cobra patrol regions."""
     fiber_id = np.asarray(pfsDesign0.fiberId, dtype=int)
-    cobra_idx = np.array(
-        [fibId.fiberIdToCobraId(int(fid)) - 1 for fid in fiber_id], dtype=int
+    cobra_ids_raw = np.array(
+        [fibId.fiberIdToCobraId(int(fid)) for fid in fiber_id], dtype=int
     )
+    # cobra IDs >= FiberIds.ENGINEERING (65533) are sentinel values for
+    # engineering/empty/missing fibers; skip them as they have no cobra assignment
+    valid_mask = cobra_ids_raw <= len(bench.cobras.centers)
+    fiber_id = fiber_id[valid_mask]
+    cobra_idx = cobra_ids_raw[valid_mask] - 1
 
     centers = bench.cobras.centers[cobra_idx]
-    target_pfi = np.asarray(pfsDesign0.pfiNominal, dtype=float)
+    target_pfi = np.asarray(pfsDesign0.pfiNominal, dtype=float)[valid_mask]
     target_pfi_x = target_pfi[:, 0]
     target_pfi_y = target_pfi[:, 1]
+    ob_code = np.asarray(pfsDesign0.obCode)[valid_mask]
 
     l1 = np.asarray(bench.cobras.L1, dtype=float)
     l2 = np.asarray(bench.cobras.L2, dtype=float)
@@ -185,7 +191,7 @@ def _warn_patrol_region_violations(pfsDesign0, bench, fibId, designId, ppc_code)
             "fiberId": fiber_id,
             "fiber_x": fiber_x,
             "fiber_y": fiber_y,
-            "ob_code": pfsDesign0.obCode,
+            "ob_code": ob_code,
             "target_pfi_x": target_pfi_x,
             "target_pfi_y": target_pfi_y,
             "r": r,
@@ -618,7 +624,14 @@ def validation(parentPath, figpath, save, show, ssp, conf):
         else:
             unfib_bright = []
 
-        df = pldes.check_design(designId, ppc_code_, df_fib, df_ag, df_guidestars_toobright, n_unfib_bright=len(unfib_bright))
+        df = pldes.check_design(
+            designId,
+            ppc_code_,
+            df_fib,
+            df_ag,
+            df_guidestars_toobright,
+            n_unfib_bright=len(unfib_bright),
+        )
         df_ch = pd.concat([df_ch, df], ignore_index=True)
         title = f"designId=0x{designId:016x} ({pfsDesign0.raBoresight:.2f},{pfsDesign0.decBoresight:.2f},PA={pfsDesign0.posAng:.1f})\n{ppc_code_}"
         fname = f"{figpath}/check_0x{designId:016x}"
