@@ -1,0 +1,121 @@
+[ppp]
+mode = 'queue'
+localPath_tgt = '' 
+localPath_ppc = ''
+sql_query = ""
+inputDir = 'input'
+reserveFibers = false
+fiberNonAllocationCost = 0.0
+visibility_check=false
+daily_plan=true
+
+[qplan]
+overhead = "5" # minute
+obs_dates = [
+    "2026-03-13",
+    "2026-03-14",
+    "2026-03-21",
+    "2026-03-22",
+]
+start_time = [
+    "2026-03-14 00:30:00",
+    "2026-03-15 00:30:00",
+    "2026-03-22 00:30:00",
+    "2026-03-23 00:30:00",
+]  # HST
+
+stop_time = [
+    "2026-03-14 05:45:00",
+    "2026-03-15 05:45:00",
+    "2026-03-22 05:40:00",
+    "2026-03-23 05:40:00",
+]  # HST
+
+[qplan.weight]
+w_slew = 0.0000
+w_delay = 0.005
+w_filterchange = 0.0
+w_rank = 0.85
+w_priority = 0.01
+
+
+[targetdb.sky]
+version = ["20230209"]
+
+[targetdb.fluxstd]
+version = "3.5"
+
+
+[netflow]
+use_gurobi = true
+two_stage = false
+cobra_location_group_n = 50
+min_sky_targets_per_location = 8
+location_group_penalty = 1e11
+cobra_safety_margin = 0.1 #100um
+
+[gurobi]
+seed = 0
+presolve = 1
+method = 0
+degenmoves = 0
+heuristics = 0.6
+mipfocus = 0
+mipgap = 5.0e-3
+PreSOS2Encoding = 0
+PreSOS1Encoding = 0
+threads = 4
+
+
+[sfa]
+n_sky = 400
+sky_random = false
+n_sky_random = 4000
+reduce_sky_targets = true
+cobra_coach_module_version = "None"
+sm = [1, 2, 3, 4]
+dot_margin = 1.65
+dot_penalty = "None"
+guidestar_mag_min = 12.0
+guidestar_mag_max = 22.0
+guidestar_neighbor_mag_min = 21.0
+guidestar_minsep_deg = 0.0002778
+n_fluxstd = 200
+fluxstd_mag_max = 19.0
+fluxstd_mag_min = 17.0
+fluxstd_mag_filter = "g"
+good_fluxstd = false
+fluxstd_min_prob_f_star = 0.5
+fluxstd_min_teff = 5000
+fluxstd_max_teff = 8000
+fluxstd_flags_dist = false
+fluxstd_flags_ebv = false
+filler = true
+proposalIds_obsFiller = ["S25A-000QF"]
+filler_mag_min = 17.0 #18.0
+filler_mag_max = 99.0 #22.5
+filler_random = false
+n_fillers_random = 30000
+reduce_fillers = true
+multiprocessing = true
+dup_obs_filler_remove = true
+obs_filler_done_remove = true
+fill_unassign_radius_check = 0.00083
+fill_unassign = true
+fill_unassign_radius = 0.00694
+fill_unassign_gaia_mag = 18.0
+fill_unassign_pslId = "S25B-000UF"
+
+
+[ope]
+runName = "test"
+n_split_frame=2
+
+[packages]
+config_path = "config_database.toml"
+
+[validation]
+savefig=true
+showfig=false
+save_unassign_toobright=true
+
