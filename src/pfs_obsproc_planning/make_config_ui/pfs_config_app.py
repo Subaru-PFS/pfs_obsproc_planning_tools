@@ -514,7 +514,6 @@ class PFSConfigApp:
             description="All times are in HST. \n Please note that the date is the scheduled night, not the actual observation date. For example, an observation from 00:00 to 05:00 on the night of 2026-03-15 should be entered as `2026-03-15 00:00-05:00`, not `2026-03-16 00:00-05:00`.",
             placeholder="HST",
             sizing_mode="stretch_width",
-            resizable=False,
         )
         self.refresh_observation_button = pn.widgets.Button(
             name="Refresh default",
@@ -547,12 +546,6 @@ class PFSConfigApp:
             pn.Row(self.confirm_save_button, self.cancel_save_button),
             visible=False,
             sizing_mode="stretch_width",
-            styles={
-                "padding": "12px",
-                "border": "1px solid #d0d7de",
-                "border-radius": "8px",
-                "background": "white",
-            },
         )
         self.left_status = pn.pane.Markdown(sizing_mode="stretch_width")
         self.right_panel = pn.Column(sizing_mode="stretch_both", scroll=True)
@@ -860,7 +853,6 @@ class PFSConfigApp:
             theme_toggle=False,
         )
         return template
-
 
 app = PFSConfigApp().view()
 app.servable()

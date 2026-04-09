@@ -1,0 +1,2220 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>PFSDesignGenerator</class>
+ <widget class="QDialog" name="PFSDesignGenerator">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>332</width>
+    <height>860</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>PFS Design Generator</string>
+  </property>
+  <widget class="QGroupBox" name="box_obsMode">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>10</y>
+     <width>201</width>
+     <height>41</height>
+    </rect>
+   </property>
+   <property name="autoFillBackground">
+    <bool>false</bool>
+   </property>
+   <property name="styleSheet">
+    <string notr="true">border: none;</string>
+   </property>
+   <property name="title">
+    <string>Observation mode:</string>
+   </property>
+   <property name="flat">
+    <bool>false</bool>
+   </property>
+   <property name="checkable">
+    <bool>false</bool>
+   </property>
+   <widget class="QRadioButton" name="radioButton_queue">
+    <property name="geometry">
+     <rect>
+      <x>0</x>
+      <y>20</y>
+      <width>71</width>
+      <height>20</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Queue</string>
+    </property>
+    <property name="checked">
+     <bool>true</bool>
+    </property>
+   </widget>
+   <widget class="QRadioButton" name="radioButton_classic">
+    <property name="geometry">
+     <rect>
+      <x>80</x>
+      <y>20</y>
+      <width>111</width>
+      <height>20</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Classical/ToO</string>
+    </property>
+    <property name="checkable">
+     <bool>true</bool>
+    </property>
+    <property name="checked">
+     <bool>false</bool>
+    </property>
+   </widget>
+  </widget>
+  <widget class="QTabWidget" name="tab_config">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>60</y>
+     <width>311</width>
+     <height>731</height>
+    </rect>
+   </property>
+   <property name="layoutDirection">
+    <enum>Qt::LeftToRight</enum>
+   </property>
+   <property name="currentIndex">
+    <number>0</number>
+   </property>
+   <widget class="QWidget" name="tab_other">
+    <attribute name="title">
+     <string>Parameters</string>
+    </attribute>
+    <widget class="QGroupBox" name="box_ppp_other">
+     <property name="geometry">
+      <rect>
+       <x>0</x>
+       <y>375</y>
+       <width>305</width>
+       <height>201</height>
+      </rect>
+     </property>
+     <property name="styleSheet">
+      <string notr="true"/>
+     </property>
+     <property name="title">
+      <string>SFA related</string>
+     </property>
+     <property name="flat">
+      <bool>true</bool>
+     </property>
+     <property name="checkable">
+      <bool>false</bool>
+     </property>
+     <widget class="QCheckBox" name="checkBox_2stage">
+      <property name="geometry">
+       <rect>
+        <x>5</x>
+        <y>45</y>
+        <width>231</width>
+        <height>23</height>
+       </rect>
+      </property>
+      <property name="toolTip">
+       <string>Assign science targets in the 1st-stage, and assign calibrators in the 2nd-stage</string>
+      </property>
+      <property name="text">
+       <string>Enable two-stage assignment?</string>
+      </property>
+     </widget>
+     <widget class="QCheckBox" name="checkBox_useGurobi">
+      <property name="geometry">
+       <rect>
+        <x>5</x>
+        <y>23</y>
+        <width>141</width>
+        <height>23</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Use gurobi?</string>
+      </property>
+      <property name="checked">
+       <bool>true</bool>
+      </property>
+     </widget>
+     <widget class="QGroupBox" name="box_sky_uniform">
+      <property name="enabled">
+       <bool>true</bool>
+      </property>
+      <property name="geometry">
+       <rect>
+        <x>3</x>
+        <y>89</y>
+        <width>291</width>
+        <height>121</height>
+       </rect>
+      </property>
+      <property name="toolTip">
+       <string/>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">QGroupBox#box_sky_uniform {border:0;}</string>
+      </property>
+      <property name="title">
+       <string>Enable sky uniformity </string>
+      </property>
+      <property name="flat">
+       <bool>true</bool>
+      </property>
+      <property name="checkable">
+       <bool>true</bool>
+      </property>
+      <property name="checked">
+       <bool>true</bool>
+      </property>
+      <widget class="QLineEdit" name="lineEdit_group_n">
+       <property name="enabled">
+        <bool>true</bool>
+       </property>
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>25</y>
+         <width>251</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="toolTip">
+        <string>The number of sub-regions you want to separate on the focal plane</string>
+       </property>
+       <property name="inputMask">
+        <string>co\br\a_loc\atio\n_group_\n=000</string>
+       </property>
+       <property name="text">
+        <string>cobra_location_group_n=50</string>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+       </property>
+      </widget>
+      <widget class="QLineEdit" name="lineEdit_nsky_min_group">
+       <property name="enabled">
+        <bool>true</bool>
+       </property>
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>55</y>
+         <width>251</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="toolTip">
+        <string>The minimal number of sky in each sub-region</string>
+       </property>
+       <property name="inputMask">
+        <string>mi\n_sky_t\argets_per_loc\atio\n=000</string>
+       </property>
+       <property name="text">
+        <string>min_sky_targets_per_location=8</string>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+       </property>
+      </widget>
+      <widget class="QLineEdit" name="lineEdit_group_penalty">
+       <property name="enabled">
+        <bool>true</bool>
+       </property>
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>85</y>
+         <width>251</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="toolTip">
+        <string>The additional penalty if sub-region can not assign the required number of sky</string>
+       </property>
+       <property name="inputMask">
+        <string>loc\atio\n_group_pe\n\alty=0e00</string>
+       </property>
+       <property name="text">
+        <string>location_group_penalty=5e11</string>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+       </property>
+      </widget>
+     </widget>
+     <widget class="QCheckBox" name="checkBox_nsplit">
+      <property name="geometry">
+       <rect>
+        <x>5</x>
+        <y>67</y>
+        <width>291</width>
+        <height>23</height>
+       </rect>
+      </property>
+      <property name="toolTip">
+       <string>Split each 900-sec frame into multiple subframes to avoid too much cosmic ray?</string>
+      </property>
+      <property name="text">
+       <string>Split 900-sec frame?</string>
+      </property>
+      <property name="checked">
+       <bool>true</bool>
+      </property>
+     </widget>
+     <widget class="QDoubleSpinBox" name="doubleSpinBox_nsplit">
+      <property name="geometry">
+       <rect>
+        <x>170</x>
+        <y>67</y>
+        <width>101</width>
+        <height>25</height>
+       </rect>
+      </property>
+      <property name="prefix">
+       <string>n_frame=</string>
+      </property>
+      <property name="suffix">
+       <string/>
+      </property>
+      <property name="decimals">
+       <number>0</number>
+      </property>
+      <property name="singleStep">
+       <double>1.000000000000000</double>
+      </property>
+      <property name="value">
+       <double>2.000000000000000</double>
+      </property>
+     </widget>
+    </widget>
+    <widget class="QGroupBox" name="box_calib_other">
+     <property name="geometry">
+      <rect>
+       <x>0</x>
+       <y>580</y>
+       <width>305</width>
+       <height>121</height>
+      </rect>
+     </property>
+     <property name="styleSheet">
+      <string notr="true"/>
+     </property>
+     <property name="title">
+      <string>Calibrator related</string>
+     </property>
+     <property name="flat">
+      <bool>true</bool>
+     </property>
+     <property name="checkable">
+      <bool>false</bool>
+     </property>
+     <widget class="QGroupBox" name="box_fstar_other">
+      <property name="enabled">
+       <bool>true</bool>
+      </property>
+      <property name="geometry">
+       <rect>
+        <x>5</x>
+        <y>26</y>
+        <width>271</width>
+        <height>91</height>
+       </rect>
+      </property>
+      <property name="toolTip">
+       <string/>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">QGroupBox#box_fstar_other {border:0;}</string>
+      </property>
+      <property name="title">
+       <string>Fstar</string>
+      </property>
+      <property name="flat">
+       <bool>true</bool>
+      </property>
+      <property name="checkable">
+       <bool>false</bool>
+      </property>
+      <property name="checked">
+       <bool>false</bool>
+      </property>
+      <widget class="QLineEdit" name="lineEdit_fstar_min_prob">
+       <property name="enabled">
+        <bool>true</bool>
+       </property>
+       <property name="geometry">
+        <rect>
+         <x>40</x>
+         <y>0</y>
+         <width>231</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="toolTip">
+        <string>Probability of being an Fstar</string>
+       </property>
+       <property name="inputMask">
+        <string>flu\xst\d_mi\n_pro\b_f_st\ar=0.00</string>
+       </property>
+       <property name="text">
+        <string>fluxstd_min_prob_f_star=0.5</string>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+       </property>
+      </widget>
+      <widget class="QLineEdit" name="lineEdit_fstar_teff_min">
+       <property name="enabled">
+        <bool>true</bool>
+       </property>
+       <property name="geometry">
+        <rect>
+         <x>40</x>
+         <y>30</y>
+         <width>231</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="toolTip">
+        <string>Minimal effective temperature of flux-calibration stars</string>
+       </property>
+       <property name="inputMask">
+        <string>flu\xst\d_mi\n_teff=00000</string>
+       </property>
+       <property name="text">
+        <string>fluxstd_min_teff=5000</string>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+       </property>
+      </widget>
+      <widget class="QLineEdit" name="lineEdit_fstar_teff_max">
+       <property name="enabled">
+        <bool>true</bool>
+       </property>
+       <property name="geometry">
+        <rect>
+         <x>40</x>
+         <y>60</y>
+         <width>231</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="toolTip">
+        <string>Maximal effective temperature of flux-calibration stars</string>
+       </property>
+       <property name="inputMask">
+        <string>flu\xst\d_m\a\x_teff=00000</string>
+       </property>
+       <property name="text">
+        <string>fluxstd_max_teff=8000</string>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+       </property>
+      </widget>
+     </widget>
+    </widget>
+    <widget class="QGroupBox" name="box_sfa_other">
+     <property name="geometry">
+      <rect>
+       <x>0</x>
+       <y>40</y>
+       <width>305</width>
+       <height>341</height>
+      </rect>
+     </property>
+     <property name="styleSheet">
+      <string notr="true"/>
+     </property>
+     <property name="title">
+      <string>Templates and workDirs</string>
+     </property>
+     <property name="flat">
+      <bool>true</bool>
+     </property>
+     <property name="checkable">
+      <bool>false</bool>
+     </property>
+     <widget class="QGroupBox" name="box_dic">
+      <property name="enabled">
+       <bool>true</bool>
+      </property>
+      <property name="geometry">
+       <rect>
+        <x>5</x>
+        <y>120</y>
+        <width>301</width>
+        <height>221</height>
+       </rect>
+      </property>
+      <property name="toolTip">
+       <string/>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">QGroupBox#box_dic {border:0;}</string>
+      </property>
+      <property name="title">
+       <string>Directory</string>
+      </property>
+      <property name="flat">
+       <bool>true</bool>
+      </property>
+      <property name="checkable">
+       <bool>false</bool>
+      </property>
+      <property name="checked">
+       <bool>false</bool>
+      </property>
+      <widget class="QGroupBox" name="box_pfs_instdata">
+       <property name="enabled">
+        <bool>true</bool>
+       </property>
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>110</y>
+         <width>291</width>
+         <height>51</height>
+        </rect>
+       </property>
+       <property name="toolTip">
+        <string>Please select the pfs_instdata folder</string>
+       </property>
+       <property name="styleSheet">
+        <string notr="true">QGroupBox#box_pfs_instdata {border:0;}</string>
+       </property>
+       <property name="title">
+        <string>pfs_instdata</string>
+       </property>
+       <property name="flat">
+        <bool>true</bool>
+       </property>
+       <property name="checkable">
+        <bool>false</bool>
+       </property>
+       <property name="checked">
+        <bool>false</bool>
+       </property>
+       <widget class="QPushButton" name="pushButton_pfs_instdata">
+        <property name="geometry">
+         <rect>
+          <x>89</x>
+          <y>0</y>
+          <width>55</width>
+          <height>25</height>
+         </rect>
+        </property>
+        <property name="toolTip">
+         <string/>
+        </property>
+        <property name="toolTipDuration">
+         <number>-1</number>
+        </property>
+        <property name="whatsThis">
+         <string/>
+        </property>
+        <property name="text">
+         <string>open</string>
+        </property>
+        <property name="autoDefault">
+         <bool>true</bool>
+        </property>
+       </widget>
+       <widget class="QLineEdit" name="lineEdit_instdata_path">
+        <property name="geometry">
+         <rect>
+          <x>144</x>
+          <y>0</y>
+          <width>141</width>
+          <height>25</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+        </property>
+       </widget>
+       <widget class="QLineEdit" name="lineEdit_pfsinstdata_ver">
+        <property name="enabled">
+         <bool>true</bool>
+        </property>
+        <property name="geometry">
+         <rect>
+          <x>144</x>
+          <y>25</y>
+          <width>141</width>
+          <height>25</height>
+         </rect>
+        </property>
+        <property name="toolTip">
+         <string>Version of pfs_instdata</string>
+        </property>
+        <property name="inputMask">
+         <string>versio\n=xxxxxxxxxxxxxxxxxxxxxx</string>
+        </property>
+        <property name="text">
+         <string>version=</string>
+        </property>
+        <property name="maxLength">
+         <number>30</number>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+        </property>
+       </widget>
+      </widget>
+      <widget class="QGroupBox" name="box_pfsutils">
+       <property name="enabled">
+        <bool>true</bool>
+       </property>
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>165</y>
+         <width>291</width>
+         <height>61</height>
+        </rect>
+       </property>
+       <property name="toolTip">
+        <string>Please select the pfs_utils folder</string>
+       </property>
+       <property name="styleSheet">
+        <string notr="true">QGroupBox#box_pfsutils {border:0;}</string>
+       </property>
+       <property name="title">
+        <string>pfs_utils</string>
+       </property>
+       <property name="flat">
+        <bool>true</bool>
+       </property>
+       <property name="checkable">
+        <bool>false</bool>
+       </property>
+       <property name="checked">
+        <bool>false</bool>
+       </property>
+       <widget class="QPushButton" name="pushButton_pfsutils">
+        <property name="geometry">
+         <rect>
+          <x>89</x>
+          <y>0</y>
+          <width>55</width>
+          <height>25</height>
+         </rect>
+        </property>
+        <property name="toolTip">
+         <string/>
+        </property>
+        <property name="toolTipDuration">
+         <number>-1</number>
+        </property>
+        <property name="whatsThis">
+         <string/>
+        </property>
+        <property name="text">
+         <string>open</string>
+        </property>
+        <property name="autoDefault">
+         <bool>true</bool>
+        </property>
+       </widget>
+       <widget class="QLineEdit" name="lineEdit_pfsutils_path">
+        <property name="geometry">
+         <rect>
+          <x>144</x>
+          <y>0</y>
+          <width>141</width>
+          <height>25</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+        </property>
+       </widget>
+       <widget class="QLineEdit" name="lineEdit_pfsutils_ver">
+        <property name="enabled">
+         <bool>true</bool>
+        </property>
+        <property name="geometry">
+         <rect>
+          <x>144</x>
+          <y>25</y>
+          <width>141</width>
+          <height>25</height>
+         </rect>
+        </property>
+        <property name="toolTip">
+         <string>Version of pfs_utils</string>
+        </property>
+        <property name="inputMask">
+         <string>versio\n=xxxxxxxxxxxxxxxxxxxxxx</string>
+        </property>
+        <property name="text">
+         <string>version=</string>
+        </property>
+        <property name="maxLength">
+         <number>30</number>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+        </property>
+       </widget>
+      </widget>
+      <widget class="QGroupBox" name="box_workdir">
+       <property name="enabled">
+        <bool>true</bool>
+       </property>
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>20</y>
+         <width>291</width>
+         <height>31</height>
+        </rect>
+       </property>
+       <property name="toolTip">
+        <string>Please select the working directory</string>
+       </property>
+       <property name="styleSheet">
+        <string notr="true">QGroupBox#box_workdir {border:0;}</string>
+       </property>
+       <property name="title">
+        <string>workDir</string>
+       </property>
+       <property name="flat">
+        <bool>true</bool>
+       </property>
+       <property name="checkable">
+        <bool>false</bool>
+       </property>
+       <property name="checked">
+        <bool>false</bool>
+       </property>
+       <widget class="QPushButton" name="pushButton_workdir">
+        <property name="geometry">
+         <rect>
+          <x>89</x>
+          <y>0</y>
+          <width>55</width>
+          <height>25</height>
+         </rect>
+        </property>
+        <property name="toolTip">
+         <string/>
+        </property>
+        <property name="toolTipDuration">
+         <number>-1</number>
+        </property>
+        <property name="whatsThis">
+         <string/>
+        </property>
+        <property name="text">
+         <string>open</string>
+        </property>
+        <property name="autoDefault">
+         <bool>true</bool>
+        </property>
+       </widget>
+       <widget class="QLineEdit" name="lineEdit_workdir_path">
+        <property name="geometry">
+         <rect>
+          <x>144</x>
+          <y>0</y>
+          <width>141</width>
+          <height>25</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>~/workDir</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+        </property>
+       </widget>
+      </widget>
+      <widget class="QGroupBox" name="box_queuedb">
+       <property name="enabled">
+        <bool>true</bool>
+       </property>
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>50</y>
+         <width>291</width>
+         <height>31</height>
+        </rect>
+       </property>
+       <property name="toolTip">
+        <string>Please select the file to connect with queueDB.</string>
+       </property>
+       <property name="styleSheet">
+        <string notr="true">QGroupBox#box_queuedb {border:0;}</string>
+       </property>
+       <property name="title">
+        <string>queueDB</string>
+       </property>
+       <property name="flat">
+        <bool>true</bool>
+       </property>
+       <property name="checkable">
+        <bool>false</bool>
+       </property>
+       <property name="checked">
+        <bool>false</bool>
+       </property>
+       <widget class="QPushButton" name="pushButton_queuedb">
+        <property name="geometry">
+         <rect>
+          <x>89</x>
+          <y>0</y>
+          <width>55</width>
+          <height>25</height>
+         </rect>
+        </property>
+        <property name="toolTip">
+         <string/>
+        </property>
+        <property name="toolTipDuration">
+         <number>-1</number>
+        </property>
+        <property name="whatsThis">
+         <string/>
+        </property>
+        <property name="text">
+         <string>open</string>
+        </property>
+        <property name="autoDefault">
+         <bool>true</bool>
+        </property>
+       </widget>
+       <widget class="QLineEdit" name="lineEdit_queuedb_path">
+        <property name="geometry">
+         <rect>
+          <x>144</x>
+          <y>0</y>
+          <width>141</width>
+          <height>25</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>~/g2sim_qdb_rd.yml</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+        </property>
+       </widget>
+      </widget>
+      <widget class="QGroupBox" name="box_cobra_coach">
+       <property name="enabled">
+        <bool>true</bool>
+       </property>
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>80</y>
+         <width>291</width>
+         <height>31</height>
+        </rect>
+       </property>
+       <property name="toolTip">
+        <string>Please select the cobra_coach folder</string>
+       </property>
+       <property name="styleSheet">
+        <string notr="true">QGroupBox#box_cobra_coach {border:0;}</string>
+       </property>
+       <property name="title">
+        <string>cobra_coach</string>
+       </property>
+       <property name="flat">
+        <bool>true</bool>
+       </property>
+       <property name="checkable">
+        <bool>false</bool>
+       </property>
+       <property name="checked">
+        <bool>false</bool>
+       </property>
+       <widget class="QPushButton" name="pushButton_cobra_coach">
+        <property name="geometry">
+         <rect>
+          <x>89</x>
+          <y>0</y>
+          <width>55</width>
+          <height>25</height>
+         </rect>
+        </property>
+        <property name="toolTip">
+         <string/>
+        </property>
+        <property name="toolTipDuration">
+         <number>-1</number>
+        </property>
+        <property name="whatsThis">
+         <string/>
+        </property>
+        <property name="text">
+         <string>open</string>
+        </property>
+        <property name="autoDefault">
+         <bool>true</bool>
+        </property>
+       </widget>
+       <widget class="QLineEdit" name="lineEdit_cobra_path">
+        <property name="geometry">
+         <rect>
+          <x>144</x>
+          <y>0</y>
+          <width>141</width>
+          <height>25</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>~/cobracoach</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+        </property>
+       </widget>
+      </widget>
+     </widget>
+     <widget class="QGroupBox" name="box_ope">
+      <property name="enabled">
+       <bool>true</bool>
+      </property>
+      <property name="geometry">
+       <rect>
+        <x>5</x>
+        <y>70</y>
+        <width>301</width>
+        <height>51</height>
+       </rect>
+      </property>
+      <property name="toolTip">
+       <string>Please select the ope template</string>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">QGroupBox#box_ope {border:0;}</string>
+      </property>
+      <property name="title">
+       <string>OPE template</string>
+      </property>
+      <property name="flat">
+       <bool>true</bool>
+      </property>
+      <property name="checkable">
+       <bool>false</bool>
+      </property>
+      <property name="checked">
+       <bool>false</bool>
+      </property>
+      <widget class="QPushButton" name="pushButton_ope_template">
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>20</y>
+         <width>55</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="toolTip">
+        <string/>
+       </property>
+       <property name="toolTipDuration">
+        <number>-1</number>
+       </property>
+       <property name="whatsThis">
+        <string/>
+       </property>
+       <property name="text">
+        <string>open</string>
+       </property>
+       <property name="autoDefault">
+        <bool>true</bool>
+       </property>
+      </widget>
+      <widget class="QLineEdit" name="lineEdit_ope_path">
+       <property name="geometry">
+        <rect>
+         <x>64</x>
+         <y>20</y>
+         <width>231</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>templates/template_pfs_v2024-03-05_singleExptime.ope</string>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+       </property>
+      </widget>
+     </widget>
+     <widget class="QGroupBox" name="box_config">
+      <property name="enabled">
+       <bool>true</bool>
+      </property>
+      <property name="geometry">
+       <rect>
+        <x>5</x>
+        <y>20</y>
+        <width>301</width>
+        <height>51</height>
+       </rect>
+      </property>
+      <property name="toolTip">
+       <string>Please select the config template</string>
+      </property>
+      <property name="toolTipDuration">
+       <number>-4</number>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">QGroupBox#box_config {border:0;}</string>
+      </property>
+      <property name="title">
+       <string>config template</string>
+      </property>
+      <property name="flat">
+       <bool>true</bool>
+      </property>
+      <property name="checkable">
+       <bool>false</bool>
+      </property>
+      <property name="checked">
+       <bool>false</bool>
+      </property>
+      <widget class="QPushButton" name="pushButton_config_template">
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>20</y>
+         <width>55</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="toolTip">
+        <string/>
+       </property>
+       <property name="toolTipDuration">
+        <number>-1</number>
+       </property>
+       <property name="whatsThis">
+        <string/>
+       </property>
+       <property name="text">
+        <string>open</string>
+       </property>
+       <property name="autoDefault">
+        <bool>true</bool>
+       </property>
+      </widget>
+      <widget class="QLineEdit" name="lineEdit_config_path">
+       <property name="geometry">
+        <rect>
+         <x>64</x>
+         <y>20</y>
+         <width>231</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+       </property>
+      </widget>
+     </widget>
+    </widget>
+    <widget class="QDoubleSpinBox" name="doubleSpinBox_nppc_l">
+     <property name="geometry">
+      <rect>
+       <x>30</x>
+       <y>10</y>
+       <width>121</width>
+       <height>25</height>
+      </rect>
+     </property>
+     <property name="prefix">
+      <string>Nppc_low=</string>
+     </property>
+     <property name="suffix">
+      <string/>
+     </property>
+     <property name="decimals">
+      <number>0</number>
+     </property>
+     <property name="maximum">
+      <double>500.000000000000000</double>
+     </property>
+     <property name="singleStep">
+      <double>1.000000000000000</double>
+     </property>
+     <property name="value">
+      <double>1.000000000000000</double>
+     </property>
+    </widget>
+    <widget class="QDoubleSpinBox" name="doubleSpinBox_nppc_m">
+     <property name="geometry">
+      <rect>
+       <x>160</x>
+       <y>10</y>
+       <width>121</width>
+       <height>25</height>
+      </rect>
+     </property>
+     <property name="prefix">
+      <string>Nppc_med=</string>
+     </property>
+     <property name="suffix">
+      <string/>
+     </property>
+     <property name="decimals">
+      <number>0</number>
+     </property>
+     <property name="maximum">
+      <double>500.000000000000000</double>
+     </property>
+     <property name="singleStep">
+      <double>1.000000000000000</double>
+     </property>
+     <property name="value">
+      <double>1.000000000000000</double>
+     </property>
+    </widget>
+   </widget>
+   <widget class="QWidget" name="tab_main">
+    <attribute name="title">
+     <string>Targets/obstime</string>
+    </attribute>
+    <widget class="QGroupBox" name="box_readtarget">
+     <property name="geometry">
+      <rect>
+       <x>0</x>
+       <y>0</y>
+       <width>301</width>
+       <height>241</height>
+      </rect>
+     </property>
+     <property name="styleSheet">
+      <string notr="true"/>
+     </property>
+     <property name="title">
+      <string>Set programs:</string>
+     </property>
+     <property name="flat">
+      <bool>true</bool>
+     </property>
+     <property name="checkable">
+      <bool>false</bool>
+     </property>
+     <widget class="QPushButton" name="pushButton_tgt_local">
+      <property name="enabled">
+       <bool>true</bool>
+      </property>
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>24</y>
+        <width>113</width>
+        <height>25</height>
+       </rect>
+      </property>
+      <property name="toolTip">
+       <string>Please select the target list (*.csv)</string>
+      </property>
+      <property name="styleSheet">
+       <string notr="true"/>
+      </property>
+      <property name="text">
+       <string>from local</string>
+      </property>
+      <property name="autoDefault">
+       <bool>true</bool>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="pushButton_tgt_db">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>53</y>
+        <width>113</width>
+        <height>25</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>from targetDB</string>
+      </property>
+      <property name="autoRepeat">
+       <bool>false</bool>
+      </property>
+      <property name="default">
+       <bool>true</bool>
+      </property>
+      <property name="flat">
+       <bool>false</bool>
+      </property>
+     </widget>
+     <widget class="QLineEdit" name="lineEdit_tgt_local_path">
+      <property name="enabled">
+       <bool>true</bool>
+      </property>
+      <property name="geometry">
+       <rect>
+        <x>132</x>
+        <y>24</y>
+        <width>161</width>
+        <height>25</height>
+       </rect>
+      </property>
+      <property name="alignment">
+       <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+      </property>
+     </widget>
+     <widget class="QGroupBox" name="box_readtarget_mix">
+      <property name="enabled">
+       <bool>false</bool>
+      </property>
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>83</y>
+        <width>281</width>
+        <height>51</height>
+       </rect>
+      </property>
+      <property name="toolTip">
+       <string>Share blank fibers on classic pointings with queue targets</string>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">QGroupBox#box_readtarget_mix {border:0;}</string>
+      </property>
+      <property name="title">
+       <string>Mix with classic?</string>
+      </property>
+      <property name="flat">
+       <bool>true</bool>
+      </property>
+      <property name="checkable">
+       <bool>true</bool>
+      </property>
+      <property name="checked">
+       <bool>false</bool>
+      </property>
+      <widget class="QPushButton" name="pushButton_design_local_classic">
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>24</y>
+         <width>55</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="toolTip">
+        <string>Please select the folder containing the design files of classic pointings</string>
+       </property>
+       <property name="toolTipDuration">
+        <number>-1</number>
+       </property>
+       <property name="whatsThis">
+        <string/>
+       </property>
+       <property name="text">
+        <string>open</string>
+       </property>
+       <property name="autoDefault">
+        <bool>true</bool>
+       </property>
+      </widget>
+      <widget class="QLineEdit" name="lineEdit_design_local_path">
+       <property name="geometry">
+        <rect>
+         <x>70</x>
+         <y>24</y>
+         <width>211</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+       </property>
+      </widget>
+     </widget>
+     <widget class="QGroupBox" name="box_readPPC">
+      <property name="enabled">
+       <bool>true</bool>
+      </property>
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>135</y>
+        <width>281</width>
+        <height>51</height>
+       </rect>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">QGroupBox#box_readPPC {border:0;}</string>
+      </property>
+      <property name="title">
+       <string>Use user pointings?</string>
+      </property>
+      <property name="flat">
+       <bool>true</bool>
+      </property>
+      <property name="checkable">
+       <bool>true</bool>
+      </property>
+      <property name="checked">
+       <bool>false</bool>
+      </property>
+      <widget class="QPushButton" name="pushButton_ppc_local_classic">
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>24</y>
+         <width>55</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="toolTip">
+        <string>Please select the user pointing list (*.csv)</string>
+       </property>
+       <property name="text">
+        <string>open</string>
+       </property>
+       <property name="autoDefault">
+        <bool>true</bool>
+       </property>
+      </widget>
+      <widget class="QLineEdit" name="lineEdit_ppc_local_path">
+       <property name="geometry">
+        <rect>
+         <x>70</x>
+         <y>24</y>
+         <width>211</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+       </property>
+      </widget>
+     </widget>
+     <widget class="QGroupBox" name="box_readtarget_filler">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>188</y>
+        <width>291</width>
+        <height>51</height>
+       </rect>
+      </property>
+      <property name="toolTip">
+       <string/>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">QGroupBox#box_readtarget_filler {border:0;}</string>
+      </property>
+      <property name="title">
+       <string>Include fillers?</string>
+      </property>
+      <property name="flat">
+       <bool>true</bool>
+      </property>
+      <property name="checkable">
+       <bool>true</bool>
+      </property>
+      <property name="checked">
+       <bool>false</bool>
+      </property>
+      <widget class="QDoubleSpinBox" name="doubleSpinBox_filler_min">
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>24</y>
+         <width>135</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="toolTip">
+        <string>Bright magnitude limit in g band</string>
+       </property>
+       <property name="prefix">
+        <string>g_min=</string>
+       </property>
+       <property name="suffix">
+        <string>mag</string>
+       </property>
+       <property name="decimals">
+        <number>1</number>
+       </property>
+       <property name="singleStep">
+        <double>0.100000000000000</double>
+       </property>
+       <property name="value">
+        <double>18.000000000000000</double>
+       </property>
+      </widget>
+      <widget class="QDoubleSpinBox" name="doubleSpinBox_filler_max">
+       <property name="geometry">
+        <rect>
+         <x>150</x>
+         <y>24</y>
+         <width>135</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="toolTip">
+        <string>Faint magnitude limit in g band</string>
+       </property>
+       <property name="prefix">
+        <string>g_max=</string>
+       </property>
+       <property name="suffix">
+        <string>mag</string>
+       </property>
+       <property name="decimals">
+        <number>1</number>
+       </property>
+       <property name="singleStep">
+        <double>0.100000000000000</double>
+       </property>
+       <property name="value">
+        <double>22.500000000000000</double>
+       </property>
+      </widget>
+     </widget>
+     <widget class="QLineEdit" name="lineEdit_pslid_db">
+      <property name="enabled">
+       <bool>true</bool>
+      </property>
+      <property name="geometry">
+       <rect>
+        <x>132</x>
+        <y>53</y>
+        <width>161</width>
+        <height>25</height>
+       </rect>
+      </property>
+      <property name="alignment">
+       <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+      </property>
+     </widget>
+    </widget>
+    <widget class="QGroupBox" name="box_obstime">
+     <property name="geometry">
+      <rect>
+       <x>0</x>
+       <y>445</y>
+       <width>301</width>
+       <height>251</height>
+      </rect>
+     </property>
+     <property name="styleSheet">
+      <string notr="true"/>
+     </property>
+     <property name="title">
+      <string>Set observation time:</string>
+     </property>
+     <property name="flat">
+      <bool>true</bool>
+     </property>
+     <property name="checkable">
+      <bool>false</bool>
+     </property>
+     <widget class="QGroupBox" name="box_obstime_overhead">
+      <property name="enabled">
+       <bool>true</bool>
+      </property>
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>23</y>
+        <width>211</width>
+        <height>31</height>
+       </rect>
+      </property>
+      <property name="toolTip">
+       <string/>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">QGroupBox#box_obstime_overhead {border:0;}</string>
+      </property>
+      <property name="title">
+       <string>overheads</string>
+      </property>
+      <property name="flat">
+       <bool>true</bool>
+      </property>
+      <property name="checkable">
+       <bool>false</bool>
+      </property>
+      <property name="checked">
+       <bool>false</bool>
+      </property>
+      <widget class="QDoubleSpinBox" name="doubleSpinBox_overhead">
+       <property name="geometry">
+        <rect>
+         <x>80</x>
+         <y>0</y>
+         <width>71</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="suffix">
+        <string>min</string>
+       </property>
+       <property name="decimals">
+        <number>1</number>
+       </property>
+       <property name="singleStep">
+        <double>0.100000000000000</double>
+       </property>
+       <property name="value">
+        <double>5.000000000000000</double>
+       </property>
+      </widget>
+     </widget>
+     <widget class="QGroupBox" name="box_obstime_date">
+      <property name="enabled">
+       <bool>true</bool>
+      </property>
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>55</y>
+        <width>281</width>
+        <height>101</height>
+       </rect>
+      </property>
+      <property name="toolTip">
+       <string>HST</string>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">QGroupBox#box_obstime_date {border:0;}</string>
+      </property>
+      <property name="title">
+       <string>dates</string>
+      </property>
+      <property name="flat">
+       <bool>true</bool>
+      </property>
+      <property name="checkable">
+       <bool>false</bool>
+      </property>
+      <property name="checked">
+       <bool>false</bool>
+      </property>
+      <widget class="QDateEdit" name="dateEdit_obstime_date">
+       <property name="geometry">
+        <rect>
+         <x>45</x>
+         <y>0</y>
+         <width>91</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="toolTip">
+        <string>HST</string>
+       </property>
+       <property name="displayFormat">
+        <string>M-d-yy</string>
+       </property>
+       <property name="calendarPopup">
+        <bool>true</bool>
+       </property>
+       <property name="timeSpec">
+        <enum>Qt::UTC</enum>
+       </property>
+       <property name="date">
+        <date>
+         <year>2025</year>
+         <month>1</month>
+         <day>31</day>
+        </date>
+       </property>
+      </widget>
+      <widget class="QGroupBox" name="box_obstime_start">
+       <property name="enabled">
+        <bool>false</bool>
+       </property>
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>30</y>
+         <width>171</width>
+         <height>31</height>
+        </rect>
+       </property>
+       <property name="toolTip">
+        <string>HST</string>
+       </property>
+       <property name="styleSheet">
+        <string notr="true">QGroupBox#box_obstime_start {border:0;}</string>
+       </property>
+       <property name="title">
+        <string>start time</string>
+       </property>
+       <property name="flat">
+        <bool>true</bool>
+       </property>
+       <property name="checkable">
+        <bool>true</bool>
+       </property>
+       <property name="checked">
+        <bool>false</bool>
+       </property>
+       <widget class="QDateTimeEdit" name="dateTimeEdit_starttime">
+        <property name="geometry">
+         <rect>
+          <x>90</x>
+          <y>0</y>
+          <width>80</width>
+          <height>25</height>
+         </rect>
+        </property>
+        <property name="dateTime">
+         <datetime>
+          <hour>6</hour>
+          <minute>0</minute>
+          <second>0</second>
+          <year>2024</year>
+          <month>12</month>
+          <day>28</day>
+         </datetime>
+        </property>
+        <property name="date">
+         <date>
+          <year>2024</year>
+          <month>12</month>
+          <day>28</day>
+         </date>
+        </property>
+        <property name="time">
+         <time>
+          <hour>6</hour>
+          <minute>0</minute>
+          <second>0</second>
+         </time>
+        </property>
+        <property name="maximumDate">
+         <date>
+          <year>2024</year>
+          <month>12</month>
+          <day>28</day>
+         </date>
+        </property>
+        <property name="minimumDate">
+         <date>
+          <year>2024</year>
+          <month>12</month>
+          <day>28</day>
+         </date>
+        </property>
+        <property name="minimumTime">
+         <time>
+          <hour>0</hour>
+          <minute>0</minute>
+          <second>0</second>
+         </time>
+        </property>
+        <property name="displayFormat">
+         <string>H:mm:ss</string>
+        </property>
+        <property name="calendarPopup">
+         <bool>false</bool>
+        </property>
+        <property name="timeSpec">
+         <enum>Qt::UTC</enum>
+        </property>
+       </widget>
+      </widget>
+      <widget class="QGroupBox" name="box_obstime_stop">
+       <property name="enabled">
+        <bool>false</bool>
+       </property>
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>60</y>
+         <width>171</width>
+         <height>31</height>
+        </rect>
+       </property>
+       <property name="toolTip">
+        <string>HST</string>
+       </property>
+       <property name="styleSheet">
+        <string notr="true">QGroupBox#box_obstime_stop {border:0;}</string>
+       </property>
+       <property name="title">
+        <string>stop time</string>
+       </property>
+       <property name="flat">
+        <bool>true</bool>
+       </property>
+       <property name="checkable">
+        <bool>true</bool>
+       </property>
+       <property name="checked">
+        <bool>false</bool>
+       </property>
+       <widget class="QDateTimeEdit" name="dateTimeEdit_stoptime">
+        <property name="geometry">
+         <rect>
+          <x>90</x>
+          <y>0</y>
+          <width>80</width>
+          <height>25</height>
+         </rect>
+        </property>
+        <property name="dateTime">
+         <datetime>
+          <hour>6</hour>
+          <minute>0</minute>
+          <second>0</second>
+          <year>2024</year>
+          <month>12</month>
+          <day>28</day>
+         </datetime>
+        </property>
+        <property name="date">
+         <date>
+          <year>2024</year>
+          <month>12</month>
+          <day>28</day>
+         </date>
+        </property>
+        <property name="time">
+         <time>
+          <hour>6</hour>
+          <minute>0</minute>
+          <second>0</second>
+         </time>
+        </property>
+        <property name="displayFormat">
+         <string>H:mm:ss</string>
+        </property>
+        <property name="calendarPopup">
+         <bool>false</bool>
+        </property>
+        <property name="timeSpec">
+         <enum>Qt::UTC</enum>
+        </property>
+       </widget>
+      </widget>
+     </widget>
+     <widget class="QPushButton" name="pushButton_obstime_remove">
+      <property name="geometry">
+       <rect>
+        <x>210</x>
+        <y>225</y>
+        <width>71</width>
+        <height>25</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>delete</string>
+      </property>
+      <property name="icon">
+       <iconset theme="list-remove">
+        <normaloff>.</normaloff>.</iconset>
+      </property>
+      <property name="flat">
+       <bool>true</bool>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="pushButton_obstime_add">
+      <property name="geometry">
+       <rect>
+        <x>150</x>
+        <y>225</y>
+        <width>51</width>
+        <height>25</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>add</string>
+      </property>
+      <property name="icon">
+       <iconset theme="list-add">
+        <normaloff>.</normaloff>.</iconset>
+      </property>
+      <property name="flat">
+       <bool>true</bool>
+      </property>
+     </widget>
+     <widget class="QListWidget" name="listWidget_obstime">
+      <property name="geometry">
+       <rect>
+        <x>16</x>
+        <y>145</y>
+        <width>271</width>
+        <height>81</height>
+       </rect>
+      </property>
+      <property name="dragEnabled">
+       <bool>true</bool>
+      </property>
+      <property name="dragDropMode">
+       <enum>QAbstractItemView::DragDrop</enum>
+      </property>
+      <property name="selectionMode">
+       <enum>QAbstractItemView::MultiSelection</enum>
+      </property>
+      <property name="sortingEnabled">
+       <bool>true</bool>
+      </property>
+     </widget>
+     <zorder>box_obstime_date</zorder>
+     <zorder>box_obstime_overhead</zorder>
+     <zorder>pushButton_obstime_remove</zorder>
+     <zorder>pushButton_obstime_add</zorder>
+     <zorder>listWidget_obstime</zorder>
+    </widget>
+    <widget class="QGroupBox" name="box_cal">
+     <property name="geometry">
+      <rect>
+       <x>0</x>
+       <y>245</y>
+       <width>301</width>
+       <height>195</height>
+      </rect>
+     </property>
+     <property name="styleSheet">
+      <string notr="true"/>
+     </property>
+     <property name="title">
+      <string>Set calibrators:</string>
+     </property>
+     <property name="flat">
+      <bool>true</bool>
+     </property>
+     <property name="checkable">
+      <bool>false</bool>
+     </property>
+     <widget class="QGroupBox" name="box_cal_sky">
+      <property name="enabled">
+       <bool>true</bool>
+      </property>
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>20</y>
+        <width>281</width>
+        <height>51</height>
+       </rect>
+      </property>
+      <property name="toolTip">
+       <string/>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">QGroupBox#box_cal_sky{border:0;}</string>
+      </property>
+      <property name="title">
+       <string>sky</string>
+      </property>
+      <property name="flat">
+       <bool>true</bool>
+      </property>
+      <property name="checkable">
+       <bool>false</bool>
+      </property>
+      <property name="checked">
+       <bool>false</bool>
+      </property>
+      <widget class="QDoubleSpinBox" name="doubleSpinBox_sky_n">
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>20</y>
+         <width>71</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="toolTip">
+        <string>Number of sky fibers</string>
+       </property>
+       <property name="prefix">
+        <string>n=</string>
+       </property>
+       <property name="decimals">
+        <number>0</number>
+       </property>
+       <property name="maximum">
+        <double>3000.000000000000000</double>
+       </property>
+       <property name="singleStep">
+        <double>1.000000000000000</double>
+       </property>
+       <property name="value">
+        <double>400.000000000000000</double>
+       </property>
+      </widget>
+      <widget class="QLineEdit" name="lineEdit_sky_ver">
+       <property name="enabled">
+        <bool>true</bool>
+       </property>
+       <property name="geometry">
+        <rect>
+         <x>90</x>
+         <y>20</y>
+         <width>171</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="toolTip">
+        <string>Version of sky catalog</string>
+       </property>
+       <property name="inputMask">
+        <string>versio\n=\[&quot;00000000&quot;\]</string>
+       </property>
+       <property name="text">
+        <string>version=[&quot;20221031&quot;]</string>
+       </property>
+       <property name="maxLength">
+        <number>20</number>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+       </property>
+      </widget>
+     </widget>
+     <widget class="QGroupBox" name="box_cal_fstar">
+      <property name="enabled">
+       <bool>true</bool>
+      </property>
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>68</y>
+        <width>291</width>
+        <height>81</height>
+       </rect>
+      </property>
+      <property name="toolTip">
+       <string/>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">QGroupBox#box_cal_fstar {border:0;}</string>
+      </property>
+      <property name="title">
+       <string>Fstar</string>
+      </property>
+      <property name="flat">
+       <bool>true</bool>
+      </property>
+      <property name="checkable">
+       <bool>false</bool>
+      </property>
+      <property name="checked">
+       <bool>false</bool>
+      </property>
+      <widget class="QDoubleSpinBox" name="doubleSpinBox_fstar_n">
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>20</y>
+         <width>71</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="toolTip">
+        <string>Number of Fstar fibers</string>
+       </property>
+       <property name="prefix">
+        <string>n=</string>
+       </property>
+       <property name="decimals">
+        <number>0</number>
+       </property>
+       <property name="maximum">
+        <double>3000.000000000000000</double>
+       </property>
+       <property name="singleStep">
+        <double>1.000000000000000</double>
+       </property>
+       <property name="value">
+        <double>200.000000000000000</double>
+       </property>
+      </widget>
+      <widget class="QDoubleSpinBox" name="doubleSpinBox_fstar_min">
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>50</y>
+         <width>135</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="toolTip">
+        <string>Bright magnitude limit in gaia-g band</string>
+       </property>
+       <property name="prefix">
+        <string>g_min=</string>
+       </property>
+       <property name="suffix">
+        <string>mag</string>
+       </property>
+       <property name="decimals">
+        <number>1</number>
+       </property>
+       <property name="singleStep">
+        <double>0.100000000000000</double>
+       </property>
+       <property name="value">
+        <double>17.000000000000000</double>
+       </property>
+      </widget>
+      <widget class="QDoubleSpinBox" name="doubleSpinBox_fstar_max">
+       <property name="geometry">
+        <rect>
+         <x>150</x>
+         <y>50</y>
+         <width>135</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="toolTip">
+        <string>Faint magnitude limit in gaia-g band</string>
+       </property>
+       <property name="prefix">
+        <string>g_max=</string>
+       </property>
+       <property name="suffix">
+        <string>mag</string>
+       </property>
+       <property name="decimals">
+        <number>1</number>
+       </property>
+       <property name="singleStep">
+        <double>0.100000000000000</double>
+       </property>
+       <property name="value">
+        <double>19.000000000000000</double>
+       </property>
+      </widget>
+      <widget class="QLineEdit" name="lineEdit_fstar_ver">
+       <property name="enabled">
+        <bool>true</bool>
+       </property>
+       <property name="geometry">
+        <rect>
+         <x>90</x>
+         <y>20</y>
+         <width>171</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="toolTip">
+        <string>Version of Fstar catalog</string>
+       </property>
+       <property name="inputMask">
+        <string>versio\n=\[&quot;0.0&quot;\]</string>
+       </property>
+       <property name="text">
+        <string>version=[&quot;3.3&quot;]</string>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+       </property>
+      </widget>
+     </widget>
+     <widget class="QGroupBox" name="box_cal_guide">
+      <property name="enabled">
+       <bool>true</bool>
+      </property>
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>145</y>
+        <width>291</width>
+        <height>51</height>
+       </rect>
+      </property>
+      <property name="toolTip">
+       <string/>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">QGroupBox#box_cal_guide {border:0;}</string>
+      </property>
+      <property name="title">
+       <string>Guide star</string>
+      </property>
+      <property name="flat">
+       <bool>true</bool>
+      </property>
+      <property name="checkable">
+       <bool>false</bool>
+      </property>
+      <property name="checked">
+       <bool>false</bool>
+      </property>
+      <widget class="QDoubleSpinBox" name="doubleSpinBox_guide_min">
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>20</y>
+         <width>135</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="toolTip">
+        <string>Bright magnitude limit in gaia-g band</string>
+       </property>
+       <property name="prefix">
+        <string>g_min=</string>
+       </property>
+       <property name="suffix">
+        <string>mag</string>
+       </property>
+       <property name="decimals">
+        <number>1</number>
+       </property>
+       <property name="singleStep">
+        <double>0.100000000000000</double>
+       </property>
+       <property name="value">
+        <double>12.000000000000000</double>
+       </property>
+      </widget>
+      <widget class="QDoubleSpinBox" name="doubleSpinBox_guide_max">
+       <property name="geometry">
+        <rect>
+         <x>150</x>
+         <y>20</y>
+         <width>135</width>
+         <height>25</height>
+        </rect>
+       </property>
+       <property name="toolTip">
+        <string>Faint magnitude limit in gaia-g band</string>
+       </property>
+       <property name="prefix">
+        <string>g_max=</string>
+       </property>
+       <property name="suffix">
+        <string>mag</string>
+       </property>
+       <property name="decimals">
+        <number>1</number>
+       </property>
+       <property name="singleStep">
+        <double>0.100000000000000</double>
+       </property>
+       <property name="value">
+        <double>22.000000000000000</double>
+       </property>
+      </widget>
+     </widget>
+    </widget>
+   </widget>
+  </widget>
+  <widget class="QPushButton" name="pushButton_runCode">
+   <property name="geometry">
+    <rect>
+     <x>170</x>
+     <y>825</y>
+     <width>130</width>
+     <height>25</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>Run</string>
+   </property>
+   <property name="flat">
+    <bool>false</bool>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="pushButton_viewConfig">
+   <property name="geometry">
+    <rect>
+     <x>30</x>
+     <y>825</y>
+     <width>130</width>
+     <height>25</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>Check config</string>
+   </property>
+  </widget>
+  <widget class="QCheckBox" name="checkBox_runPPP">
+   <property name="geometry">
+    <rect>
+     <x>30</x>
+     <y>800</y>
+     <width>51</width>
+     <height>23</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>PPP</string>
+   </property>
+   <property name="checked">
+    <bool>true</bool>
+   </property>
+  </widget>
+  <widget class="QCheckBox" name="checkBox_runQplan">
+   <property name="geometry">
+    <rect>
+     <x>90</x>
+     <y>800</y>
+     <width>61</width>
+     <height>23</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>Qplan</string>
+   </property>
+   <property name="checked">
+    <bool>true</bool>
+   </property>
+  </widget>
+  <widget class="QCheckBox" name="checkBox_runSFA">
+   <property name="geometry">
+    <rect>
+     <x>165</x>
+     <y>800</y>
+     <width>51</width>
+     <height>23</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>SFA</string>
+   </property>
+   <property name="checked">
+    <bool>true</bool>
+   </property>
+  </widget>
+  <widget class="QCheckBox" name="checkBox_runValidate">
+   <property name="geometry">
+    <rect>
+     <x>225</x>
+     <y>800</y>
+     <width>81</width>
+     <height>23</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>validate</string>
+   </property>
+   <property name="checked">
+    <bool>true</bool>
+   </property>
+  </widget>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
