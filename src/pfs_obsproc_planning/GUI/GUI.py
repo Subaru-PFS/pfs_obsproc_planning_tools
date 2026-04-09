@@ -12,13 +12,22 @@ from loguru import logger
 warnings.filterwarnings("ignore")
 
 
+PACKAGE_DIR = os.path.dirname(__file__)
+DEFAULT_REPO_DIR = os.path.dirname(PACKAGE_DIR)
+GUI_WINDOW_DIR = os.path.join(PACKAGE_DIR, "GUI_window")
+
+
 class GeneratePfsDesignGUI(object):
     def __init__(self, repoDir=None):
         self.app = QtWidgets.QApplication([])
-        self.repoDir = repoDir
-        self.app_window = uic.loadUi(f"{repoDir}/GUI_window/mainWindow.ui")
-        self.config_window = uic.loadUi(f"{repoDir}/GUI_window/configWindow.ui")
-        self.proposal_window = uic.loadUi(f"{repoDir}/GUI_window/proposalWindow.ui")
+        self.repoDir = repoDir if repoDir is not None else DEFAULT_REPO_DIR
+        self.app_window = uic.loadUi(os.path.join(GUI_WINDOW_DIR, "mainWindow.ui"))
+        self.config_window = uic.loadUi(
+            os.path.join(GUI_WINDOW_DIR, "configWindow.ui")
+        )
+        self.proposal_window = uic.loadUi(
+            os.path.join(GUI_WINDOW_DIR, "proposalWindow.ui")
+        )
 
     def obsmode_enable(self):
         # classic mode

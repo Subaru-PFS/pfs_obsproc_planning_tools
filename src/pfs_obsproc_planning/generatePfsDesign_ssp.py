@@ -27,7 +27,7 @@ from pfs.instdata import get_root_path as get_pfs_instdata_root_path
 from pfs_design_tool import reconfigure_fibers_ppp as sfa
 from pfs_design_tool.pointing_utils import nfutils
 
-from .opefile import OpeFile
+from .utils.make_opefile import OpeFile
 
 warnings.filterwarnings("ignore")
 
@@ -1343,7 +1343,7 @@ class GeneratePfsDesign_ssp(object):
         return None
 
     def runValidation(self):
-        from . import validation
+        from .utils import validation
 
         ## update config before run SFA ##
         self.update_config()

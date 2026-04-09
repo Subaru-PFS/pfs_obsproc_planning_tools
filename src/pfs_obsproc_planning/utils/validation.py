@@ -37,7 +37,7 @@ from pfs.utils.fiberids import FiberIds
 from pfs_design_tool import reconfigure_fibers_ppp as sfa
 
 # sys.path.append("/work/moritani/codes/obstools/")
-from . import plotPfsDesign as pldes
+from . import plot_pfsDesign as pldes
 
 warnings.filterwarnings("ignore")
 

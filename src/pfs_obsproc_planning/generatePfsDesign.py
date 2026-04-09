@@ -23,7 +23,7 @@ import ets_fiber_assigner.netflow as nf
 from pfs_design_tool import reconfigure_fibers_ppp as sfa
 from pfs_design_tool.pointing_utils import nfutils
 
-from .opefile import OpeFile
+from .utils.make_opefile import OpeFile
 
 warnings.filterwarnings("ignore")
 
@@ -275,9 +275,9 @@ class GeneratePfsDesign(object):
 
     def runPPP(self, n_pccs_l, n_pccs_m, backup=False):
         if "queue" in self.workDir:
-            from . import PPP_queue as PPP
+            from .utils import run_for_queue as PPP
         else:
-            from . import PPP
+            from .utils import run_for_classic as PPP
 
         time_start = time.time()
 
@@ -369,7 +369,7 @@ class GeneratePfsDesign(object):
         self.update_config()
 
         ## import qPlanner module ##
-        from . import qPlan
+        from .utils import run_qPlan as qPlan
 
         # """
         try:
@@ -521,7 +521,7 @@ class GeneratePfsDesign(object):
     def runSFA(self, clearOutput=False):
         time_start = time.time()
 
-        from . import SFA
+        from .utils import run_SFA as SFA
 
         ## update config before run SFA ##
         self.update_config()
@@ -818,7 +818,7 @@ class GeneratePfsDesign(object):
         return None
 
     def runValidation(self):
-        from . import validation
+        from .utils import validation
 
         ## update config before run SFA ##
         self.update_config()
@@ -835,7 +835,7 @@ class GeneratePfsDesign(object):
         logger.info(f"validation plots saved under {self.outputDirValidation}")
 
         if "queue" in self.workDir:
-            from . import completion_check
+            from .utils import completion_check
 
             completion_check.run(self.conf, self.outputDir)
 
