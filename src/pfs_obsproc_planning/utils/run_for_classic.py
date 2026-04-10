@@ -11,6 +11,7 @@ from .run_PPP import (
 )
 from .build_target import read_target_classic
 from .classic_for_single_proposal import (
+    _get_optimize_costs,
     _get_proposal_policy,
     _get_single_program_mode,
     _get_single_program_ppc_pa,
@@ -152,6 +153,8 @@ def run(
 
     unique_proposal_ids = set(tb_tgt["proposal_id"])
     single_proposal_id = next(iter(unique_proposal_ids), None)
+    if len(unique_proposal_ids) == 1:
+        optimize_costs = _get_optimize_costs(single_proposal_id, optimize_costs)
     single_program_mode = (
         _get_single_program_mode(single_proposal_id)
         if len(unique_proposal_ids) == 1

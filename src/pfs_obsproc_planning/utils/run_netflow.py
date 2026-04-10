@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import ets_fiber_assigner.netflow as nf
 import numpy as np
+from astropy import units as u
+from astropy.coordinates import AltAz, EarthLocation, SkyCoord
 from astropy.table import Table, join
+from astropy.time import Time
 from loguru import logger
 from scipy.optimize import minimize
 
@@ -95,6 +98,94 @@ _CLASSIC_NETFLOW_CALIBRATION_COST = 2000
 def set_bench(bench_model):
     global bench
     bench = bench_model
+
+
+def select_good_observation_time(
+    ppc_ra,
+    ppc_dec,
+    dates_local=None,
+    local_times_hst=None,
+    min_elevation=30.0,
+    max_elevation=75.0,
+):
+    """Pick a coarse but reasonable UTC observation time for a field at Subaru.
+
+    The search is intentionally simple: try one representative night in each
+    season and a few nighttime local HST times (21:00, 00:00, 03:00 by default).
+    Return the first candidate whose elevation is within the requested range.
+    If none match, fall back to the highest-elevation candidate.
+    """
+
+    if dates_local is None:
+        dates_local = [
+            "2026-01-15",
+            "2026-03-15",
+            "2026-05-15",
+            "2026-07-15",
+            "2026-09-15",
+            "2026-11-15",
+        ]
+    if local_times_hst is None:
+        local_times_hst = [21, 0, 3]
+
+    candidate_datetimes_utc = []
+    for date_local in dates_local:
+        local_midnight = datetime.fromisoformat(f"{date_local}T00:00:00")
+        for local_hour in local_times_hst:
+            local_datetime = local_midnight + timedelta(hours=float(local_hour))
+            utc_datetime = local_datetime + timedelta(hours=10)
+            candidate_datetimes_utc.append(utc_datetime)
+
+    sample_times = Time(candidate_datetimes_utc, scale="utc")
+
+    subaru = EarthLocation.of_site("Subaru Telescope")
+    field = SkyCoord(ra=float(ppc_ra) * u.deg, dec=float(ppc_dec) * u.deg)
+    altaz = field.transform_to(AltAz(obstime=sample_times, location=subaru))
+    elevations = np.asarray(altaz.alt.deg, dtype=float)
+
+    valid_mask = (elevations >= float(min_elevation)) & (
+        elevations <= float(max_elevation)
+    )
+
+    if np.any(valid_mask):
+        best_index = int(np.flatnonzero(valid_mask)[0])
+        logger.info(
+            "Selected observation_time={} for PPC ({:.6f}, {:.6f}) at elevation {:.2f} deg".format(
+                sample_times[best_index].strftime("%Y-%m-%dT%H:%M:%SZ"),
+                float(ppc_ra),
+                float(ppc_dec),
+                elevations[best_index],
+            )
+        )
+    else:
+        best_index = int(np.argmax(elevations))
+        logger.warning(
+            "No sampled observation time keeps PPC ({:.6f}, {:.6f}) within elevation {:.1f}-{:.1f} deg; using highest elevation {:.2f} deg at {}".format(
+                float(ppc_ra),
+                float(ppc_dec),
+                float(min_elevation),
+                float(max_elevation),
+                elevations[best_index],
+                sample_times[best_index].strftime("%Y-%m-%dT%H:%M:%SZ"),
+            )
+        )
+
+    return sample_times[best_index].strftime("%Y-%m-%dT%H:%M:%SZ"), elevations[
+        best_index
+    ]
+
+
+def _resolve_observation_time(observation_time, ppc_list):
+    if observation_time is not None:
+        return observation_time
+
+    representative_ra = float(ppc_list[0][1])
+    representative_dec = float(ppc_list[0][2])
+    resolved_time, _ = select_good_observation_time(
+        representative_ra,
+        representative_dec,
+    )
+    return resolved_time
 
 
 def build_netflow_targets(tb_tgt, for_single_ppc=False):
@@ -216,7 +307,7 @@ def run_netflow(
     tb_tgt,
     num_reserved_fibers=0,
     fiber_non_allocation_cost=0.0,
-    observation_time="2026-01-10T10:00:00Z",
+    observation_time=None,
     for_single_ppc=False,
     classdict_override=None,
 ):
@@ -230,6 +321,7 @@ def run_netflow(
     class_dict = (
         classdict_override if classdict_override is not None else build_classdict()
     )
+    observation_time = _resolve_observation_time(observation_time, ppc_list)
 
     telescopes = [
         nf.Telescope(telescope_ra[index], telescope_dec[index], telescope_pa[index], observation_time)
@@ -306,7 +398,7 @@ def fiber_allocate(
     tb_tgt,
     single_ppc_mode=False,
     ppc_candidate=None,
-    observation_time="2026-01-10T10:00:00Z",
+    observation_time=None,
     num_reserved_fibers=0,
     fiber_non_allocation_cost=0.0,
     classdict_override=None,
@@ -489,7 +581,7 @@ def optimize_non_observation_costs(
     weight_p0=3.0,
     weight_p1=2.0,
     focus_max=10,
-    otime="2026-03-24T13:00:00Z",
+    otime=None,
     debug=False,
 ):
     base_classdict = classic_build_classdict(_tb_tgt)

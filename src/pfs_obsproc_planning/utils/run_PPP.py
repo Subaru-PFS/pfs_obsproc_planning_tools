@@ -527,7 +527,7 @@ def PPP_centers(
                 tb_tgt_remaining,
                 single_ppc_mode=True,
                 ppc_candidate=(best_ppc_ra, best_ppc_dec, best_ppc_pa),
-                observation_time="2026-01-10T10:00:00Z",
+                observation_time=None,
             )
             retry_count += 1
         tb_tgt_assigned_mask = np.isin(_tb_tgt["identify_code"], assigned_target_ids)

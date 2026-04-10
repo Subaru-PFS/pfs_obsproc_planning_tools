@@ -19,6 +19,7 @@ def get_single_proposal_requirements(proposal_id):
             "ppc_pa": 120.0,
             "import_user_ppc_from_db": True,
             "single_exptime_override": 3600.0,
+            "single_program_mode": "LR",
         }
 
     if proposalId == "S25A-UH006-B":
@@ -140,6 +141,21 @@ def _get_import_user_ppc_from_db(proposal_id, default=True):
     if proposal_id is None:
         return default
     return _get_proposal_policy(proposal_id).get("import_user_ppc_from_db", default)
+
+
+def _get_optimize_costs(proposal_id, default=False):
+    if proposal_id is None:
+        return default
+    return _get_proposal_policy(proposal_id).get("optimize_costs", default)
+
+
+def _get_observation_time(proposal_id, default="2026-01-10T10:00:00Z"):
+    if proposal_id is None:
+        return default
+    proposal_policy = _get_proposal_policy(proposal_id)
+    return proposal_policy.get(
+        "observation_time", proposal_policy.get("otime", default)
+    )
 
 
 def _apply_configured_row_level_adjustments(tb_tgt):

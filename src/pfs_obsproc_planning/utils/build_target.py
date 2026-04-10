@@ -19,6 +19,8 @@ from qplan.util.site import site_subaru as observer
 
 from .classic_for_single_proposal import (
     _get_import_user_ppc_from_db,
+    _get_proposal_policy,
+    _get_single_program_ppc_pa,
     apply_proposal_target_adjustments,
 )
 from .db_query import database_info, query_target_from_db, query_user_ppc_from_db
@@ -319,6 +321,13 @@ def apply_db_ppc_metadata(tb_tgt, tb_tgt_l, tb_tgt_m, para_db):
     finally:
         tgt_db.dispose()
 
+    if len(proposal_ids) == 1:
+        proposal_id = proposal_ids[0]
+        proposal_policy = _get_proposal_policy(proposal_id)
+        if "ppc_pa" in proposal_policy and len(tb_ppc_tem) > 0:
+            tb_ppc_tem = tb_ppc_tem.copy(copy_data=True)
+            tb_ppc_tem["ppc_pa"] = _get_single_program_ppc_pa(proposal_id)
+
     apply_ppc_metadata(tb_tgt, tb_tgt_l, tb_tgt_m, tb_ppc_tem, "target DB")
     return True
 
@@ -352,10 +361,10 @@ def read_target_classic(mode, params):
             tb_tgt["is_medium_resolution"].astype(str) == "True", "M", "L"
         )
     if "exptime" not in tb_tgt.colnames:
-        tb_tgt.rename_column("exptime_usr", "exptime")
+        tb_tgt["exptime"] = tb_tgt["exptime_usr"]
 
     if "allocated_time" not in tb_tgt.colnames:
-        tb_tgt.rename_column("allocated_time_tac", "allocated_time")
+        tb_tgt["allocated_time"] = tb_tgt["allocated_time_tac"]
 
     if np.any(tb_tgt["allocated_time"] < 0):
         tb_tgt["allocated_time"] = np.sum(tb_tgt["exptime"] / 3600.0)
