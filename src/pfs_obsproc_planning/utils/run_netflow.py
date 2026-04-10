@@ -725,6 +725,12 @@ def fiber_allocation_classic(
             lst_ppc_usr[:, 1:],
             names=["ppc_ra", "ppc_dec", "ppc_pa", "ppc_priority_usr"],
         )
+        for column_name in ["ppc_ra", "ppc_dec", "ppc_pa", "ppc_priority_usr"]:
+            tb_ppc_usr[column_name] = np.asarray(tb_ppc_usr[column_name], dtype=float)
+        for column_name in ["ppc_ra", "ppc_dec", "ppc_pa"]:
+            tb_ppc_netflow[column_name] = np.asarray(
+                tb_ppc_netflow[column_name], dtype=float
+            )
         df_ppc_usr = Table.to_pandas(tb_ppc_usr)
         df_ppc_usr = df_ppc_usr.drop_duplicates(
             subset=["ppc_ra", "ppc_dec", "ppc_pa"],

@@ -14,6 +14,13 @@ _DEFAULT_SINGLE_PROGRAM_PRIORITY_POLICY = {
 def get_single_proposal_requirements(proposal_id):
     proposalId = str(proposal_id) if proposal_id is not None else None
 
+    if proposalId == "S26A-126":
+        return {
+            "ppc_pa": 120.0,
+            "import_user_ppc_from_db": True,
+            "single_exptime_override": 3600.0,
+        }
+
     if proposalId == "S25A-UH006-B":
         return {
             "tracked_priorities": list(range(20, 30)) + [999],
@@ -123,7 +130,10 @@ def _get_single_program_mode(proposal_id):
 def _get_single_program_ppc_pa(proposal_id, default=0.0):
     if proposal_id is None:
         return default
-    return _get_proposal_policy(proposal_id).get("ppc_pa", default)
+    ppc_pa = _get_proposal_policy(proposal_id).get("ppc_pa", default)
+    if ppc_pa != default:
+        logger.warning(f"PPC PA has been modified to {ppc_pa} for {proposal_id}.")
+    return ppc_pa
 
 
 def _get_import_user_ppc_from_db(proposal_id, default=True):
