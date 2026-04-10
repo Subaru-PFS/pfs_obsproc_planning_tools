@@ -17,7 +17,10 @@ from qplan import entity
 from qplan.util.eph_cache import EphemerisCache
 from qplan.util.site import site_subaru as observer
 
-from .classic_for_single_proposal import apply_proposal_target_adjustments
+from .classic_for_single_proposal import (
+    _get_import_user_ppc_from_db,
+    apply_proposal_target_adjustments,
+)
 from .db_query import database_info, query_target_from_db, query_user_ppc_from_db
 
 warnings.filterwarnings("ignore")
@@ -379,10 +382,20 @@ def read_target_classic(mode, params):
     tb_tgt_l = tb_tgt[tb_tgt["resolution"] == "L"]
     tb_tgt_m = tb_tgt[tb_tgt["resolution"] == "M"]
 
+    import_user_ppc_from_db = True
+    proposal_ids = sorted(set(tb_tgt["proposal_id"].astype(str)))
+    if len(proposal_ids) == 1:
+        import_user_ppc_from_db = _get_import_user_ppc_from_db(
+            proposal_ids[0],
+            default=import_user_ppc_from_db,
+        )
+
     if len(params["localPath_ppc"]) > 0:
         apply_user_ppc_metadata(tb_tgt, tb_tgt_l, tb_tgt_m, params["localPath_ppc"])
-    else:
+    elif import_user_ppc_from_db:
         apply_db_ppc_metadata(tb_tgt, tb_tgt_l, tb_tgt_m, params["DBPath_tgt"])
+    else:
+        logger.info("[S1] DB user PPC import is disabled; PPCs will be determined automatically unless provided locally.")
 
     if len(tb_tgt.meta.get("PPC", [])) == 0:
         logger.warning("[S1] No PPC is provided, PPCs would be determined automatically.")

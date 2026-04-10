@@ -120,6 +120,18 @@ def _get_single_program_mode(proposal_id):
     return _get_proposal_policy(proposal_id).get("single_program_mode")
 
 
+def _get_single_program_ppc_pa(proposal_id, default=0.0):
+    if proposal_id is None:
+        return default
+    return _get_proposal_policy(proposal_id).get("ppc_pa", default)
+
+
+def _get_import_user_ppc_from_db(proposal_id, default=True):
+    if proposal_id is None:
+        return default
+    return _get_proposal_policy(proposal_id).get("import_user_ppc_from_db", default)
+
+
 def _apply_configured_row_level_adjustments(tb_tgt):
     if "proposal_id" not in tb_tgt.colnames:
         return tb_tgt
