@@ -1,5 +1,6 @@
 import copy
 import html
+import io
 import re
 import tomllib
 from datetime import datetime, timedelta
@@ -514,38 +515,20 @@ class PFSConfigApp:
             description="All times are in HST. \n Please note that the date is the scheduled night, not the actual observation date. For example, an observation from 00:00 to 05:00 on the night of 2026-03-15 should be entered as `2026-03-15 00:00-05:00`, not `2026-03-16 00:00-05:00`.",
             placeholder="HST",
             sizing_mode="stretch_width",
+            resizable=False,
         )
         self.refresh_observation_button = pn.widgets.Button(
             name="Refresh default",
             button_type="default",
             sizing_mode="stretch_width",
         )
-        self.save_config_button = pn.widgets.Button(
-            name="Save the config",
+        self.save_config_button = pn.widgets.FileDownload(
+            callback=self._download_config_file,
+            filename=self.config_path.name,
+            label="Save the config",
             button_type="primary",
             sizing_mode="stretch_width",
-        )
-        self.save_path_input = pn.widgets.TextInput(
-            name="save path",
-            value=str(self.config_path),
-            sizing_mode="stretch_width",
-        )
-        self.confirm_save_button = pn.widgets.Button(
-            name="Save",
-            button_type="primary",
-            width=100,
-        )
-        self.cancel_save_button = pn.widgets.Button(
-            name="Cancel",
-            button_type="default",
-            width=100,
-        )
-        self.save_dialog = pn.Column(
-            pn.pane.HTML(f"<div style=\"{SUBTITLE_STYLE}\">Save config</div>"),
-            self.save_path_input,
-            pn.Row(self.confirm_save_button, self.cancel_save_button),
-            visible=False,
-            sizing_mode="stretch_width",
+            auto=True,
         )
         self.left_status = pn.pane.Markdown(sizing_mode="stretch_width")
         self.right_panel = pn.Column(sizing_mode="stretch_both", scroll=True)
@@ -553,9 +536,6 @@ class PFSConfigApp:
         self.reload_button.on_click(self._reload_config)
         self.refresh_ids_button.on_click(self._refresh_ids)
         self.refresh_observation_button.on_click(self._reset_observation_text)
-        self.save_config_button.on_click(self._open_save_dialog)
-        self.confirm_save_button.on_click(self._save_config)
-        self.cancel_save_button.on_click(self._close_save_dialog)
         self.mode_selector.param.watch(self._on_mode_change, "value")
         self.proposal_select.param.watch(self._on_proposal_change, "value")
         self.observation_text.param.watch(self._on_observation_text_change, "value")
@@ -622,6 +602,7 @@ class PFSConfigApp:
                 self._notify(f"Loaded config: {config_path}", "success")
 
         self.config_path = Path(config_path).expanduser()
+        self.save_config_button.filename = self.config_path.name or "config.toml"
         self._sync_controls_from_config()
         self._render_config_panel()
         self._update_status()
@@ -629,29 +610,19 @@ class PFSConfigApp:
     def _reload_config(self, event=None):
         self._load_config(self.path_input.value, notify=True)
 
-    def _open_save_dialog(self, event=None):
-        self.save_path_input.value = str(self.config_path)
-        self.save_dialog.visible = True
-
-    def _close_save_dialog(self, event=None):
-        self.save_dialog.visible = False
-
-    def _save_config(self, event=None):
-        save_path = Path(self.save_path_input.value).expanduser()
-        try:
-            save_path.parent.mkdir(parents=True, exist_ok=True)
-            save_path.write_text(dumps_toml(self.config_data), encoding="utf-8")
-        except Exception as error:
-            self._notify(f"Could not save config: {error}", "error")
-            return
-
-        self._notify(f"Saved config to {save_path}", "success")
-        self.save_dialog.visible = False
+    def _download_config_file(self):
+        self._notify(
+            "Download started. Choose the save location in your browser if prompted.",
+            "success",
+        )
+        return io.BytesIO(dumps_toml(self.config_data).encode("utf-8"))
 
     def _sync_controls_from_config(self):
         ppp_config = self.config_data.setdefault("ppp", {})
         mode = ppp_config.get("mode", "queue")
         mode = "classic" if str(mode).lower() == "classic" else "queue"
+        if mode == "classic":
+            ppp_config["daily_plan"] = False
         proposal_ids = ppp_config.get("proposalIds", [])
 
         selected_proposal = None
@@ -673,6 +644,8 @@ class PFSConfigApp:
     def _apply_mode_to_widgets(self, mode, selected_proposal=None, rerender=True):
         ppp_config = self.config_data.setdefault("ppp", {})
         ppp_config["mode"] = mode
+        if mode == "classic":
+            ppp_config["daily_plan"] = False
 
         if mode == "queue":
             self.proposal_select.options = [QUEUE_ONLY_ID]
@@ -754,6 +727,9 @@ class PFSConfigApp:
 
     def _reset_observation_text(self, event=None):
         self.observation_text.value = self.default_observation_text
+        if self._sync_qplan_from_observation_text():
+            self._render_config_panel()
+            self._update_status()
 
     def _on_mode_change(self, event):
         if self._mode_guard:
@@ -840,8 +816,6 @@ class PFSConfigApp:
             self.refresh_observation_button,
             pn.Spacer(height=12),
             self.save_config_button,
-            pn.Spacer(height=8),
-            self.save_dialog,
             sizing_mode="stretch_width",
         )
 
