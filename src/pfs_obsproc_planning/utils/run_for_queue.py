@@ -17,13 +17,89 @@ from .run_netflow import (
 )
 
 
-def export_output_tables(tb_ppc, tb_tgt, output_dir="output/", backup=False):
+_PPC_EXPORT_COLUMNS = [
+    "ppc_code",
+    "ppc_ra",
+    "ppc_dec",
+    "ppc_pa",
+    "ppc_equinox",
+    "ppc_priority",
+    "ppc_priority_usr",
+    "ppc_exptime",
+    "ppc_totaltime",
+    "ppc_resolution",
+    "ppc_fiber_usage_frac",
+    "ppc_allocated_targets",
+    "ppc_comment",
+]
+
+
+def _normalize_ppc_export_table(tb_ppc, tb_tgt=None):
     tb_ppc_export = tb_ppc.copy(copy_data=True)
+    n_rows = len(tb_ppc_export)
+    is_classic = (
+        "ppc_code" in tb_ppc_export.colnames
+        and n_rows > 0
+        and all(str(code).startswith("cla_") for code in tb_ppc_export["ppc_code"])
+    )
+
+    default_columns = {
+        "ppc_equinox": np.array(["J2000"] * n_rows, dtype=np.str_),
+        "ppc_exptime": np.full(n_rows, 900.0, dtype=float),
+        "ppc_totaltime": np.full(n_rows, 1200.0, dtype=float),
+        "ppc_comment": np.array([""] * n_rows, dtype=np.str_),
+        "ppc_allocated_targets": np.array([[] for _ in range(n_rows)], dtype=object),
+    }
+
+    if is_classic and "ppc_exptime" not in tb_ppc_export.colnames:
+        default_single_exptime = None
+        if tb_tgt is not None and hasattr(tb_tgt, "meta"):
+            default_single_exptime = tb_tgt.meta.get("single_exptime")
+        if default_single_exptime is not None:
+            default_columns["ppc_exptime"] = np.full(
+                n_rows, float(default_single_exptime), dtype=float
+            )
+            default_columns["ppc_totaltime"] = np.full(
+                n_rows, float(default_single_exptime) + 300.0, dtype=float
+            )
+
+    if "ppc_priority_usr" not in tb_ppc_export.colnames:
+        if "ppc_priority" in tb_ppc_export.colnames:
+            tb_ppc_export["ppc_priority_usr"] = np.asarray(
+                tb_ppc_export["ppc_priority"], dtype=float
+            )
+        else:
+            tb_ppc_export["ppc_priority_usr"] = np.arange(1, n_rows + 1, dtype=float)
+
+    if "ppc_priority" not in tb_ppc_export.colnames:
+        tb_ppc_export["ppc_priority"] = np.arange(1, n_rows + 1, dtype=float)
+
+    for column_name, default_value in default_columns.items():
+        if column_name not in tb_ppc_export.colnames:
+            tb_ppc_export[column_name] = default_value
+
+    return tb_ppc_export[_PPC_EXPORT_COLUMNS]
+
+
+def export_output_tables(tb_ppc, tb_tgt, output_dir="output/", backup=False):
+    tb_ppc_export = _normalize_ppc_export_table(tb_ppc, tb_tgt=tb_tgt)
     tb_ppc_export.write(
         os.path.join(output_dir, "ppcList_all.ecsv"),
         format="ascii.ecsv",
         overwrite=True,
     )
+    if not backup:
+        tb_ppc_export.write(
+            os.path.join(output_dir, "ppcList.ecsv"),
+            format="ascii.ecsv",
+            overwrite=True,
+        )
+    else:
+        tb_ppc_export.write(
+            os.path.join(output_dir, "ppcList_backup.ecsv"),
+            format="ascii.ecsv",
+            overwrite=True,
+        )
 
     target_column_map = [
         ("ob_code", "ob_code"),
@@ -224,18 +300,5 @@ def run(
         tb_tgt_l,
         tb_tgt_m,
     )
-
-    if not backup:
-        tb_ppc_tot.write(
-            os.path.join(output_dir, "ppcList.ecsv"),
-            format="ascii.ecsv",
-            overwrite=True,
-        )
-    else:
-        tb_ppc_tot.write(
-            os.path.join(output_dir, "ppcList_backup.ecsv"),
-            format="ascii.ecsv",
-            overwrite=True,
-        )
 
     export_output_tables(tb_ppc_tot, tb_tgt_tot, output_dir=output_dir, backup=backup)
