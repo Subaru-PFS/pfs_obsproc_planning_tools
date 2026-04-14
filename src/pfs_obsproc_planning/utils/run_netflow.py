@@ -11,6 +11,7 @@ from astropy.table import Table, join
 from astropy.time import Time
 from loguru import logger
 from scipy.optimize import minimize
+from ics.cobraOps.TargetGroup import TargetGroup
 
 bench = None
 cobra_location_group = None
@@ -108,13 +109,20 @@ def select_good_observation_time(
     min_elevation=30.0,
     max_elevation=75.0,
 ):
-    """Pick a coarse but reasonable UTC observation time for a field at Subaru.
+    """Pick a coarse but reasonable UTC observation time for one or more PPCs.
 
     The search is intentionally simple: try one representative night in each
     season and a few nighttime local HST times (21:00, 00:00, 03:00 by default).
-    Return the first candidate whose elevation is within the requested range.
-    If none match, fall back to the highest-elevation candidate.
+    Choose the sampled UTC time that maximizes how many PPC centers are within
+    the requested elevation range. If multiple times tie, prefer the one with
+    the highest summed valid elevation. If none match, fall back to the time
+    with the highest mean elevation across the supplied PPC centers.
     """
+
+    ppc_ra_values = np.atleast_1d(np.asarray(ppc_ra, dtype=float))
+    ppc_dec_values = np.atleast_1d(np.asarray(ppc_dec, dtype=float))
+    if ppc_ra_values.shape != ppc_dec_values.shape:
+        raise ValueError("ppc_ra and ppc_dec must have the same shape")
 
     if dates_local is None:
         dates_local = [
@@ -139,53 +147,87 @@ def select_good_observation_time(
     sample_times = Time(candidate_datetimes_utc, scale="utc")
 
     subaru = EarthLocation.of_site("Subaru Telescope")
-    field = SkyCoord(ra=float(ppc_ra) * u.deg, dec=float(ppc_dec) * u.deg)
-    altaz = field.transform_to(AltAz(obstime=sample_times, location=subaru))
-    elevations = np.asarray(altaz.alt.deg, dtype=float)
+    elevations = np.vstack(
+        [
+            np.asarray(
+                SkyCoord(ra=ra * u.deg, dec=dec * u.deg)
+                .transform_to(AltAz(obstime=sample_times, location=subaru))
+                .alt.deg,
+                dtype=float,
+            )
+            for ra, dec in zip(ppc_ra_values, ppc_dec_values)
+        ]
+    )
 
     valid_mask = (elevations >= float(min_elevation)) & (
         elevations <= float(max_elevation)
     )
+    visible_counts = np.sum(valid_mask, axis=0)
+    n_ppc = len(ppc_ra_values)
 
-    if np.any(valid_mask):
-        best_index = int(np.flatnonzero(valid_mask)[0])
+    if np.any(visible_counts > 0):
+        candidate_indices = np.flatnonzero(visible_counts == np.max(visible_counts))
+        valid_elevation_sums = np.sum(
+            np.where(valid_mask[:, candidate_indices], elevations[:, candidate_indices], 0.0),
+            axis=0,
+        )
+        best_index = int(candidate_indices[np.argmax(valid_elevation_sums)])
         logger.info(
-            "Selected observation_time={} for PPC ({:.6f}, {:.6f}) at elevation {:.2f} deg".format(
+            "Selected observation_time={} with {}/{} PPCs visible in elevation range {:.1f}-{:.1f} deg".format(
                 sample_times[best_index].strftime("%Y-%m-%dT%H:%M:%SZ"),
-                float(ppc_ra),
-                float(ppc_dec),
-                elevations[best_index],
+                int(visible_counts[best_index]),
+                int(n_ppc),
+                float(min_elevation),
+                float(max_elevation),
             )
         )
     else:
-        best_index = int(np.argmax(elevations))
+        best_index = int(np.argmax(np.mean(elevations, axis=0)))
         logger.warning(
-            "No sampled observation time keeps PPC ({:.6f}, {:.6f}) within elevation {:.1f}-{:.1f} deg; using highest elevation {:.2f} deg at {}".format(
-                float(ppc_ra),
-                float(ppc_dec),
+            "No sampled observation time keeps any PPC within elevation {:.1f}-{:.1f} deg; using {} with mean elevation {:.2f} deg across {} PPCs".format(
                 float(min_elevation),
                 float(max_elevation),
-                elevations[best_index],
                 sample_times[best_index].strftime("%Y-%m-%dT%H:%M:%SZ"),
+                float(np.mean(elevations[:, best_index])),
+                int(n_ppc),
             )
         )
 
-    return sample_times[best_index].strftime("%Y-%m-%dT%H:%M:%SZ"), elevations[
-        best_index
-    ]
+    best_elevations = elevations[:, best_index]
+    if n_ppc == 1:
+        best_elevations = float(best_elevations[0])
+
+    return sample_times[best_index].strftime("%Y-%m-%dT%H:%M:%SZ"), best_elevations
 
 
 def _resolve_observation_time(observation_time, ppc_list):
     if observation_time is not None:
         return observation_time
 
-    representative_ra = float(ppc_list[0][1])
-    representative_dec = float(ppc_list[0][2])
+    representative_ra = np.asarray(ppc_list[:, 1], dtype=float)
+    representative_dec = np.asarray(ppc_list[:, 2], dtype=float)
     resolved_time, _ = select_good_observation_time(
         representative_ra,
         representative_dec,
     )
     return resolved_time
+
+
+def _filter_targets_near_ppc(tb_tgt, ppc_centers, radius_deg=2.0):
+    if len(tb_tgt) == 0 or len(ppc_centers) == 0:
+        return tb_tgt
+
+    target_coords = SkyCoord(
+        ra=np.asarray(tb_tgt["ra"], dtype=float) * u.deg,
+        dec=np.asarray(tb_tgt["dec"], dtype=float) * u.deg,
+    )
+    keep_mask = np.zeros(len(tb_tgt), dtype=bool)
+
+    for ppc_ra, ppc_dec in ppc_centers:
+        center_coord = SkyCoord(ra=float(ppc_ra) * u.deg, dec=float(ppc_dec) * u.deg)
+        keep_mask |= target_coords.separation(center_coord).deg <= float(radius_deg)
+
+    return tb_tgt[keep_mask]
 
 
 def build_netflow_targets(tb_tgt, for_single_ppc=False):
@@ -213,6 +255,10 @@ def build_netflow_targets(tb_tgt, for_single_ppc=False):
                 target_priority,
                 "sci",
                 req_flags=request_flags,
+                pmra=tb_tgt_row["pmra"],
+                pmdec=tb_tgt_row["pmdec"],
+                parallax=tb_tgt_row["parallax"],
+                epoch=float(str(tb_tgt_row["equinox"]).lstrip("J")),
             )
         )
         proposal_class_keys.append(f"sci_P{target_priority}")
@@ -391,6 +437,22 @@ def run_netflow(
                 _, _, tidx, cidx, ivis = key.split("_")
                 res[int(ivis)][int(tidx)] = int(cidx)
 
+    for ivis, (vis, tp) in enumerate(zip(res, focal_plane_positions)):
+        selectedTargets = np.full(
+            len(bench.cobras.centers), TargetGroup.NULL_TARGET_POSITION
+        )
+        ids = np.full(len(bench.cobras.centers), TargetGroup.NULL_TARGET_ID)
+        for tidx, cidx in vis.items():
+            selectedTargets[cidx] = tp[tidx]
+            ids[cidx] = ""
+        for i in range(selectedTargets.size):
+            if selectedTargets[i] != TargetGroup.NULL_TARGET_POSITION:
+                dist = np.abs(selectedTargets[i] - bench.cobras.centers[i])
+                if dist > bench.cobras.L1[i] + bench.cobras.L2[i]:
+                    logger.warning(
+                        f"(CobraId={i}) Distance from the center exceeds L1+L2 ({dist} mm)"
+                    )
+
     return res, telescopes, netflow_targets
 
 
@@ -409,6 +471,15 @@ def fiber_allocate(
             raise ValueError("ppc_candidate must be provided when single_ppc_mode=True")
 
         ppc_ra, ppc_dec, ppc_pa = ppc_candidate
+        tb_tgt = _filter_targets_near_ppc(tb_tgt, [(ppc_ra, ppc_dec)], radius_deg=2.0)
+        if len(tb_tgt) == 0:
+            logger.warning(
+                "No targets within 2.0 deg of PPC center ({:.6f}, {:.6f})".format(
+                    float(ppc_ra),
+                    float(ppc_dec),
+                )
+            )
+            return []
         ppc_list = np.array([[0, ppc_ra, ppc_dec, ppc_pa, 0]], dtype=object)
 
         assignments, telescopes, netflow_targets = run_netflow(
@@ -441,6 +512,10 @@ def fiber_allocate(
 
         ppc_records = []
         ppc_list = tb_tgt.meta["PPC"]
+        tb_tgt = _filter_targets_near_ppc(tb_tgt, ppc_list[:, 1:3], radius_deg=2.0)
+        if len(tb_tgt) == 0:
+            logger.warning("[S3] No targets within 2.0 deg of any PPC center")
+            return []
         today_date = datetime.now().strftime("%y%m%d")
         resolution = tb_tgt["resolution"][0]
 
