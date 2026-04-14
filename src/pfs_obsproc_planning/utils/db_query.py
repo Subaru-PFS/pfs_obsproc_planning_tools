@@ -93,6 +93,11 @@ def query_target_from_db(tgt_db, proposal_ids):
         pd.to_numeric, errors="coerce"
     )
 
+    df_tgt.loc[df_tgt["pmra"].isna(), "pmra"] = 0.0
+    df_tgt.loc[df_tgt["pmdec"].isna(), "pmdec"] = 0.0
+    df_tgt.loc[df_tgt["parallax"].isna(), "parallax"] = 1.0e-7
+    df_tgt.loc[df_tgt["parallax"] == 0.0, "parallax"] = 1.0e-7
+
     tb_tgt_from_db = Table.from_pandas(df_tgt)
     for column in _TARGET_DB_FILTER_COLUMNS:
         tb_tgt_from_db[column] = tb_tgt_from_db[column].astype("str")
