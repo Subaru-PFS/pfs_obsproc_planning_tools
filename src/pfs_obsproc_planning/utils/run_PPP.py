@@ -32,6 +32,17 @@ warnings.filterwarnings("ignore")
 np.random.seed(0)
 
 _DEFAULT_PPP_WEIGHT_PARAMS = (2, 0, 0)
+_PPP_OBJECTIVE_LAMBDAS = {
+    "fh": 1.00,
+    "finish": 0.1,
+    "cont": 0.1,
+    "prio": 0.30,
+    "fill": 0.30,
+    "new": 0.10,
+    "over": 0.05,
+}
+_PPP_PRIORITY_VALUES = {0: 1.0, 1: 0.6}
+_PPP_TOTAL_FIBERS = 2394.0
 
 
 # -----------------------------------------------------------------------------
@@ -238,31 +249,205 @@ def KDE(_tb_tgt, multiProcesing):
     return X_, Y_, obj_dis_sig_, peak_x, peak_y
 
 
+def _safe_divide(numerator, denominator):
+    """Safely divide two scalars and return 0 when the denominator is zero."""
+    if denominator <= 0:
+        return 0.0
+    return float(numerator) / float(denominator)
+
+
+def _proposal_weight_by_id(_tb_tgt):
+    """Return normalized proposal-rank weights keyed by proposal ID."""
+    proposal_ids = np.asarray(_tb_tgt["proposal_id"], dtype=str)
+    proposal_ranks = np.asarray(_tb_tgt["rank"], dtype=float)
+    proposal_weights = {}
+    for proposal_id in np.unique(proposal_ids):
+        proposal_mask = proposal_ids == proposal_id
+        proposal_weights[proposal_id] = float(proposal_ranks[proposal_mask][0]) / 10.0
+    return proposal_weights
+
+
+def _proposal_remaining_fh_by_id(_tb_tgt):
+    """Return remaining credited fiber-hours for each proposal."""
+    fh_done_by_proposal = _calculate_fh_done_by_proposal(_tb_tgt)
+    proposal_ids = np.asarray(_tb_tgt["proposal_id"], dtype=str)
+    allocated_time = np.asarray(_tb_tgt["allocated_time"], dtype=float)
+    proposal_remaining_fh = {}
+    for proposal_id in np.unique(proposal_ids):
+        proposal_mask = proposal_ids == proposal_id
+        fh_goal = float(allocated_time[proposal_mask][0])
+        fh_done = float(fh_done_by_proposal.get(proposal_id, 0.0))
+        proposal_remaining_fh[proposal_id] = max(0.0, fh_goal - fh_done)
+    return proposal_remaining_fh
+
+
+def _priority_value_sum(priority_values, priority_value_map=None):
+    """Convert priority labels into a weighted value sum."""
+    if priority_value_map is None:
+        priority_value_map = _PPP_PRIORITY_VALUES
+    priority_values = np.asarray(priority_values, dtype=int)
+    return float(
+        sum(
+            priority_value_map.get(int(priority), 0.0)
+            for priority in priority_values
+        )
+    )
+
+
+def _score_single_ppc_assignment(_tb_tgt, assigned_target_ids):
+    """Evaluate one single-PPC assignment with normalized queue/classic metrics."""
+    term_names = [
+        "fh",
+        "finish",
+        "cont",
+        "prio",
+        "fill",
+        "new_partial",
+        "overshoot",
+        "n_assigned",
+        "n_p0",
+        "n_p1",
+        "n_finish",
+        "n_partial",
+        "n_continue",
+        "n_new_partial",
+    ]
+    if len(_tb_tgt) == 0 or len(assigned_target_ids) == 0:
+        return 0.0, {term_name: 0.0 for term_name in term_names}
+
+    identify_codes = np.asarray(_tb_tgt["identify_code"], dtype=str)
+    assigned_target_ids = np.asarray(assigned_target_ids, dtype=str)
+    assigned_mask = np.isin(identify_codes, assigned_target_ids)
+    if not np.any(assigned_mask):
+        return 0.0, {term_name: 0.0 for term_name in term_names}
+
+    tb_tgt_assigned = _tb_tgt[assigned_mask]
+    n_assigned = len(tb_tgt_assigned)
+    single_exptime = float(_tb_tgt.meta["single_exptime"])
+
+    remaining_exptime = np.asarray(tb_tgt_assigned["exptime_PPP"], dtype=float)
+    exptime_done = np.asarray(tb_tgt_assigned["exptime_done"], dtype=float)
+    assigned_priorities = np.asarray(tb_tgt_assigned["priority"], dtype=int)
+    incremental_seconds = np.minimum(remaining_exptime, single_exptime)
+    incremental_seconds = np.clip(incremental_seconds, 0.0, None)
+
+    n_finish = int(np.sum(remaining_exptime <= single_exptime))
+    n_partial = int(np.sum(remaining_exptime > single_exptime))
+    n_continue = int(np.sum(exptime_done > 0.0))
+    n_new_partial = int(
+        np.sum((exptime_done <= 0.0) & (remaining_exptime > single_exptime))
+    )
+    n_p0 = int(np.sum(assigned_priorities == 0))
+    n_p1 = int(np.sum(assigned_priorities == 1))
+
+    proposal_weights = _proposal_weight_by_id(_tb_tgt)
+    proposal_remaining_fh = _proposal_remaining_fh_by_id(_tb_tgt)
+    proposal_ids_assigned = np.asarray(tb_tgt_assigned["proposal_id"], dtype=str)
+    unique_proposal_ids, inverse_indices = np.unique(
+        proposal_ids_assigned, return_inverse=True
+    )
+    delta_fh_by_proposal = {
+        proposal_id: fh_delta
+        for proposal_id, fh_delta in zip(
+            unique_proposal_ids,
+            np.bincount(inverse_indices, weights=incremental_seconds) / 3600.0,
+        )
+    }
+
+    total_remaining_weighted_fh = float(
+        sum(
+            proposal_weights.get(proposal_id, 0.0) * remaining_fh
+            for proposal_id, remaining_fh in proposal_remaining_fh.items()
+        )
+    )
+    max_proposal_weight = max(proposal_weights.values(), default=0.0)
+    single_pointing_weighted_fh_cap = (
+        (_PPP_TOTAL_FIBERS * single_exptime / 3600.0) * max_proposal_weight
+    )
+    fh_denominator = min(total_remaining_weighted_fh, single_pointing_weighted_fh_cap)
+    useful_fh_gain = float(
+        sum(
+            proposal_weights.get(proposal_id, 0.0)
+            * min(delta_fh_by_proposal.get(proposal_id, 0.0), remaining_fh)
+            for proposal_id, remaining_fh in proposal_remaining_fh.items()
+        )
+    )
+    overshoot_fh = float(
+        sum(
+            proposal_weights.get(proposal_id, 0.0)
+            * max(0.0, delta_fh_by_proposal.get(proposal_id, 0.0) - remaining_fh)
+            for proposal_id, remaining_fh in proposal_remaining_fh.items()
+        )
+    )
+
+    remaining_priority_mask = np.asarray(_tb_tgt["exptime_PPP"], dtype=float) > 0.0
+    priority_value_denominator = _priority_value_sum(
+        np.asarray(_tb_tgt["priority"], dtype=int)[remaining_priority_mask]
+    )
+    priority_value_assigned = _priority_value_sum(
+        np.asarray(tb_tgt_assigned["priority"], dtype=int)
+    )
+
+    term_values = {
+        "fh": _safe_divide(useful_fh_gain, fh_denominator),
+        "finish": _safe_divide(n_finish, n_assigned),
+        "cont": _safe_divide(n_continue, n_assigned),
+        "prio": _safe_divide(priority_value_assigned, priority_value_denominator),
+        "fill": _safe_divide(n_assigned, _PPP_TOTAL_FIBERS),
+        "new_partial": _safe_divide(n_new_partial, n_assigned),
+        "overshoot": _safe_divide(overshoot_fh, fh_denominator),
+        "n_assigned": float(n_assigned),
+        "n_p0": float(n_p0),
+        "n_p1": float(n_p1),
+        "n_finish": float(n_finish),
+        "n_partial": float(n_partial),
+        "n_continue": float(n_continue),
+        "n_new_partial": float(n_new_partial),
+    }
+
+    score = (
+        _PPP_OBJECTIVE_LAMBDAS["fh"] * term_values["fh"]
+        + _PPP_OBJECTIVE_LAMBDAS["finish"] * term_values["finish"]
+        + _PPP_OBJECTIVE_LAMBDAS["cont"] * term_values["cont"]
+        + _PPP_OBJECTIVE_LAMBDAS["prio"] * term_values["prio"]
+        + _PPP_OBJECTIVE_LAMBDAS["fill"] * term_values["fill"]
+        - _PPP_OBJECTIVE_LAMBDAS["new"] * term_values["new_partial"]
+        - _PPP_OBJECTIVE_LAMBDAS["over"] * term_values["overshoot"]
+    )
+
+    return score, term_values
+
+
 def objective_ppc_assignment(trial_ppc, _tb_tgt, ppc_pa=0.0):
     """Score a candidate PPC center by the targets it can allocate."""
     ppc_ra, ppc_dec = trial_ppc
     assigned_target_ids = fiber_allocate(
         _tb_tgt, single_ppc_mode=True, ppc_candidate=(ppc_ra, ppc_dec, ppc_pa)
     )
-    assigned_mask = np.isin(_tb_tgt["identify_code"], assigned_target_ids)
-    priority_values = np.asarray(_tb_tgt["priority"])
-    tracked_priorities = list(range(10)) + [999]
-    assigned_counts = {}
-    total_counts = {}
-    for priority in tracked_priorities:
-        priority_mask = priority_values == priority
-        assigned_counts[priority] = int(np.sum(assigned_mask & priority_mask))
-        total_counts[priority] = int(np.sum(priority_mask))
-    n_assigned_total = len(assigned_target_ids)
-    priority_summary = ", ".join(
-        f"N{priority} = {assigned_counts[priority]}/{total_counts[priority]}"
-        for priority in tracked_priorities
-    )
+    score, term_values = _score_single_ppc_assignment(_tb_tgt, assigned_target_ids)
     print(
-        f"{ppc_ra}, {ppc_dec}, {ppc_pa}, Nall = {n_assigned_total}/{len(_tb_tgt)}, {priority_summary}"
-    )
-    score = (
-        1.0 * n_assigned_total + 0.5 * assigned_counts[0] + 1.10 * assigned_counts[999]
+        "{:.6f}, {:.6f}, {:.1f}, Nassigned = {:.0f}/{:.0f}, NP0 = {:.0f}, "
+        "NP1 = {:.0f}, Ncomplete = {:.0f}, Npartial = {:.0f}, FH = {:.3f}, "
+        "Finish = {:.3f}, Continue = {:.3f}, Prio = {:.3f}, Fill = {:.3f}, "
+        "NewPartial = {:.3f}, Over = {:.3f}, Score = {:.3f}".format(
+            ppc_ra,
+            ppc_dec,
+            ppc_pa,
+            term_values["n_assigned"],
+            len(_tb_tgt),
+            term_values["n_p0"],
+            term_values["n_p1"],
+            term_values["n_finish"],
+            term_values["n_partial"],
+            term_values["fh"],
+            term_values["finish"],
+            term_values["cont"],
+            term_values["prio"],
+            term_values["fill"],
+            term_values["new_partial"],
+            term_values["overshoot"],
+            score,
+        )
     )
     return -score
 
@@ -530,6 +715,9 @@ def PPP_centers(
                 observation_time=None,
             )
             retry_count += 1
+        ppc_score, ppc_term_values = _score_single_ppc_assignment(
+            _tb_tgt, assigned_target_ids
+        )
         tb_tgt_assigned_mask = np.isin(_tb_tgt["identify_code"], assigned_target_ids)
         _tb_tgt["exptime_PPP"][tb_tgt_assigned_mask] -= single_exptime
         _tb_tgt["exptime_done"][tb_tgt_assigned_mask] += single_exptime
@@ -548,8 +736,8 @@ def PPP_centers(
                     best_ppc_ra,
                     best_ppc_dec,
                     best_ppc_pa,
-                    total_assigned_weight,
-                    sum(assigned_fh_by_proposal.values()) / total_fh_goal,
+                    ppc_score,
+                    ppc_term_values["fh"],
                     len(tb_tgt_assigned) / 2394.0,
                     assigned_target_ids,
                 ],
@@ -572,7 +760,7 @@ def PPP_centers(
         tb_tgt_remaining = _select_tb_tgt_remaining(_tb_tgt, incomplete_proposal_ids)
         n_partially_observed_after_filter = sum(tb_tgt_remaining["exptime_done"] > 0)
         print(
-            f"PPC_{len(ppc_records):3d}: {len(_tb_tgt)-len(tb_tgt_remaining):5d}/{len(_tb_tgt):10d} targets are finished (w={total_assigned_weight:.2f}). (partial = {n_partially_observed_before_filter}, {n_partially_observed_after_filter})"
+            f"PPC_{len(ppc_records):3d}: {len(_tb_tgt)-len(tb_tgt_remaining):5d}/{len(_tb_tgt):10d} targets are finished (score={ppc_score:.3f}, fh={ppc_term_values['fh']:.3f}). (partial = {n_partially_observed_before_filter}, {n_partially_observed_after_filter})"
         )
         Table.pprint_all(tb_proposal_progress)
     if len(ppc_records) == 0:
@@ -603,15 +791,12 @@ def objective_single_program_ppc_assignment(trial_ppc, tb_tgt, ppc_pa=0.0):
     assigned_target_ids = fiber_allocate(
         tb_tgt, single_ppc_mode=True, ppc_candidate=(ppc_ra, ppc_dec, ppc_pa)
     )
+    score, term_values = _score_single_ppc_assignment(tb_tgt, assigned_target_ids)
     assigned_mask = np.isin(tb_tgt["identify_code"], assigned_target_ids)
     proposal_policy = _get_proposal_policy(_single_program_proposal_id(tb_tgt))
     tracked_priorities = proposal_policy.get(
         "tracked_priorities",
         _DEFAULT_SINGLE_PROGRAM_PRIORITY_POLICY["tracked_priorities"],
-    )
-    emphasized_priority = proposal_policy.get(
-        "emphasized_priority",
-        _DEFAULT_SINGLE_PROGRAM_PRIORITY_POLICY["emphasized_priority"],
     )
     priority_values = np.asarray(tb_tgt["priority"])
     assigned_counts = {}
@@ -625,12 +810,29 @@ def objective_single_program_ppc_assignment(trial_ppc, tb_tgt, ppc_pa=0.0):
         for priority in tracked_priorities
     )
     print(
-        f"{ppc_ra}, {ppc_dec}, {ppc_pa}, Nall = {len(assigned_target_ids)}/{len(tb_tgt)}, {priority_summary}"
-    )
-    score = (
-        1.0 * len(assigned_target_ids)
-        + 0.5 * assigned_counts[emphasized_priority]
-        + 1.50 * assigned_counts[999]
+        "{:.6f}, {:.6f}, {:.1f}, Nassigned = {:.0f}/{:.0f}, NP0 = {:.0f}, "
+        "NP1 = {:.0f}, Ncomplete = {:.0f}, Npartial = {:.0f}, {}, FH = {:.3f}, "
+        "Finish = {:.3f}, Continue = {:.3f}, Prio = {:.3f}, Fill = {:.3f}, "
+        "NewPartial = {:.3f}, Over = {:.3f}, Score = {:.3f}".format(
+            ppc_ra,
+            ppc_dec,
+            ppc_pa,
+            term_values["n_assigned"],
+            len(tb_tgt),
+            term_values["n_p0"],
+            term_values["n_p1"],
+            term_values["n_finish"],
+            term_values["n_partial"],
+            priority_summary,
+            term_values["fh"],
+            term_values["finish"],
+            term_values["cont"],
+            term_values["prio"],
+            term_values["fill"],
+            term_values["new_partial"],
+            term_values["overshoot"],
+            score,
+        )
     )
     return -score
 
@@ -670,6 +872,7 @@ def _optimize_fixed_pa_single_program_pointing(
             single_ppc_mode=True,
             ppc_candidate=(test_ra, test_dec, fixed_ppc_pa),
         )
+        score, term_values = _score_single_ppc_assignment(tb_tgt, assigned_ids)
         index_assign = np.isin(tb_tgt["identify_code"], assigned_ids)
         assigned_targets = tb_tgt[index_assign]
         priority_mask = tb_tgt["priority"] <= priority_limit
@@ -678,17 +881,32 @@ def _optimize_fixed_pa_single_program_pointing(
             np.sum(assigned_targets["priority"] <= priority_limit)
         )
         n_total = len(assigned_ids)
-        priority_norm = (
-            n_priority_targets_assigned / n_priority_targets_total
-            if n_priority_targets_total > 0
-            else 0.0
-        )
-        total_norm = n_total / len(tb_tgt) if len(tb_tgt) > 0 else 0.0
-        score = -(5 * priority_norm + total_norm)
         print(
-            f"Testing RA={test_ra:.6f}, Dec={test_dec:.6f}: P<= {priority_limit}={n_priority_targets_assigned}, Total={n_total}, Score={score:.3f}"
+            "Testing RA={:.6f}, Dec={:.6f}: P<= {} = {}/{}, Nassigned={}, "
+            "NP0={}, NP1={}, Ncomplete={}, Npartial={}, FH={:.3f}, "
+            "Finish={:.3f}, Continue={:.3f}, Prio={:.3f}, Fill={:.3f}, "
+            "New={:.3f}, Over={:.3f}, Score={:.3f}".format(
+                test_ra,
+                test_dec,
+                priority_limit,
+                n_priority_targets_assigned,
+                n_priority_targets_total,
+                n_total,
+                int(term_values["n_p0"]),
+                int(term_values["n_p1"]),
+                int(term_values["n_finish"]),
+                int(term_values["n_partial"]),
+                term_values["fh"],
+                term_values["finish"],
+                term_values["cont"],
+                term_values["prio"],
+                term_values["fill"],
+                term_values["new_partial"],
+                term_values["overshoot"],
+                score,
+            )
         )
-        return score
+        return -score
 
     print(
         f"\nOptimizing pointing position for {label} around RA={central_ra}, Dec={central_dec}"
@@ -790,6 +1008,7 @@ def _build_classic_ppc_list_table(final_ppc_records, tb_tgt, n_ppc):
     """Build the PPC table for classic single-program planning output."""
     resol = tb_tgt["resolution"][0]
     proposal_id = tb_tgt["proposal_id"][0]
+    single_exptime = float(tb_tgt.meta["single_exptime"])
     proposal_policy = _get_proposal_policy(proposal_id)
     custom_prefix = proposal_policy.get("classic_ppc_prefix")
     if custom_prefix is not None:
@@ -807,8 +1026,8 @@ def _build_classic_ppc_list_table(final_ppc_records, tb_tgt, n_ppc):
             ["J2000"] * n_ppc,
             [0] * n_ppc,
             [0] * n_ppc,
-            [900.0] * n_ppc,
-            [1200.0] * n_ppc,
+            [single_exptime] * n_ppc,
+            [single_exptime + 300.0] * n_ppc,
             [resol] * n_ppc,
             final_ppc_records[:, -1],
             final_ppc_records[:, -2],
