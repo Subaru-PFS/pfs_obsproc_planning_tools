@@ -22,6 +22,7 @@ from dateutil import parser as ps
 from loguru import logger
 import ets_fiber_assigner.netflow as nf
 from pfs_design_tool import reconfigure_fibers_ppp as sfa
+from pfs_design_tool import utils
 from pfs_design_tool.pointing_utils import nfutils
 
 from .utils.make_opefile import OpeFile
@@ -29,6 +30,9 @@ from .utils.make_opefile import OpeFile
 warnings.filterwarnings("ignore")
 
 hawaii_tz = pytz.timezone("Pacific/Honolulu")
+
+_PFS_UTILS_DIR = utils.get_pfs_utils_path()
+_PFS_INSTDATA_DIR = utils.get_pfs_instdata_path()
 
 
 def merge_nested_dicts(base_config, override_config):
@@ -314,11 +318,6 @@ class GeneratePfsDesign(object):
         ]:
             check_version_pfs(self, package_)
 
-        import pfs.utils
-
-        repo_path = os.path.join(pfs.utils.__path__[0], "../../../")
-        os.environ["PFS_UTILS_DIR"] = os.path.join(pfs.utils.__path__[0], "../../../")
-
         return None
 
     def update_config(self):
@@ -380,8 +379,11 @@ class GeneratePfsDesign(object):
             },
         }
 
+        utils.get_pfs_instdata_path()
+        utils.get_pfs_utils_path()
+
         bench_info = nfutils.getBench(
-            self.conf["packages"]["pfs_instdata_dir"],
+            _PFS_INSTDATA_DIR,
             self.conf["sfa"]["cobra_coach_dir"],
             None,
             self.conf["sfa"]["sm"],
