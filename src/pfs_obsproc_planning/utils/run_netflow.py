@@ -172,7 +172,7 @@ def select_good_observation_time(
             axis=0,
         )
         best_index = int(candidate_indices[np.argmax(valid_elevation_sums)])
-        logger.info(
+        logger.debug(
             "Selected observation_time={} with {}/{} PPCs visible in elevation range {:.1f}-{:.1f} deg".format(
                 sample_times[best_index].strftime("%Y-%m-%dT%H:%M:%SZ"),
                 int(visible_counts[best_index]),
@@ -531,49 +531,50 @@ def fiber_allocate(
             logger.info(
                 f"[S3] Group {1:3d}: nppc = {len(ppc_list):5d}, n_tgt = {len(tb_tgt_in_group):6d}"
             )
+            logger.info("[S3] Skipping multi-pointing netflow in queue mode")
 
-            assignments, telescopes, netflow_targets = run_netflow(
-                ppc_list,
-                tb_tgt_in_group,
-                num_reserved_fibers=num_reserved_fibers,
-                fiber_non_allocation_cost=fiber_non_allocation_cost,
-                classdict_override=classdict_override,
-            )
-
-            for pointing_index, (assignment_map, telescope) in enumerate(
-                zip(assignments, telescopes), start=1
-            ):
-                ppc_fiber_usage_frac = len(assignment_map) / 2394.0 * 100
-                logger.info(
-                    f"PPC {pointing_index - 1:4d}: {len(assignment_map):.0f}/2394={ppc_fiber_usage_frac:.2f}% assigned Cobras"
-                )
-
-                assigned_target_ids = [
-                    netflow_targets[target_idx].ID for target_idx in assignment_map
-                ]
-
-                if len(assigned_target_ids) == 0:
-                    ppc_priority = np.nan
-                else:
-                    ppc_priority = float(
-                        np.sum(
-                            tb_tgt["rank_fin"][
-                                np.isin(tb_tgt["identify_code"], assigned_target_ids)
-                            ]
-                        )
-                    )
-
-                ppc_records.append(
-                    [
-                        telescope._ra,
-                        telescope._dec,
-                        telescope._posang,
-                        ppc_priority,
-                        ppc_fiber_usage_frac,
-                        assigned_target_ids,
-                        resolution,
-                    ]
-                )
+            # assignments, telescopes, netflow_targets = run_netflow(
+            #     ppc_list,
+            #     tb_tgt_in_group,
+            #     num_reserved_fibers=num_reserved_fibers,
+            #     fiber_non_allocation_cost=fiber_non_allocation_cost,
+            #     classdict_override=classdict_override,
+            # )
+            #
+            # for pointing_index, (assignment_map, telescope) in enumerate(
+            #     zip(assignments, telescopes), start=1
+            # ):
+            #     ppc_fiber_usage_frac = len(assignment_map) / 2394.0 * 100
+            #     logger.info(
+            #         f"PPC {pointing_index - 1:4d}: {len(assignment_map):.0f}/2394={ppc_fiber_usage_frac:.2f}% assigned Cobras"
+            #     )
+            #
+            #     assigned_target_ids = [
+            #         netflow_targets[target_idx].ID for target_idx in assignment_map
+            #     ]
+            #
+            #     if len(assigned_target_ids) == 0:
+            #         ppc_priority = np.nan
+            #     else:
+            #         ppc_priority = float(
+            #             np.sum(
+            #                 tb_tgt["rank_fin"][
+            #                     np.isin(tb_tgt["identify_code"], assigned_target_ids)
+            #                 ]
+            #             )
+            #         )
+            #
+            #     ppc_records.append(
+            #         [
+            #             telescope._ra,
+            #             telescope._dec,
+            #             telescope._posang,
+            #             ppc_priority,
+            #             ppc_fiber_usage_frac,
+            #             assigned_target_ids,
+            #             resolution,
+            #         ]
+            #     )
 
         if len(ppc_records) == 0:
             logger.warning("[S3] Netflow returned no PPC allocations")
