@@ -62,7 +62,20 @@ def read_conf(conf):
         secondary_config = tomllib.load(f)
 
     logger.info(f"Loaded extra config from {secondary_path}")
-    return merge_nested_dicts(secondary_config, primary_config)
+    merged_config = merge_nested_dicts(secondary_config, primary_config)
+
+    primary_ppp_config = primary_config.get("ppp", {})
+    secondary_ppp_config = secondary_config.get("ppp", {})
+    merged_ppp_config = merged_config.get("ppp", {})
+    ppp_mode = str(merged_ppp_config.get("mode", primary_ppp_config.get("mode", ""))).lower()
+
+    if ppp_mode == "queue":
+        for proposal_key in ["proposalIds", "proposalIds_backup"]:
+            if proposal_key in secondary_ppp_config:
+                merged_ppp_config[proposal_key] = secondary_ppp_config[proposal_key]
+
+    merged_config["ppp"] = merged_ppp_config
+    return merged_config
 
 
 def clear_folder(folder):
