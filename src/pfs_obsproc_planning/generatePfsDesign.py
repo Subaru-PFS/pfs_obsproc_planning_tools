@@ -5,6 +5,7 @@ import argparse
 import os
 import sys
 import time
+import re
 import warnings
 from datetime import timedelta, datetime, date
 from pathlib import Path
@@ -42,11 +43,58 @@ def merge_nested_dicts(base_config, override_config):
     return merged
 
 
+def _merge_duplicate_toml_tables(raw_text):
+    merged_lines = []
+    table_blocks = {}
+    table_order = []
+    current_table = None
+
+    for line in raw_text.splitlines():
+        stripped_line = line.strip()
+        table_match = re.match(r"^\[(.+)\]$", stripped_line)
+
+        if table_match and not stripped_line.startswith("[["):
+            current_table = table_match.group(1)
+            if current_table not in table_blocks:
+                table_blocks[current_table] = []
+                table_order.append(current_table)
+            continue
+
+        if current_table is None:
+            merged_lines.append(line)
+        else:
+            table_blocks[current_table].append(line)
+
+    rebuilt_lines = list(merged_lines)
+    if rebuilt_lines and rebuilt_lines[-1] != "":
+        rebuilt_lines.append("")
+
+    for table_name in table_order:
+        rebuilt_lines.append(f"[{table_name}]")
+        rebuilt_lines.extend(table_blocks[table_name])
+        rebuilt_lines.append("")
+
+    return "\n".join(rebuilt_lines)
+
+
+def _load_toml_config(config_path):
+    with config_path.open("rb") as f:
+        try:
+            return tomllib.load(f)
+        except tomllib.TOMLDecodeError as error:
+            if "Cannot declare" not in str(error):
+                raise
+
+    raw_text = config_path.read_text(encoding="utf-8")
+    logger.warning(
+        f"Detected duplicate TOML tables in {config_path}; merging repeated sections"
+    )
+    return tomllib.loads(_merge_duplicate_toml_tables(raw_text))
+
+
 def read_conf(conf):
     primary_path = Path(conf).expanduser().resolve()
-
-    with primary_path.open("rb") as f:
-        primary_config = tomllib.load(f)
+    primary_config = _load_toml_config(primary_path)
 
     packages_config = primary_config.get("packages", {})
     secondary_config_path = packages_config.get("config_path")
@@ -57,9 +105,7 @@ def read_conf(conf):
     secondary_path = Path(secondary_config_path).expanduser()
     if not secondary_path.is_absolute():
         secondary_path = (primary_path.parent / secondary_path).resolve()
-
-    with secondary_path.open("rb") as f:
-        secondary_config = tomllib.load(f)
+    secondary_config = _load_toml_config(secondary_path)
 
     logger.info(f"Loaded extra config from {secondary_path}")
     merged_config = merge_nested_dicts(secondary_config, primary_config)
