@@ -183,8 +183,16 @@ def _run_for_resolution(
     num_reserved_fibers=0,
     fiber_non_allocation_cost=0.0,
     backup=False,
+    fixed_ppc_pa=None,
+    config=None,
 ):
-    ppc_records, tb_ppc_list = PPP_centers(tb_tgt_resolution, n_ppc, backup=backup)
+    ppc_records, tb_ppc_list = PPP_centers(
+        tb_tgt_resolution,
+        n_ppc,
+        backup=backup,
+        fixed_ppc_pa=fixed_ppc_pa,
+        config=config,
+    )
 
     tb_tgt_netflow = Table.copy(tb_tgt_resolution)
     tb_tgt_netflow.meta["PPC"] = ppc_records
@@ -275,12 +283,16 @@ def run(
     for tb_tgt_current in (tb_tgt, tb_tgt_l, tb_tgt_m):
         tb_tgt_current.meta["cobra_feature_flag"] = cobra_feature_flag
 
+    fixed_ppc_pa = config["ppp"].get("fixed_ppc_pa", config["ppp"].get("ppc_pa"))
+
     tb_ppc_list_l, tb_tgt_l_final = _run_for_resolution(
         tb_tgt_l,
         n_ppc_l,
         num_reserved_fibers=num_reserved_fibers,
         fiber_non_allocation_cost=fiber_non_allocation_cost,
         backup=backup,
+        fixed_ppc_pa=fixed_ppc_pa,
+        config=config,
     )
     tb_ppc_list_m, tb_tgt_m_final = _run_for_resolution(
         tb_tgt_m,
@@ -288,6 +300,8 @@ def run(
         num_reserved_fibers=num_reserved_fibers,
         fiber_non_allocation_cost=fiber_non_allocation_cost,
         backup=backup,
+        fixed_ppc_pa=fixed_ppc_pa,
+        config=config,
     )
 
     tb_ppc_tot, tb_tgt_tot = _combine_resolution_outputs(

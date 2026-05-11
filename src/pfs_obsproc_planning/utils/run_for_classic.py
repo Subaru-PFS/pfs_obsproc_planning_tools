@@ -7,14 +7,21 @@ from .run_PPP import (
     PPP_centers,
     PPP_centers_for_single_program,
     _DEFAULT_PPP_WEIGHT_PARAMS,
+    _apply_shared_pa_to_ppc_list,
+    _coerce_utc_datetime,
+    _coerce_ppc_list_array,
+    _is_provided_ppc_pa_value,
+    _ppc_list_has_provided_pa,
     _prepare_tb_tgt_for_ppc,
+    _resolve_pa_constraint_observation_time,
+    optimize_shared_pa_for_fixed_pointings,
 )
 from .build_target import read_target_classic
 from .classic_for_single_proposal import (
     _get_optimize_costs,
     _get_proposal_policy,
+    _get_single_program_fixed_ppc_pa,
     _get_single_program_mode,
-    _get_single_program_ppc_pa,
 )
 from .run_for_queue import _combine_resolution_outputs, export_output_tables
 from .run_netflow import (
@@ -39,6 +46,7 @@ def _run_classic_for_resolution(
     optimize_costs=False,
     resolution_label=None,
     output_dir=None,
+    config=None,
 ):
     tb_tgt_resolution = _prepare_tb_tgt_for_ppc(
         tb_tgt_resolution,
@@ -53,22 +61,83 @@ def _run_classic_for_resolution(
     )
 
     if use_user_ppc:
-        ppc_list = user_ppc_list
+        fixed_ppc_pa = _get_single_program_fixed_ppc_pa(proposal_id)
+        if _is_provided_ppc_pa_value(fixed_ppc_pa):
+            from .validation import _warn_too_bright_guidestars
+
+            ppc_list = _apply_shared_pa_to_ppc_list(user_ppc_list, fixed_ppc_pa)
+            observation_time = _resolve_pa_constraint_observation_time(
+                ppc_list,
+                config=config,
+            )
+            if isinstance(config, dict) and observation_time is not None:
+                label_text = resolution_label or proposal_id
+                for pointing_index, ppc_row in enumerate(ppc_list):
+                    df_guidestars_toobright = _warn_too_bright_guidestars(
+                        float(ppc_row[1]),
+                        float(ppc_row[2]),
+                        float(ppc_row[3]),
+                        _coerce_utc_datetime(observation_time),
+                        config,
+                    )
+                    per_camera_counts = {}
+                    if len(df_guidestars_toobright) > 0 and "agId" in df_guidestars_toobright.columns:
+                        camera_ids, camera_counts = np.unique(
+                            np.asarray(df_guidestars_toobright["agId"], dtype=int),
+                            return_counts=True,
+                        )
+                        per_camera_counts = {
+                            int(camera_id): int(camera_count)
+                            for camera_id, camera_count in zip(camera_ids, camera_counts)
+                        }
+                    print(
+                        "[S2] {} bright guide stars in AG cameras for {} pointing {} at RA={:.6f}, Dec={:.6f}, PA={:.1f} (per_cam={})".format(
+                            len(df_guidestars_toobright),
+                            label_text,
+                            pointing_index + 1,
+                            float(ppc_row[1]),
+                            float(ppc_row[2]),
+                            float(ppc_row[3]),
+                            per_camera_counts,
+                        )
+                    )
+            pa_metrics = {"best_pa": float(fixed_ppc_pa), "message": "Used provided shared PA"}
+        elif _ppc_list_has_provided_pa(user_ppc_list):
+            ppc_list = _coerce_ppc_list_array(user_ppc_list)
+            pa_metrics = {"best_pa": np.nan, "message": "Used provided PPC-list PAs"}
+        else:
+            ppc_list, pa_metrics = optimize_shared_pa_for_fixed_pointings(
+                tb_tgt_resolution,
+                user_ppc_list,
+                fixed_ppc_pa=fixed_ppc_pa,
+                label=resolution_label or proposal_id,
+                config=config,
+            )
         if resolution_label is not None:
-            logger.info(f"[S2] {resolution_label} using user-provided PPC list.")
+            logger.info(
+                "[S2] {} using user-provided PPC list ({}){}.".format(
+                    resolution_label,
+                    pa_metrics["message"],
+                    " with PA {:.1f}".format(pa_metrics["best_pa"])
+                    if np.isfinite(pa_metrics.get("best_pa", np.nan))
+                    else "",
+                )
+            )
     elif use_single_centers:
-        fixed_ppc_pa = _get_single_program_ppc_pa(proposal_id)
+        fixed_ppc_pa = _get_single_program_fixed_ppc_pa(proposal_id)
         ppc_list = PPP_centers_for_single_program(
             tb_tgt_resolution,
             n_ppc,
             fixed_ppc_pa=fixed_ppc_pa,
             output_dir=output_dir,
+            config=config,
         )
     else:
         ppc_list = PPP_centers(
             tb_tgt_resolution,
             n_ppc,
             use_multiprocessing=use_multiprocessing,
+            config=config,
         )
 
     tb_tgt_netflow = Table.copy(tb_tgt_resolution)
@@ -180,6 +249,7 @@ def run(
             optimize_costs=optimize_costs,
             resolution_label="LR",
             output_dir=output_dir,
+            config=config,
         )
 
     tb_ppc_m_fin = Table()
@@ -196,6 +266,7 @@ def run(
             optimize_costs=optimize_costs,
             resolution_label="MR",
             output_dir=output_dir,
+            config=config,
         )
 
     tb_ppc_tot, tb_tgt_tot = _combine_resolution_outputs(
