@@ -20,7 +20,7 @@ from qplan.util.site import site_subaru as observer
 from .classic_for_single_proposal import (
     _get_import_user_ppc_from_db,
     _get_proposal_policy,
-    _get_single_program_ppc_pa,
+    _get_single_program_fixed_ppc_pa,
     apply_proposal_target_adjustments,
 )
 from .db_query import database_info, query_target_from_db, query_user_ppc_from_db
@@ -256,6 +256,17 @@ def load_user_ppc_table(path_ppc):
 
 
 def build_ppc_meta_array(tb_ppc_tem, resolution=None):
+    def normalize_ppc_pa_value(ppc_pa):
+        if np.ma.is_masked(ppc_pa) or ppc_pa is None:
+            return np.nan
+        try:
+            ppc_pa_float = float(ppc_pa)
+        except (TypeError, ValueError):
+            return np.nan
+        if not np.isfinite(ppc_pa_float):
+            return np.nan
+        return ppc_pa_float
+
     ppc_rows = []
     for index, row in enumerate(tb_ppc_tem):
         if resolution is not None and row["ppc_resolution"] != resolution:
@@ -265,7 +276,7 @@ def build_ppc_meta_array(tb_ppc_tem, resolution=None):
                 index,
                 row["ppc_ra"],
                 row["ppc_dec"],
-                row["ppc_pa"],
+                normalize_ppc_pa_value(row["ppc_pa"]),
                 row["ppc_priority"],
             ]
         )
@@ -324,9 +335,12 @@ def apply_db_ppc_metadata(tb_tgt, tb_tgt_l, tb_tgt_m, para_db):
     if len(proposal_ids) == 1:
         proposal_id = proposal_ids[0]
         proposal_policy = _get_proposal_policy(proposal_id)
-        if "ppc_pa" in proposal_policy and len(tb_ppc_tem) > 0:
+        if (
+            ("fixed_ppc_pa" in proposal_policy or "ppc_pa" in proposal_policy)
+            and len(tb_ppc_tem) > 0
+        ):
             tb_ppc_tem = tb_ppc_tem.copy(copy_data=True)
-            tb_ppc_tem["ppc_pa"] = _get_single_program_ppc_pa(proposal_id)
+            tb_ppc_tem["ppc_pa"] = _get_single_program_fixed_ppc_pa(proposal_id)
 
     apply_ppc_metadata(tb_tgt, tb_tgt_l, tb_tgt_m, tb_ppc_tem, "target DB")
     return True
