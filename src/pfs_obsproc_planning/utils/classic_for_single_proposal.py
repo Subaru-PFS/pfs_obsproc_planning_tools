@@ -14,10 +14,20 @@ _DEFAULT_SINGLE_PROGRAM_PRIORITY_POLICY = {
 def get_single_proposal_requirements(proposal_id):
     proposalId = str(proposal_id) if proposal_id is not None else None
 
+    if proposalId == "S26A-UH018-A":
+        return {
+            "fixed_ppc_pa": 120.0,
+            "import_user_ppc_from_db": True,
+            "optimize_costs": True,
+            "single_exptime_override": 10800.0,
+            "single_program_mode": "LR",
+        }
+    
     if proposalId == "S26A-126":
         return {
-            "ppc_pa": 120.0,
+            "fixed_ppc_pa": 120.0,
             "import_user_ppc_from_db": True,
+            "optimize_costs": True,
             "single_exptime_override": 3600.0,
             "single_program_mode": "LR",
         }
@@ -128,13 +138,21 @@ def _get_single_program_mode(proposal_id):
     return _get_proposal_policy(proposal_id).get("single_program_mode")
 
 
-def _get_single_program_ppc_pa(proposal_id, default=0.0):
+def _get_single_program_fixed_ppc_pa(proposal_id, default=None):
     if proposal_id is None:
         return default
-    ppc_pa = _get_proposal_policy(proposal_id).get("ppc_pa", default)
-    if ppc_pa != default:
-        logger.warning(f"PPC PA has been modified to {ppc_pa} for {proposal_id}.")
-    return ppc_pa
+    proposal_policy = _get_proposal_policy(proposal_id)
+    if "fixed_ppc_pa" in proposal_policy:
+        fixed_ppc_pa = proposal_policy["fixed_ppc_pa"]
+    else:
+        fixed_ppc_pa = proposal_policy.get("ppc_pa", default)
+    if fixed_ppc_pa != default:
+        logger.warning(f"Fixed PPC PA is set to {fixed_ppc_pa} for {proposal_id}.")
+    return fixed_ppc_pa
+
+
+def _get_single_program_ppc_pa(proposal_id, default=None):
+    return _get_single_program_fixed_ppc_pa(proposal_id, default=default)
 
 
 def _get_import_user_ppc_from_db(proposal_id, default=True):
