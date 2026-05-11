@@ -110,7 +110,7 @@ def get_ag_counts(df_ag, threshold=19, radius=245.0):
 
 
 # ---------------------- Drawing helpers ----------------------
-def _draw_fov_points(ax, df_fib, df_ag, unfib_bright, fiber_id_n2, c, alpha, s):
+def _draw_fov_points(ax, df_fib, df_ag, unfib_bright, fiber_id_n2, c, alpha, s, conf):
     """Draw scatter points on the FoV axes (unassigned, sky, std, sci, AGs).
 
      This consolidates the multiple consecutive scatter() calls into a single
@@ -204,16 +204,42 @@ def _draw_fov_points(ax, df_fib, df_ag, unfib_bright, fiber_id_n2, c, alpha, s):
         label=f"FLUXSTD ({len(df_fib[df_fib.targetType==3].pfi_y)})",
     )
 
+    proposal_ids_primary = set()
+    if isinstance(conf, dict):
+        proposal_ids_primary = {
+            str(proposal_id) for proposal_id in conf.get("ppp", {}).get("proposalIds", [])
+        }
+
+    science_mask = df_fib.targetType == 1
+    if len(proposal_ids_primary) == 0:
+        science_primary_mask = science_mask
+        science_other_mask = science_mask & False
+    else:
+        science_primary_mask = science_mask & df_fib.proposalId.astype(str).isin(proposal_ids_primary)
+        science_other_mask = science_mask & ~science_primary_mask
+
     ax.scatter(
-        df_fib[df_fib.targetType == 1].pfi_x,
-        df_fib[df_fib.targetType == 1].pfi_y,
-        c=c["sci"],
+        df_fib[science_primary_mask].pfi_x,
+        df_fib[science_primary_mask].pfi_y,
+        c=c["sci_primary"],
         marker="o",
         s=s,
         alpha=alpha,
         lw=0,
-        label=f"SCIENCE ({len(df_fib[df_fib.targetType==1].pfi_y)})",
+        label=f"SCIENCE primary ({len(df_fib[science_primary_mask].pfi_y)})",
     )
+
+    if science_other_mask.any():
+        ax.scatter(
+            df_fib[science_other_mask].pfi_x,
+            df_fib[science_other_mask].pfi_y,
+            c=c["sci_other"],
+            marker="o",
+            s=s * 0.55,
+            alpha=alpha * 0.55,
+            lw=0,
+            label=f"SCIENCE filler ({len(df_fib[science_other_mask].pfi_y)})",
+        )
 
     # special highlight (kept for backward compatibility)
     mask_special = df_fib.obCode == "M31_30410_R31_02730_v2"
@@ -577,7 +603,8 @@ def plot_FoV(
         "sky": "deepskyblue",  # KEEP
         "fstar": "green",  # KEEP
         # --- de-emphasized ---
-        "sci": "#F2C6C6",  # faint salmon (soft, background-level)
+        "sci_primary": "#E79A9A",  # soft salmon for primary proposals
+        "sci_other": "#F6DEDE",  # lighter same-family salmon for other proposals
         # --- others ---
         "ag": "blueviolet",  # unchanged
     }
@@ -587,7 +614,7 @@ def plot_FoV(
     s = 10.0
 
     # draw scatter points and guide stars on the main FoV axes (delegated)
-    _draw_fov_points(ax1, df_fib, df_ag, unfib_bright, fiber_id_n2, c, alpha, s)
+    _draw_fov_points(ax1, df_fib, df_ag, unfib_bright, fiber_id_n2, c, alpha, s, conf)
 
     # store AG counts and annotation positions
     agnum_threshold = 19
