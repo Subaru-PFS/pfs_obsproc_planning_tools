@@ -169,7 +169,10 @@ def query_queueDB(psl_id_list, DBPath_qDB, tb_queuedb_filename):
     qdb = q_db.QueueDatabase(logger_qplan)
     qdb.read_config(DBPath_qDB)
     qdb.connect()
-    # Use try/finally to guarantee the queue DB is closed on any exit path.
+    # Use try/finally to guarantee the queue DB is closed on any exit path after
+    # a successful connect(). Moving connect() inside the try is not safe because
+    # close() calls mdb_client.close(), which would raise AttributeError if
+    # connect() failed before mdb_client was assigned.
     try:
         qa = q_db.QueueAdapter(qdb)
         qq = q_query.QueueQuery(qa, use_cache=False)
