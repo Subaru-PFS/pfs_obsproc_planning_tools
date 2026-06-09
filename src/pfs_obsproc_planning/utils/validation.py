@@ -229,7 +229,7 @@ def _warn_too_bright_guidestars(ppc_ra, ppc_dec, ppc_pa, ppc_obstime_utc, conf):
         telescope_elevation=None,
         conf=conf,
         guidestar_mag_min=0,
-        guidestar_mag_max=10,
+        guidestar_mag_max=12,
         guidestar_neighbor_mag_min=21.0,
         guidestar_minsep_deg=0.0002778,
     )
@@ -366,7 +366,7 @@ def _build_df_fib(pfsDesign0):
                 )
                 pfsflux_f.append(filt)
             else:
-                indices = [i for i, item in enumerate(fl) if item != "none"]
+                indices = [i for i, item in enumerate(fl) if ~np.isin(item, ["none", "nan"])]
                 pfsflux_l.append(
                     a[indices[0]] if not np.isnan(a[indices[0]]) else b[indices[0]]
                 )
