@@ -117,18 +117,10 @@ def query_user_ppc_from_db(tgt_db, proposal_ids):
 
     sql = sa.text(
         """
-        SELECT
-            up.user_pointing_id,
-            up.ppc_code,
-            up.ppc_ra,
-            up.ppc_dec,
-            up.ppc_pa,
-            up.ppc_resolution,
-            up.ppc_priority,
-            up.input_catalog_id
+        SELECT up.user_pointing_id, up.ppc_code, up.ppc_ra, up.ppc_dec, up.ppc_pa,
+               up.ppc_resolution, up.ppc_priority, up.input_catalog_id
         FROM user_pointing up
         JOIN input_catalog ic ON up.input_catalog_id = ic.input_catalog_id
-        JOIN target t ON t.input_catalog_id = ic.input_catalog_id
         WHERE ic.active = TRUE
           AND ic.is_classical = TRUE
           AND ic.is_user_pointing = TRUE
@@ -137,29 +129,16 @@ def query_user_ppc_from_db(tgt_db, proposal_ids):
     ).bindparams(sa.bindparam("proposal_ids", expanding=True))
 
     with tgt_db.connect() as conn:
-        rows = conn.execute(sql, {"proposal_ids": proposal_ids}).mappings().all()
+        rows = pd.DataFrame(conn.execute(sql).fetchall())
 
-    if len(rows) == 0:
+    if rows.empty:
         return Table()
-
-    unique_rows = []
-    seen_keys = set()
-    for row in rows:
-        key = (
-            row["ppc_ra"],
-            row["ppc_dec"],
-            row["ppc_pa"],
-            row["ppc_resolution"],
-        )
-        if key in seen_keys:
-            continue
-        seen_keys.add(key)
-        unique_rows.append(row)
-
-    return Table(
-        rows=[tuple(row.values()) for row in unique_rows],
-        names=list(unique_rows[0].keys()),
+    
+    unique_rows = rows.drop_duplicates(
+        subset=["ppc_ra", "ppc_dec", "ppc_pa", "ppc_resolution"]
     )
+
+    return Table.from_pandas(unique_rows)
 
 
 def query_queueDB(psl_id_list, DBPath_qDB, tb_queuedb_filename):
