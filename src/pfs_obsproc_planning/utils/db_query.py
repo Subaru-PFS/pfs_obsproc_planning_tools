@@ -153,66 +153,73 @@ def query_queueDB(psl_id_list, DBPath_qDB, tb_queuedb_filename):
     qdb = q_db.QueueDatabase(logger_qplan)
     qdb.read_config(DBPath_qDB)
     qdb.connect()
-    qa = q_db.QueueAdapter(qdb)
-    qq = q_query.QueueQuery(qa, use_cache=False)
+    # Use try/finally to guarantee the queue DB is closed on any exit path after
+    # a successful connect(). Moving connect() inside the try is not safe because
+    # close() calls mdb_client.close(), which would raise AttributeError if
+    # connect() failed before mdb_client was assigned.
+    try:
+        qa = q_db.QueueAdapter(qdb)
+        qq = q_query.QueueQuery(qa, use_cache=False)
 
-    results = []
-    counter = 0
+        results = []
+        counter = 0
 
-    for psl_id in psl_id_list:
-        logger.info(f"Querying qDB for {psl_id}")
-        ex_obs_list = qq.get_executed_obs_by_proposal(psl_id)
-        if not ex_obs_list:
-            continue
+        for psl_id in psl_id_list:
+            logger.info(f"Querying qDB for {psl_id}")
+            ex_obs_list = qq.get_executed_obs_by_proposal(psl_id)
+            if not ex_obs_list:
+                continue
 
-        for ex_ob in ex_obs_list:
-            ex_ob_stats = qq.get_pfs_executed_ob_stats_by_ob_key(ex_ob.ob_key)
-            ob = qq.get_ob(ex_ob.ob_key)
-            arm = ob.inscfg.qa_reference_arm
+            for ex_ob in ex_obs_list:
+                ex_ob_stats = qq.get_pfs_executed_ob_stats_by_ob_key(ex_ob.ob_key)
+                ob = qq.get_ob(ex_ob.ob_key)
+                arm = ob.inscfg.qa_reference_arm
 
-            exptime_b = ex_ob_stats.cum_eff_exp_time_b
-            exptime_r = ex_ob_stats.cum_eff_exp_time_r
-            exptime_m = ex_ob_stats.cum_eff_exp_time_m
-            exptime_n = ex_ob_stats.cum_eff_exp_time_n
-            exptime_selected = ex_ob_stats.cum_eff_exp_time
+                exptime_b = ex_ob_stats.cum_eff_exp_time_b
+                exptime_r = ex_ob_stats.cum_eff_exp_time_r
+                exptime_m = ex_ob_stats.cum_eff_exp_time_m
+                exptime_n = ex_ob_stats.cum_eff_exp_time_n
+                exptime_selected = ex_ob_stats.cum_eff_exp_time
 
-            if exptime_selected >= 0:
-                counter += 1
-                results.append(
-                    [
-                        counter,
-                        psl_id,
-                        ex_ob.ob_key[1],
-                        arm,
-                        exptime_selected,
-                        exptime_b,
-                        exptime_r,
-                        exptime_m,
-                        exptime_n,
-                        len(ex_ob.exp_history) * 450.0,
-                    ]
-                )
+                if exptime_selected >= 0:
+                    counter += 1
+                    results.append(
+                        [
+                            counter,
+                            psl_id,
+                            ex_ob.ob_key[1],
+                            arm,
+                            exptime_selected,
+                            exptime_b,
+                            exptime_r,
+                            exptime_m,
+                            exptime_n,
+                            len(ex_ob.exp_history) * 450.0,
+                        ]
+                    )
 
-    if not results:
-        logger.warning("No executed observations found in any proposal.")
-        return Table()
+        if not results:
+            logger.warning("No executed observations found in any proposal.")
+            return Table()
 
-    tb_queuedb = Table(
-        np.array(results),
-        names=[
-            "N",
-            "psl_id",
-            "ob_code",
-            "ref_arm",
-            "eff_exptime_done_real",
-            "eff_exptime_done_real_b",
-            "eff_exptime_done_real_r",
-            "eff_exptime_done_real_m",
-            "eff_exptime_done_real_n",
-            "exptime_done_real",
-        ],
-    )
+        tb_queuedb = Table(
+            np.array(results),
+            names=[
+                "N",
+                "psl_id",
+                "ob_code",
+                "ref_arm",
+                "eff_exptime_done_real",
+                "eff_exptime_done_real_b",
+                "eff_exptime_done_real_r",
+                "eff_exptime_done_real_m",
+                "eff_exptime_done_real_n",
+                "exptime_done_real",
+            ],
+        )
 
-    tb_queuedb.write(tb_queuedb_filename, overwrite=True)
+        tb_queuedb.write(tb_queuedb_filename, overwrite=True)
+    finally:
+        qdb.close()
 
     return tb_queuedb
