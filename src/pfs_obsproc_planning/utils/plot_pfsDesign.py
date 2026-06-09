@@ -410,18 +410,18 @@ def _draw_histograms(ax2, ax3, df_fib, df_ag, conf):
     for k, v in df_mags.groups.items():
         if k[0] == "N/A":
             continue
-
+        
         mags = df_fib.loc[v, "pfsMag_plot"].values
         n_mags = len(mags)
         n_too_bright = np.sum(mags < 13)
 
         if conf["ppp"]["mode"] == "classic":
             if k[0] in conf["sfa"]["proposalIds_obsFiller"]:
-                label = f"obs. filler ({n_mags}; {n_too_bright}<13mag)"
+                label = f"obs. filler ({k[1]}, {n_mags}; {n_too_bright}<13mag)"
             elif k[0] in conf["ppp"]["proposalIds"]:
-                label = f"{k[0]} ({n_mags}; {n_too_bright}<13mag)"
+                label = f"{k[0]} ({k[1]}, {n_mags}; {n_too_bright}<13mag)"
             else:
-                label = f"usr filler ({n_mags}; {n_too_bright}<13mag)"
+                label = f"usr filler ({k[1]}, {n_mags}; {n_too_bright}<13mag)"
         else:
             label = f"{k[0]} ({k[1]}, {n_mags}; {n_too_bright}<13mag)"
 
