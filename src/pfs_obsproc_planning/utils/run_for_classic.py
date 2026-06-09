@@ -194,6 +194,7 @@ def run(
     output_dir="output/",
     num_reserved_fibers=0,
     fiber_non_allocation_cost=0.0,
+    cobra_feature_flag=True,
     optimize_costs=False,
     config=None,
     **legacy_kwargs,
@@ -206,7 +207,7 @@ def run(
         fiber_non_allocation_cost = legacy_kwargs.pop("fiberNonAllocationCost")
     if "conf" in legacy_kwargs:
         config = legacy_kwargs.pop("conf")
-    legacy_kwargs.pop("cobra_feature_flag", None)
+    #legacy_kwargs.pop("cobra_feature_flag", None)
     legacy_kwargs.pop("backup", None)
     if legacy_kwargs:
         unexpected_keys = ", ".join(sorted(legacy_kwargs))
@@ -217,6 +218,9 @@ def run(
     tb_tgt, tb_tgt_l, tb_tgt_m = read_target_classic(
         readtgt_con["mode_readtgt"], readtgt_con["para_readtgt"]
     )
+
+    for tb_tgt_current in (tb_tgt, tb_tgt_l, tb_tgt_m):
+        tb_tgt_current.meta["cobra_feature_flag"] = cobra_feature_flag
 
     multi_process = True
 
