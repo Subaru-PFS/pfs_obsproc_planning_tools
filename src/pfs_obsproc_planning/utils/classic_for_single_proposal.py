@@ -14,9 +14,36 @@ _DEFAULT_SINGLE_PROGRAM_PRIORITY_POLICY = {
 def get_single_proposal_requirements(proposal_id):
     proposalId = str(proposal_id) if proposal_id is not None else None
 
+    if proposalId == "S26A-104":
+        return {
+            #"fixed_ppc_pa": 0.0,
+            "import_user_ppc_from_db": True,
+            "optimize_costs": True,
+            "single_exptime_override": 4500.0,
+            "single_program_mode": "LR",
+        }
+        
+    if proposalId == "S26A-027":
+        return {
+            "fixed_ppc_pa": 230.0,
+            "import_user_ppc_from_db": True,
+            "optimize_costs": True,
+            "single_exptime_override": 10800.0,
+            "single_program_mode": "LR",
+        }
+         
+    if proposalId == "S26A-OT04":
+        return {
+            "fixed_ppc_pa": 250.41,
+            "import_user_ppc_from_db": True,
+            "optimize_costs": True,
+            "single_exptime_override": 1200.0,
+            "single_program_mode": "LR",
+        }
+        
     if proposalId == "S26A-UH018-A":
         return {
-            "fixed_ppc_pa": 120.0,
+            "fixed_ppc_pa": 120.15,
             "import_user_ppc_from_db": True,
             "optimize_costs": True,
             "single_exptime_override": 10800.0,
@@ -25,7 +52,7 @@ def get_single_proposal_requirements(proposal_id):
     
     if proposalId == "S26A-126":
         return {
-            "fixed_ppc_pa": 120.0,
+            "fixed_ppc_pa": 240.0,
             "import_user_ppc_from_db": True,
             "optimize_costs": True,
             "single_exptime_override": 3600.0,
