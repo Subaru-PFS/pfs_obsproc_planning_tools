@@ -66,7 +66,7 @@ def run(conf, workDir="."):
     elif len(tb_queue) == 0 and len(tb_queue_backup) > 0:
         tb_queue = tb_queue_backup
 
-    pdf = PdfPages(os.path.join(workDir, "check-S25B-queue.pdf"))
+    pdf = PdfPages(os.path.join(workDir, "check-S26A-queue.pdf"))
 
     plot_ppc(conf, tb_tgt, tb_ppc, pdf)
     plot_assign(conf, workDir, pdf)
@@ -118,8 +118,8 @@ def plot_ppc(conf, tb_tgt, tb_ppc, pdf):
     for idx, proposal_id in enumerate(proposal_ids):
         targets = tb_tgt[tb_tgt["proposal_id"] == proposal_id]
         plt.plot(
-            targets["ra"],
-            targets["dec"],
+            targets["ob_ra"],
+            targets["ob_dec"],
             "o",
             mfc=color_list[idx],
             mec="none",
@@ -419,7 +419,10 @@ def plot_EET(workDir, tb_queue, pdf):
     Plot a pairwise correlation matrix (Seaborn pairplot) of effective exposure times
     for each arm, sampled from today's queueDB.
     """
-    # 1. Convert to pandas DataFrame and downsample for visualization clarity
+    if len(tb_queue) == 0:
+        return None
+        
+    # 1. Convert to pandas DataFrame and downsample for visualization clarity        
     df = tb_queue.to_pandas()
     if len(df) > 0:
         df = df.sample(frac=0.05, random_state=42).reset_index(drop=True)
@@ -473,12 +476,18 @@ def plot_CR(conf, tb_tgt, tb_queue, workDir, pdf):
     """
 
     # --- Prepare target table ---
-    tb_tgt = join(tb_tgt, tb_queue,
-                    keys_left=["proposal_id", "ob_code"],
-                    keys_right=["psl_id", "ob_code"],
-                    join_type="left")
+    if len(tb_queue) > 0:
+        tb_tgt = join(tb_tgt, tb_queue,
+                        keys_left=["proposal_id", "ob_code"],
+                        keys_right=["psl_id", "ob_code"],
+                        join_type="left")
+        tb_tgt.rename_column("ob_code_1", "ob_code")
+    else:
+        tb_tgt["ob_exptime_usr"] = 0.0
+        tb_tgt["eff_exptime_done_real"] = 0.0
+        tb_tgt["exptime_done_real"] = 0.0
     
-    exptime_usr = np.ma.filled(tb_tgt["effective_exptime"], 0.0)
+    exptime_usr = np.ma.filled(tb_tgt["ob_exptime_usr"], 0.0)
     exptime_done_real = np.ma.filled(tb_tgt["eff_exptime_done_real"], 0.0)
 
     exptime_usr = exptime_usr.astype(float)
@@ -486,7 +495,6 @@ def plot_CR(conf, tb_tgt, tb_queue, workDir, pdf):
     
     tb_tgt["eff_exptime_done_rec"] = np.minimum(exptime_usr, exptime_done_real)
 
-    tb_tgt.rename_column("ob_code_1", "ob_code")
     #cols_to_remove = [c for c in tb_tgt.colnames if c in tb_queuedb.colnames and "ob_code" not in c]
     #tb_tgt.remove_columns(cols_to_remove)
 
@@ -512,12 +520,12 @@ def plot_CR(conf, tb_tgt, tb_queue, workDir, pdf):
         queue_ = tb_queue[tb_queue["psl_id"] == psl_id]
         tgt_ = tb_tgt[tb_tgt["proposal_id"] == psl_id]
 
-        fh_tot_ = np.sum(tgt_["effective_exptime"]) / 3600.0
+        fh_tot_ = np.sum(tgt_["ob_exptime_usr"]) / 3600.0
         fh_allo_ = list(set(tgt_["allocated_time_tac"]))[0] if len(tgt_) > 0 else 0
         fh_com_ = (
             np.sum(
                 tgt_["eff_exptime_done_rec"][
-                    tgt_["eff_exptime_done_rec"] >= tgt_["effective_exptime"]
+                    tgt_["eff_exptime_done_rec"] >= tgt_["ob_exptime_usr"]
                 ]
             )
             / 3600.0
