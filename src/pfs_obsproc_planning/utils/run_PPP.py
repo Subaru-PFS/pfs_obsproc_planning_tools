@@ -38,15 +38,15 @@ np.random.seed(0)
 
 _DEFAULT_PPP_WEIGHT_PARAMS = (2, 0, 0)
 _PPP_OBJECTIVE_LAMBDAS = {
-    "fh": 1.00,
-    "finish": 0.1,
+    "fh": 5.00,
+    "finish": 2.5,
     "cont": 0.1,
-    "prio": 0.30,
-    "fill": 0.30,
+    "prio": 1.5,
+    "fill": 0.50,
     "new": 0.10,
     "over": 0.05,
 }
-_PPP_PRIORITY_VALUES = {0: 1.0, 1: 0.6}
+_PPP_PRIORITY_VALUES = {0: 100.0, 1: 5, 2: 1, 3: 1, 4: 0.5, 5: 0.5, 6: 0.4, 9: 0.1}
 _PPP_TOTAL_FIBERS = 2394.0
 _PA_GRID_STEP_DEG = 10.0
 _PA_INR_NIGHT_STEP_MINUTES = 20
@@ -667,17 +667,21 @@ def PPP_centers(
             print(f"The non-complete proposals: {undone_str}")
         else:
             print("All proposals complete.")
-        _tb_tgt["priority"][_tb_tgt["exptime_done"] > 0] = 999
+        #_tb_tgt["priority"][_tb_tgt["exptime_done"] > 0] = 999
         tb_tgt_group_primary, initial_ra, initial_dec = _select_ppc_seed(
             tb_tgt_remaining, rng, use_multiprocessing
         )
-        seed_ppc_pa = fixed_ppc_pa if _is_provided_ppc_pa_value(fixed_ppc_pa) else 0.0
+        seed_ppc_pa = fixed_ppc_pa if _is_provided_ppc_pa_value(fixed_ppc_pa) else -90.0
         optimization_result = minimize(
             objective_ppc_assignment,
             [initial_ra, initial_dec],
             args=(tb_tgt_group_primary, seed_ppc_pa),
-            method="Nelder-Mead",
-            options={"xatol": 0.1, "fatol": 0.1, "maxiter": 25, "maxfev": 25},
+            method="Powell",
+            bounds=[
+                (initial_ra - 2.0, initial_ra + 2.0),
+                (initial_dec - 2.0, initial_dec + 2.0),
+            ],
+            options={"xatol": 0.01, "fatol": 0.01, "maxiter": 100, "maxfev": 100},
         )
         print(f"The optimal PPC center: {optimization_result.x}")
         best_ppc_ra, best_ppc_dec = optimization_result.x[0], optimization_result.x[1]
@@ -752,7 +756,7 @@ def PPP_centers(
         tb_tgt_assigned_mask = np.isin(_tb_tgt["identify_code"], assigned_target_ids)
         _tb_tgt["exptime_PPP"][tb_tgt_assigned_mask] -= single_exptime
         _tb_tgt["exptime_done"][tb_tgt_assigned_mask] += single_exptime
-        _tb_tgt["priority"][_tb_tgt["exptime_done"] > 0] = 999
+        #_tb_tgt["priority"][_tb_tgt["exptime_done"] > 0] = 999
         (
             tb_tgt_assigned,
             assigned_credit_seconds,
@@ -885,7 +889,7 @@ def _filter_single_program_targets(tb_tgt, proposal_id, ppc_index):
     )
     if threshold is None:
         return tb_tgt
-    priority_mask = tb_tgt["priority"] == 999
+    #priority_mask = tb_tgt["priority"] == 999
     remaining_exptime_mask = tb_tgt["exptime_PPP"] < threshold
     return tb_tgt[priority_mask | remaining_exptime_mask]
 
@@ -1100,8 +1104,11 @@ def _build_classic_ppc_list_table(final_ppc_records, tb_tgt, n_ppc):
 
 
 def _normalize_ppc_pa(ppc_pa):
-    """Wrap a position angle into the canonical [0, 360) range."""
-    return float(np.mod(float(ppc_pa), 360.0))
+    """Wrap a position angle into the instrument-valid [-90, 270] range."""
+    pa = float(np.mod(float(ppc_pa), 360.0))
+    if pa > 270.0:
+        pa -= 360.0
+    return pa
 
 
 def _is_provided_ppc_pa_value(ppc_pa):
@@ -1444,7 +1451,7 @@ def _evaluate_bright_guidestar_constraints(
 
 def _single_pointing_pa_candidates(initial_pa=None, pa_step_deg=_PA_GRID_STEP_DEG):
     """Return the PA grid used for per-pointing optimization."""
-    pa_candidates = np.arange(0.0, 360.0, float(pa_step_deg), dtype=float)
+    pa_candidates = np.arange(-90.0, 270.0, float(pa_step_deg), dtype=float)
     if _is_provided_ppc_pa_value(initial_pa):
         pa_candidates = np.concatenate((pa_candidates, [_normalize_ppc_pa(initial_pa)]))
     return np.array(
@@ -1818,7 +1825,7 @@ def PPP_centers_for_single_program(
                 tb_tgt_current,
                 ra,
                 dec,
-                initial_pa=0.0,
+                initial_pa=-90.0,
                 config=config,
                 label=f"{proposal_id} PPC {ppc_index + 1}",
             )
@@ -1893,7 +1900,7 @@ def PPP_centers_for_single_program(
         print(dict(Counter(tb_tgt_current["exptime_PPP"][index_assign])))
         tb_tgt_current["exptime_PPP"][index_assign] -= single_exptime
         tb_tgt_current["exptime_done"][index_assign] += single_exptime
-        tb_tgt_current["priority"][tb_tgt_current["exptime_done"] > 0] = 999
+        #tb_tgt_current["priority"][tb_tgt_current["exptime_done"] > 0] = 999
         proposal_policy = _get_proposal_policy(proposal_id)
         remaining_priority_increment_value = proposal_policy.get(
             "remaining_priority_increment_value"
@@ -1913,7 +1920,7 @@ def PPP_centers_for_single_program(
                 )
             ] += remaining_priority_increment_value
         tb_tgt_current = tb_tgt_current[tb_tgt_current["exptime_PPP"] > 0]
-        print(sum(tb_tgt_current["priority"] == 999))
+        #print(sum(tb_tgt_current["priority"] == 999))
     ppc_lst_fin = np.array(ppc_lst)
     ppcList = _build_classic_ppc_list_table(ppc_lst_fin, tb_tgt, n_ppc)
     if write_ppc_list:
