@@ -332,7 +332,7 @@ class GeneratePfsDesign(object):
     #"""
 
     def runPPP(self, n_pccs_l, n_pccs_m, backup=False):
-        if "queue" in self.workDir:
+        if self.conf["ppp"]["mode"] == "queue":
             from .utils import run_for_queue as PPP
         else:
             from .utils import run_for_classic as PPP
