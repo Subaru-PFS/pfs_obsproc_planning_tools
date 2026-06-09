@@ -33,14 +33,6 @@ from qplan.Scheduler import Scheduler
 from qplan.util.site import site_subaru as observer
 
 warnings.filterwarnings("ignore")
-HAWAII_TZ = ZoneInfo("US/Hawaii")
-
-
-def _parse_hawaii_datetime(value):
-    dt = parser.parse(str(value))
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=HAWAII_TZ)
-    return dt.astimezone(HAWAII_TZ)
 
 
 def make_schedule_table(schedule):
@@ -144,7 +136,7 @@ def run(
         dec = c.dec.to_string(sep=":", precision=2, pad=True)
         line = "  "
         line += f"{t['ppc_code']}\t"
-        line += f"{t['ppc_priority_usr']}\t"
+        line += f"{t['ppc_priority']}\t"
         line += f"{t['ppc_exptime'] + float(conf['qplan']['overhead'])*60.0 + overhead_add}\t"
         line += f"{t['ppc_pa']}\t"
         line += f"{t['ppc_resolution']}\t"
@@ -250,18 +242,16 @@ def run(
     stop_time_list = conf["qplan"].get("stop_time", [])
 
     today = date.today().strftime("%Y-%m-%d")
-    date_today = _parse_hawaii_datetime(f"{today} 12:00:00")
+    date_today = parser.parse(f"{today} 12:00 HST")
 
-    obs_dates = sorted(
-        conf["qplan"]["obs_dates"], key=lambda d: _parse_hawaii_datetime(f"{d} 00:00:00")
-    )
+    obs_dates = sorted(conf["qplan"]["obs_dates"], key=lambda d: parser.parse(d))
     first_valid_date = None
 
     start_time_list_daily = []
     stop_time_list_daily = []
 
     for date_ in obs_dates:
-        date_t = _parse_hawaii_datetime(f"{date_} 12:00:00")
+        date_t = parser.parse(f"{date_} 12:00 HST")
 
         if date_today > date_t:
             # skip past dates
@@ -292,7 +282,7 @@ def run(
                 continue
 
         observer.set_date(date_t)
-        default_start_time = observer.evening_twilight_18()
+        default_start_time = observer.evening_twilight_18() - timedelta(minutes=5)
         default_stop_time = observer.morning_twilight_18() + timedelta(
             minutes=30
         )  # extend TW18 by 30 min for real operation, just in case
@@ -304,21 +294,25 @@ def run(
             next_date = (
                 datetime.strptime(date_, "%Y-%m-%d") + timedelta(days=1)
             ).strftime("%Y-%m-%d")
-            item_hst = _parse_hawaii_datetime(item)
-            if (date_ in item) and item_hst >= default_start_time:
-                start_override = item_hst
+            if (date_ in item) and parser.parse(f"{item} HST") >= default_start_time:
+                start_override = parser.parse(f"{item} HST")
                 start_time_list.remove(item)
                 break
             elif (
                 (date_ in item)
-                and (item_hst < default_start_time)
-                and (item_hst > default_start_time - timedelta(hours=1))
+                and (parser.parse(f"{item} HST") < default_start_time)
+                and (
+                    parser.parse(f"{item} HST")
+                    > default_start_time - timedelta(hours=1)
+                )
             ):
                 start_override = default_start_time
                 start_time_list.remove(item)
                 break
-            elif (next_date in item) and item_hst <= default_stop_time:
-                start_override = item_hst
+            elif (next_date in item) and parser.parse(
+                f"{item} HST"
+            ) <= default_stop_time:
+                start_override = parser.parse(f"{item} HST")
                 start_time_list.remove(item)
                 break
 
@@ -326,19 +320,23 @@ def run(
             next_date = (
                 datetime.strptime(date_, "%Y-%m-%d") + timedelta(days=1)
             ).strftime("%Y-%m-%d")
-            item_hst = _parse_hawaii_datetime(item)
-            if (date_ in item) and item_hst >= default_start_time:
-                stop_override = item_hst
+            if (date_ in item) and parser.parse(f"{item} HST") >= default_start_time:
+                stop_override = parser.parse(f"{item} HST")
                 stop_time_list.remove(item)
                 break
-            elif (next_date in item) and item_hst <= default_stop_time:
-                stop_override = item_hst
+            elif (next_date in item) and parser.parse(
+                f"{item} HST"
+            ) <= default_stop_time:
+                stop_override = parser.parse(f"{item} HST")
                 stop_time_list.remove(item)
                 break
             elif (
                 (next_date in item)
-                and (item_hst > default_stop_time)
-                and (item_hst <= default_stop_time + timedelta(hours=1))
+                and (parser.parse(f"{item} HST") > default_stop_time)
+                and (
+                    parser.parse(f"{item} HST")
+                    <= default_stop_time + timedelta(hours=1)
+                )
             ):
                 stop_override = default_stop_time
                 stop_time_list.remove(item)
