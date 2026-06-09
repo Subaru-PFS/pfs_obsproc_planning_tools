@@ -348,7 +348,27 @@ def _draw_histograms(ax2, ax3, df_fib, df_ag, conf):
     }
 
     # Flux standard histogram
-    filtername_std = df_fib[df_fib.targetType == 3].pfsflux_plot_filter.values[0]
+    std = df_fib[df_fib.targetType == 3]
+
+    proposal_counts = (
+        std["proposalId"]
+        .dropna()
+        .astype(str)
+        .str.strip()
+        .value_counts()
+    )
+
+    proposal_detail = "\n".join(
+        f"{pid}: {cnt}" for pid, cnt in proposal_counts.items() if pid != "N/A"
+    )
+
+    df_std = df_fib[df_fib.targetType == 3]
+
+    if len(df_std) > 0:
+        filtername_std = df_std.pfsflux_plot_filter.values[0]
+    else:
+        filtername_std = None
+    
     ax2.hist(
         df_fib[df_fib.targetType == 3]["pfsMag_plot"],
         bins=bins,
@@ -356,7 +376,7 @@ def _draw_histograms(ax2, ax3, df_fib, df_ag, conf):
         color=c["fstar"],
         lw=0,
         alpha=0.4,
-        label=f"Std star ({filtername_std}, {len(df_fib[df_fib.targetType==3]['pfsMag_plot'])})",
+        label=f"Std star ({filtername_std}, {len(std)}, \n {proposal_detail})",
     )
 
     # stacked histogram per proposal/filter
@@ -603,8 +623,8 @@ def plot_FoV(
         "sky": "deepskyblue",  # KEEP
         "fstar": "green",  # KEEP
         # --- de-emphasized ---
-        "sci_primary": "#E79A9A",  # soft salmon for primary proposals
-        "sci_other": "#F6DEDE",  # lighter same-family salmon for other proposals
+        "sci_primary": "#F2C6C6",  # soft salmon for primary proposals
+        "sci_other": "#F2C6C6",  # lighter same-family salmon for other proposals
         # --- others ---
         "ag": "blueviolet",  # unchanged
     }
