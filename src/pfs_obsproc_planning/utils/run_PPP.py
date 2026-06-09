@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
+"""Pointing-priority planning helpers for PPP target selection.
+
+This module contains the core routines used to rank targets, estimate
+high-density pointing seeds, optimize PPC centers, and build PPC tables for
+both queue and classic single-program planning flows.
+"""
 
 import multiprocessing
 import os
 import time
 import warnings
+from datetime import datetime, timedelta
 from functools import partial
+from zoneinfo import ZoneInfo
 
 import numpy as np
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.table import Table
 from loguru import logger
-from matplotlib.path import Path
 from scipy.optimize import minimize
 from sklearn.cluster import DBSCAN
 from sklearn.neighbors import KernelDensity
@@ -20,15 +27,41 @@ from .classic_for_single_proposal import (
     _DEFAULT_SINGLE_PROGRAM_PRIORITY_POLICY,
     _get_proposal_policy,
 )
-from .run_netflow import fiber_allocate
+from .run_netflow import (
+    _filter_targets_near_ppc,
+    fiber_allocate,
+    select_good_observation_time,
+)
 
 warnings.filterwarnings("ignore")
 np.random.seed(0)
 
 _DEFAULT_PPP_WEIGHT_PARAMS = (2, 0, 0)
+_PPP_OBJECTIVE_LAMBDAS = {
+    "fh": 5.00,
+    "finish": 2.5,
+    "cont": 0.1,
+    "prio": 1.5,
+    "fill": 0.50,
+    "new": 0.10,
+    "over": 0.05,
+}
+_PPP_PRIORITY_VALUES = {0: 100.0, 1: 5, 2: 1, 3: 1, 4: 0.5, 5: 0.5, 6: 0.4, 9: 0.1}
+_PPP_TOTAL_FIBERS = 2394.0
+_PA_GRID_STEP_DEG = 10.0
+_PA_INR_NIGHT_STEP_MINUTES = 20
+_PA_INR_WRAP_EDGE_DEG = 170.0
+_HAWAII_TZ = ZoneInfo("US/Hawaii")
+_UTC_TZ = ZoneInfo("UTC")
+
+
+# -----------------------------------------------------------------------------
+# Shared target-scoring helpers
+# -----------------------------------------------------------------------------
 
 
 def count_local_number(_tb_tgt):
+    """Annotate each target with a coarse local sky-density count."""
     if len(_tb_tgt) == 0:
         return _tb_tgt
     ra_index = np.asarray(_tb_tgt["ra"], dtype=float).astype(int)
@@ -40,6 +73,7 @@ def count_local_number(_tb_tgt):
 
 
 def rank_recalculate(_tb_tgt):
+    """Convert proposal rank and priority into an exponential planning weight."""
     if len(_tb_tgt) == 0:
         return _tb_tgt
     rank_values = np.asarray(_tb_tgt["rank"], dtype=float)
@@ -48,12 +82,15 @@ def rank_recalculate(_tb_tgt):
     previous_distinct_ranks = np.concatenate(([0.0], unique_ranks[:-1]))
     interval_lower = 0.55 * unique_ranks + 0.45 * previous_distinct_ranks
     interval_step = 0.05 * (unique_ranks - previous_distinct_ranks)
-    sci_usr_ranktot = interval_lower[rank_index] + (9 - priority_values) * interval_step[rank_index]
+    sci_usr_ranktot = (
+        interval_lower[rank_index] + (9 - priority_values) * interval_step[rank_index]
+    )
     _tb_tgt["rank_fin"] = np.exp(sci_usr_ranktot)
     return _tb_tgt
 
 
 def weight(_tb_tgt, para_sci, para_exp, para_n):
+    """Build the combined PPP weight from science, exposure, and density terms."""
     if len(_tb_tgt) == 0:
         return _tb_tgt
     rank_fin = np.asarray(_tb_tgt["rank_fin"], dtype=float)
@@ -82,48 +119,50 @@ def weight(_tb_tgt, para_sci, para_exp, para_n):
 
 
 def target_clustering(_tb_tgt, sep=1.38):
+    """Cluster nearby targets so the densest group can seed PPC optimization."""
     if len(_tb_tgt) == 0:
         return []
     target_coordinates = np.radians(
-        np.column_stack((np.asarray(_tb_tgt["dec"], dtype=float), np.asarray(_tb_tgt["ra"], dtype=float)))
+        np.column_stack(
+            (
+                np.asarray(_tb_tgt["dec"], dtype=float),
+                np.asarray(_tb_tgt["ra"], dtype=float),
+            )
+        )
     )
-    db = DBSCAN(eps=np.radians(sep), min_samples=1, metric="haversine").fit(target_coordinates)
+    db = DBSCAN(eps=np.radians(sep), min_samples=1, metric="haversine").fit(
+        target_coordinates
+    )
     labels = db.labels_
     unique_labels, inverse_labels = np.unique(labels, return_inverse=True)
-    cluster_weights = np.bincount(inverse_labels, weights=np.asarray(_tb_tgt["rank_fin"], dtype=float))
+    cluster_weights = np.bincount(
+        inverse_labels, weights=np.asarray(_tb_tgt["rank_fin"], dtype=float)
+    )
     ordered_clusters = unique_labels[np.argsort(cluster_weights)[::-1]]
     tgt_group = []
     for cluster_label in ordered_clusters:
         tgt_t = _tb_tgt[labels == cluster_label]
         tgt_group.append(tgt_t)
         psl_ids_str = ", ".join(map(str, set(tgt_t["proposal_id"])))
-        print(f'(RA = {tgt_t["ra"][0]}, DEC = {tgt_t["dec"][0]}): {psl_ids_str}, {sum(tgt_t["rank_fin"])}')
+        print(
+            f'(RA = {tgt_t["ra"][0]}, DEC = {tgt_t["dec"][0]}): {psl_ids_str}, {sum(tgt_t["rank_fin"])}'
+        )
     return tgt_group
-
-
-def PFS_FoV(ppc_ra, ppc_dec, PA, _tb_tgt):
-    if len(_tb_tgt) == 0:
-        return np.array([], dtype=int)
-    target_coordinates = np.column_stack((np.asarray(_tb_tgt["ra"], dtype=float), np.asarray(_tb_tgt["dec"], dtype=float)))
-    ppc_center = SkyCoord(ppc_ra * u.deg, ppc_dec * u.deg)
-    hexagon = ppc_center.directional_offset_by(
-        [30 + PA, 90 + PA, 150 + PA, 210 + PA, 270 + PA, 330 + PA, 30 + PA] * u.deg,
-        1.38 / 2.0 * u.deg,
-    )
-    ra_h = hexagon.ra.deg
-    dec_h = hexagon.dec.deg
-    wrap_mask = np.fabs(ra_h - ppc_ra) > 180
-    if np.any(wrap_mask):
-        if ra_h[wrap_mask][0] > 180:
-            ra_h[wrap_mask] -= 360
-        else:
-            ra_h[wrap_mask] += 360
-    polygon = Path(np.column_stack((ra_h, dec_h)))
-    return np.where(polygon.contains_points(target_coordinates))[0]
+# -----------------------------------------------------------------------------
+# KDE-based pointing seed search
+# -----------------------------------------------------------------------------
 
 
 def KDE_xy(_tb_tgt, X, Y):
-    target_values = np.deg2rad(np.column_stack((np.asarray(_tb_tgt["dec"], dtype=float), np.asarray(_tb_tgt["ra"], dtype=float))))
+    """Evaluate the KDE map for a subset of targets on the supplied grid."""
+    target_values = np.deg2rad(
+        np.column_stack(
+            (
+                np.asarray(_tb_tgt["dec"], dtype=float),
+                np.asarray(_tb_tgt["ra"], dtype=float),
+            )
+        )
+    )
     kde = KernelDensity(
         bandwidth=np.deg2rad(1.38 / 2.0),
         kernel="linear",
@@ -137,10 +176,17 @@ def KDE_xy(_tb_tgt, X, Y):
 
 
 def KDE(_tb_tgt, multiProcesing):
+    """Estimate the highest-density pointing seed using a KDE over the sky grid."""
     if len(_tb_tgt) == 0:
         return np.nan, np.nan, np.nan, np.nan, np.nan
     if len(_tb_tgt) == 1:
-        return (_tb_tgt["ra"].data[0], _tb_tgt["dec"].data[0], np.nan, _tb_tgt["ra"].data[0], _tb_tgt["dec"].data[0])
+        return (
+            _tb_tgt["ra"].data[0],
+            _tb_tgt["dec"].data[0],
+            np.nan,
+            _tb_tgt["ra"].data[0],
+            _tb_tgt["dec"].data[0],
+        )
     ra_values = np.asarray(_tb_tgt["ra"], dtype=float)
     dec_values = np.asarray(_tb_tgt["dec"], dtype=float)
     ra_min = np.min(ra_values)
@@ -165,7 +211,9 @@ def KDE(_tb_tgt, multiProcesing):
         threads_count = 4
         thread_n = min(threads_count, round(len(_tb_tgt) * 0.5))
         with multiprocessing.Pool(thread_n) as pool:
-            kde_maps = pool.map(partial(KDE_xy, X=X_, Y=Y_), np.array_split(_tb_tgt, thread_n))
+            kde_maps = pool.map(
+                partial(KDE_xy, X=X_, Y=Y_), np.array_split(_tb_tgt, thread_n)
+            )
         Z = np.sum(kde_maps, axis=0)
     else:
         Z = KDE_xy(_tb_tgt, X_, Y_)
@@ -182,26 +230,211 @@ def KDE(_tb_tgt, multiProcesing):
     return X_, Y_, obj_dis_sig_, peak_x, peak_y
 
 
+def _safe_divide(numerator, denominator):
+    """Safely divide two scalars and return 0 when the denominator is zero."""
+    if denominator <= 0:
+        return 0.0
+    return float(numerator) / float(denominator)
+
+
+def _proposal_weight_by_id(_tb_tgt):
+    """Return normalized proposal-rank weights keyed by proposal ID."""
+    proposal_ids = np.asarray(_tb_tgt["proposal_id"], dtype=str)
+    proposal_ranks = np.asarray(_tb_tgt["rank"], dtype=float)
+    proposal_weights = {}
+    for proposal_id in np.unique(proposal_ids):
+        proposal_mask = proposal_ids == proposal_id
+        proposal_weights[proposal_id] = float(proposal_ranks[proposal_mask][0]) / 10.0
+    return proposal_weights
+
+
+def _proposal_remaining_fh_by_id(_tb_tgt):
+    """Return remaining credited fiber-hours for each proposal."""
+    fh_done_by_proposal = _calculate_fh_done_by_proposal(_tb_tgt)
+    proposal_ids = np.asarray(_tb_tgt["proposal_id"], dtype=str)
+    allocated_time = np.asarray(_tb_tgt["allocated_time"], dtype=float)
+    proposal_remaining_fh = {}
+    for proposal_id in np.unique(proposal_ids):
+        proposal_mask = proposal_ids == proposal_id
+        fh_goal = float(allocated_time[proposal_mask][0])
+        fh_done = float(fh_done_by_proposal.get(proposal_id, 0.0))
+        proposal_remaining_fh[proposal_id] = max(0.0, fh_goal - fh_done)
+    return proposal_remaining_fh
+
+
+def _priority_value_sum(priority_values, priority_value_map=None):
+    """Convert priority labels into a weighted value sum."""
+    if priority_value_map is None:
+        priority_value_map = _PPP_PRIORITY_VALUES
+    priority_values = np.asarray(priority_values, dtype=int)
+    return float(
+        sum(
+            priority_value_map.get(int(priority), 0.0)
+            for priority in priority_values
+        )
+    )
+
+
+def _score_single_ppc_assignment(_tb_tgt, assigned_target_ids):
+    """Evaluate one single-PPC assignment with normalized queue/classic metrics."""
+    term_names = [
+        "fh",
+        "finish",
+        "cont",
+        "prio",
+        "fill",
+        "new_partial",
+        "overshoot",
+        "n_assigned",
+        "n_p0",
+        "n_p1",
+        "n_finish",
+        "n_partial",
+        "n_continue",
+        "n_new_partial",
+    ]
+    if len(_tb_tgt) == 0 or len(assigned_target_ids) == 0:
+        return 0.0, {term_name: 0.0 for term_name in term_names}
+
+    identify_codes = np.asarray(_tb_tgt["identify_code"], dtype=str)
+    assigned_target_ids = np.asarray(assigned_target_ids, dtype=str)
+    assigned_mask = np.isin(identify_codes, assigned_target_ids)
+    if not np.any(assigned_mask):
+        return 0.0, {term_name: 0.0 for term_name in term_names}
+
+    tb_tgt_assigned = _tb_tgt[assigned_mask]
+    n_assigned = len(tb_tgt_assigned)
+    single_exptime = float(_tb_tgt.meta["single_exptime"])
+
+    remaining_exptime = np.asarray(tb_tgt_assigned["exptime_PPP"], dtype=float)
+    exptime_done = np.asarray(tb_tgt_assigned["exptime_done"], dtype=float)
+    assigned_priorities = np.asarray(tb_tgt_assigned["priority"], dtype=int)
+    incremental_seconds = np.minimum(remaining_exptime, single_exptime)
+    incremental_seconds = np.clip(incremental_seconds, 0.0, None)
+
+    n_finish = int(np.sum(remaining_exptime <= single_exptime))
+    n_partial = int(np.sum(remaining_exptime > single_exptime))
+    n_continue = int(np.sum(exptime_done > 0.0))
+    n_new_partial = int(
+        np.sum((exptime_done <= 0.0) & (remaining_exptime > single_exptime))
+    )
+    n_p0 = int(np.sum(assigned_priorities == 0))
+    n_p1 = int(np.sum(assigned_priorities == 1))
+
+    proposal_weights = _proposal_weight_by_id(_tb_tgt)
+    proposal_remaining_fh = _proposal_remaining_fh_by_id(_tb_tgt)
+    proposal_ids_assigned = np.asarray(tb_tgt_assigned["proposal_id"], dtype=str)
+    unique_proposal_ids, inverse_indices = np.unique(
+        proposal_ids_assigned, return_inverse=True
+    )
+    delta_fh_by_proposal = {
+        proposal_id: fh_delta
+        for proposal_id, fh_delta in zip(
+            unique_proposal_ids,
+            np.bincount(inverse_indices, weights=incremental_seconds) / 3600.0,
+        )
+    }
+
+    total_remaining_weighted_fh = float(
+        sum(
+            proposal_weights.get(proposal_id, 0.0) * remaining_fh
+            for proposal_id, remaining_fh in proposal_remaining_fh.items()
+        )
+    )
+    max_proposal_weight = max(proposal_weights.values(), default=0.0)
+    single_pointing_weighted_fh_cap = (
+        (_PPP_TOTAL_FIBERS * single_exptime / 3600.0) * max_proposal_weight
+    )
+    fh_denominator = min(total_remaining_weighted_fh, single_pointing_weighted_fh_cap)
+    useful_fh_gain = float(
+        sum(
+            proposal_weights.get(proposal_id, 0.0)
+            * min(delta_fh_by_proposal.get(proposal_id, 0.0), remaining_fh)
+            for proposal_id, remaining_fh in proposal_remaining_fh.items()
+        )
+    )
+    overshoot_fh = float(
+        sum(
+            proposal_weights.get(proposal_id, 0.0)
+            * max(0.0, delta_fh_by_proposal.get(proposal_id, 0.0) - remaining_fh)
+            for proposal_id, remaining_fh in proposal_remaining_fh.items()
+        )
+    )
+
+    remaining_priority_mask = np.asarray(_tb_tgt["exptime_PPP"], dtype=float) > 0.0
+    priority_value_denominator = _priority_value_sum(
+        np.asarray(_tb_tgt["priority"], dtype=int)[remaining_priority_mask]
+    )
+    priority_value_assigned = _priority_value_sum(
+        np.asarray(tb_tgt_assigned["priority"], dtype=int)
+    )
+
+    term_values = {
+        "fh": _safe_divide(useful_fh_gain, fh_denominator),
+        "finish": _safe_divide(n_finish, n_assigned),
+        "cont": _safe_divide(n_continue, n_assigned),
+        "prio": _safe_divide(priority_value_assigned, priority_value_denominator),
+        "fill": _safe_divide(n_assigned, _PPP_TOTAL_FIBERS),
+        "new_partial": _safe_divide(n_new_partial, n_assigned),
+        "overshoot": _safe_divide(overshoot_fh, fh_denominator),
+        "n_assigned": float(n_assigned),
+        "n_p0": float(n_p0),
+        "n_p1": float(n_p1),
+        "n_finish": float(n_finish),
+        "n_partial": float(n_partial),
+        "n_continue": float(n_continue),
+        "n_new_partial": float(n_new_partial),
+    }
+
+    score = (
+        _PPP_OBJECTIVE_LAMBDAS["fh"] * term_values["fh"]
+        + _PPP_OBJECTIVE_LAMBDAS["finish"] * term_values["finish"]
+        + _PPP_OBJECTIVE_LAMBDAS["cont"] * term_values["cont"]
+        + _PPP_OBJECTIVE_LAMBDAS["prio"] * term_values["prio"]
+        + _PPP_OBJECTIVE_LAMBDAS["fill"] * term_values["fill"]
+        - _PPP_OBJECTIVE_LAMBDAS["new"] * term_values["new_partial"]
+        - _PPP_OBJECTIVE_LAMBDAS["over"] * term_values["overshoot"]
+    )
+
+    return score, term_values
+
+
 def objective_ppc_assignment(trial_ppc, _tb_tgt, ppc_pa=0.0):
+    """Score a candidate PPC center by the targets it can allocate."""
     ppc_ra, ppc_dec = trial_ppc
-    assigned_target_ids = fiber_allocate(_tb_tgt, single_ppc_mode=True, ppc_candidate=(ppc_ra, ppc_dec, ppc_pa))
-    assigned_mask = np.isin(_tb_tgt["identify_code"], assigned_target_ids)
-    priority_values = np.asarray(_tb_tgt["priority"])
-    tracked_priorities = list(range(10)) + [999]
-    assigned_counts = {}
-    total_counts = {}
-    for priority in tracked_priorities:
-        priority_mask = priority_values == priority
-        assigned_counts[priority] = int(np.sum(assigned_mask & priority_mask))
-        total_counts[priority] = int(np.sum(priority_mask))
-    n_assigned_total = len(assigned_target_ids)
-    priority_summary = ", ".join(f"N{priority} = {assigned_counts[priority]}/{total_counts[priority]}" for priority in tracked_priorities)
-    print(f"{ppc_ra}, {ppc_dec}, {ppc_pa}, Nall = {n_assigned_total}/{len(_tb_tgt)}, {priority_summary}")
-    score = 1.0 * n_assigned_total + 0.5 * assigned_counts[0] + 1.10 * assigned_counts[999]
+    assigned_target_ids = fiber_allocate(
+        _tb_tgt, single_ppc_mode=True, ppc_candidate=(ppc_ra, ppc_dec, ppc_pa)
+    )
+    score, term_values = _score_single_ppc_assignment(_tb_tgt, assigned_target_ids)
+    print(
+        "{:.6f}, {:.6f}, {:.1f}, Nassigned = {:.0f}/{:.0f}, NP0 = {:.0f}, "
+        "NP1 = {:.0f}, Ncomplete = {:.0f}, Npartial = {:.0f}, FH = {:.3f}, "
+        "Finish = {:.3f}, Continue = {:.3f}, Prio = {:.3f}, Fill = {:.3f}, "
+        "NewPartial = {:.3f}, Over = {:.3f}, Score = {:.3f}".format(
+            ppc_ra,
+            ppc_dec,
+            ppc_pa,
+            term_values["n_assigned"],
+            len(_tb_tgt),
+            term_values["n_p0"],
+            term_values["n_p1"],
+            term_values["n_finish"],
+            term_values["n_partial"],
+            term_values["fh"],
+            term_values["finish"],
+            term_values["cont"],
+            term_values["prio"],
+            term_values["fill"],
+            term_values["new_partial"],
+            term_values["overshoot"],
+            score,
+        )
+    )
     return -score
 
 
 def _prepare_tb_tgt_for_ppc(_tb_tgt, weight_params):
+    """Apply all ranking and weighting steps before PPC optimization."""
     science_weight, exposure_weight, density_weight = weight_params
     _tb_tgt = rank_recalculate(_tb_tgt)
     _tb_tgt = count_local_number(_tb_tgt)
@@ -210,17 +443,28 @@ def _prepare_tb_tgt_for_ppc(_tb_tgt, weight_params):
 
 
 def _select_tb_tgt_remaining(_tb_tgt, proposal_ids=None):
+    """Select targets that still need exposure, optionally for chosen proposals."""
     tb_tgt_remaining = _tb_tgt[_tb_tgt["exptime_PPP"] > 0]
     if proposal_ids is not None:
-        tb_tgt_remaining = tb_tgt_remaining[np.isin(tb_tgt_remaining["proposal_id"], proposal_ids)]
+        tb_tgt_remaining = tb_tgt_remaining[
+            np.isin(tb_tgt_remaining["proposal_id"], proposal_ids)
+        ]
     return tb_tgt_remaining
 
 
 def _initialize_tb_proposal_progress(_tb_tgt):
+    """Initialize per-proposal bookkeeping for PPP completion tracking."""
     tb_tgt_remaining = _select_tb_tgt_remaining(_tb_tgt)
     proposal_ids = sorted(set(tb_tgt_remaining["proposal_id"]))
-    proposal_fh_goal = [tb_tgt_remaining["allocated_time"][tb_tgt_remaining["proposal_id"] == proposal_id][0] for proposal_id in proposal_ids]
-    tb_proposal_progress = Table([proposal_ids, proposal_fh_goal], names=["proposal_id", "FH_goal"])
+    proposal_fh_goal = [
+        tb_tgt_remaining["allocated_time"][
+            tb_tgt_remaining["proposal_id"] == proposal_id
+        ][0]
+        for proposal_id in proposal_ids
+    ]
+    tb_proposal_progress = Table(
+        [proposal_ids, proposal_fh_goal], names=["proposal_id", "FH_goal"]
+    )
     tb_proposal_progress["FH_done"] = 0.0
     tb_proposal_progress["N_done"] = 0.0
     tb_proposal_progress["N_obs"] = 0.0
@@ -229,6 +473,7 @@ def _initialize_tb_proposal_progress(_tb_tgt):
 
 
 def _sample_tb_tgt_rows(tb_tgt_input, max_rows, rng):
+    """Randomly down-sample a target table when KDE seeding would be too large."""
     if len(tb_tgt_input) <= max_rows:
         return tb_tgt_input
     sample_indices = rng.choice(len(tb_tgt_input), size=max_rows, replace=False)
@@ -236,6 +481,7 @@ def _sample_tb_tgt_rows(tb_tgt_input, max_rows, rng):
 
 
 def _select_ppc_seed(tb_tgt_remaining, rng, use_multiprocessing):
+    """Pick the strongest target cluster and derive an initial PPC seed from it."""
     tb_tgt_groups = target_clustering(tb_tgt_remaining, 1.38)
     tb_tgt_group_primary = tb_tgt_groups[0]
     tb_tgt_group_sampled = _sample_tb_tgt_rows(tb_tgt_group_primary, 200, rng)
@@ -244,6 +490,7 @@ def _select_ppc_seed(tb_tgt_remaining, rng, use_multiprocessing):
 
 
 def _calculate_tb_tgt_credit_seconds(tb_tgt_assigned):
+    """Cap credited exposure at the requested exposure time for each target."""
     requested_exptime = np.asarray(tb_tgt_assigned["exptime"], dtype=float)
     exptime_done = np.asarray(tb_tgt_assigned["exptime_done"], dtype=float)
     credited_exptime = exptime_done.copy()
@@ -253,52 +500,140 @@ def _calculate_tb_tgt_credit_seconds(tb_tgt_assigned):
 
 
 def _calculate_fh_done_by_proposal(_tb_tgt):
+    """Aggregate credited observing time in fiber-hours by proposal."""
     credited_exptime = _calculate_tb_tgt_credit_seconds(_tb_tgt)
     proposal_ids = np.asarray(_tb_tgt["proposal_id"], dtype=str)
     unique_proposal_ids, inverse_indices = np.unique(proposal_ids, return_inverse=True)
     credited_fh = np.bincount(inverse_indices, weights=credited_exptime) / 3600.0
-    return {proposal_id: fh_done for proposal_id, fh_done in zip(unique_proposal_ids, credited_fh)}
+    return {
+        proposal_id: fh_done
+        for proposal_id, fh_done in zip(unique_proposal_ids, credited_fh)
+    }
 
 
 def _summarize_tb_tgt_assignment(_tb_tgt, tb_tgt_assigned_mask):
+    """Summarize one PPC assignment step for logging and proposal accounting."""
     tb_tgt_assigned = _tb_tgt[tb_tgt_assigned_mask]
     assigned_credit_seconds = _calculate_tb_tgt_credit_seconds(tb_tgt_assigned)
-    total_assigned_weight = float(np.sum(np.asarray(tb_tgt_assigned["rank_fin"], dtype=float)))
+    total_assigned_weight = float(
+        np.sum(np.asarray(tb_tgt_assigned["rank_fin"], dtype=float))
+    )
     proposal_ids = np.asarray(tb_tgt_assigned["proposal_id"], dtype=str)
     unique_proposal_ids, inverse_indices = np.unique(proposal_ids, return_inverse=True)
     credited_fh = np.bincount(inverse_indices, weights=assigned_credit_seconds) / 3600.0
-    assigned_fh_by_proposal = {proposal_id: fh_done for proposal_id, fh_done in zip(unique_proposal_ids, credited_fh)}
-    return tb_tgt_assigned, assigned_credit_seconds, total_assigned_weight, assigned_fh_by_proposal
+    assigned_fh_by_proposal = {
+        proposal_id: fh_done
+        for proposal_id, fh_done in zip(unique_proposal_ids, credited_fh)
+    }
+    return (
+        tb_tgt_assigned,
+        assigned_credit_seconds,
+        total_assigned_weight,
+        assigned_fh_by_proposal,
+    )
 
 
 def _update_tb_proposal_progress(tb_proposal_progress, _tb_tgt):
+    """Refresh proposal completion counters after one PPC assignment."""
     fh_done_by_proposal = _calculate_fh_done_by_proposal(_tb_tgt)
     for proposal_id in tb_proposal_progress["proposal_id"]:
         proposal_progress_mask = tb_proposal_progress["proposal_id"] == proposal_id
         proposal_mask = _tb_tgt["proposal_id"] == proposal_id
-        tb_proposal_progress["N_psl"].data[proposal_progress_mask] = np.sum(proposal_mask)
-        tb_proposal_progress["FH_done"].data[proposal_progress_mask] = fh_done_by_proposal.get(proposal_id, 0.0)
-        tb_proposal_progress["N_done"].data[proposal_progress_mask] = np.sum(_tb_tgt["exptime_PPP"][proposal_mask] <= 0)
-        tb_proposal_progress["N_obs"].data[proposal_progress_mask] = np.sum(_tb_tgt["exptime_PPP"][proposal_mask] < _tb_tgt["exptime"][proposal_mask])
+        tb_proposal_progress["N_psl"].data[proposal_progress_mask] = np.sum(
+            proposal_mask
+        )
+        tb_proposal_progress["FH_done"].data[
+            proposal_progress_mask
+        ] = fh_done_by_proposal.get(proposal_id, 0.0)
+        tb_proposal_progress["N_done"].data[proposal_progress_mask] = np.sum(
+            _tb_tgt["exptime_PPP"][proposal_mask] <= 0
+        )
+        tb_proposal_progress["N_obs"].data[proposal_progress_mask] = np.sum(
+            _tb_tgt["exptime_PPP"][proposal_mask] < _tb_tgt["exptime"][proposal_mask]
+        )
 
 
 def _build_ppc_list_table(final_ppc_records, _tb_tgt, backup):
+    """Build the queue-mode PPC table written to PPP outputs."""
     ppc_weights = final_ppc_records[:, 4]
     weight_for_qplan = np.arange(1, len(final_ppc_records) + 1, dtype=int)
     n_ppc_final = len(final_ppc_records)
     resolution = _tb_tgt["resolution"][0]
     if backup:
-        ppc_codes = [f"que_{resolution}_{time.strftime('%y%m%d')}_{int(index + 1)}_backup" for index in range(n_ppc_final)]
+        ppc_codes = [
+            f"que_{resolution}_{time.strftime('%y%m%d')}_{int(index + 1)}_backup"
+            for index in range(n_ppc_final)
+        ]
     else:
-        ppc_codes = [f"que_{resolution}_{time.strftime('%y%m%d')}_{int(index + 1)}" for index in range(n_ppc_final)]
+        ppc_codes = [
+            f"que_{resolution}_{time.strftime('%y%m%d')}_{int(index + 1)}"
+            for index in range(n_ppc_final)
+        ]
     return Table(
-        [ppc_codes, final_ppc_records[:, 1], final_ppc_records[:, 2], final_ppc_records[:, 3], ["J2000"] * n_ppc_final, weight_for_qplan, ppc_weights, [900.0] * n_ppc_final, [1200.0] * n_ppc_final, [resolution] * n_ppc_final, final_ppc_records[:, -2], final_ppc_records[:, -1], [""] * n_ppc_final],
-        names=["ppc_code", "ppc_ra", "ppc_dec", "ppc_pa", "ppc_equinox", "ppc_priority", "ppc_priority_usr", "ppc_exptime", "ppc_totaltime", "ppc_resolution", "ppc_fiber_usage_frac", "ppc_allocated_targets", "ppc_comment"],
-        dtype=[np.str_, np.float64, np.float64, np.float64, np.str_, np.float64, np.float64, np.float64, np.float64, np.str_, np.float64, object, np.str_],
+        [
+            ppc_codes,
+            final_ppc_records[:, 1],
+            final_ppc_records[:, 2],
+            final_ppc_records[:, 3],
+            ["J2000"] * n_ppc_final,
+            weight_for_qplan,
+            ppc_weights,
+            [900.0] * n_ppc_final,
+            [1200.0] * n_ppc_final,
+            [resolution] * n_ppc_final,
+            final_ppc_records[:, -2],
+            final_ppc_records[:, -1],
+            [""] * n_ppc_final,
+        ],
+        names=[
+            "ppc_code",
+            "ppc_ra",
+            "ppc_dec",
+            "ppc_pa",
+            "ppc_equinox",
+            "ppc_priority",
+            "ppc_priority_usr",
+            "ppc_exptime",
+            "ppc_totaltime",
+            "ppc_resolution",
+            "ppc_fiber_usage_frac",
+            "ppc_allocated_targets",
+            "ppc_comment",
+        ],
+        dtype=[
+            np.str_,
+            np.float64,
+            np.float64,
+            np.float64,
+            np.str_,
+            np.float64,
+            np.float64,
+            np.float64,
+            np.float64,
+            np.str_,
+            np.float64,
+            object,
+            np.str_,
+        ],
     )
 
 
-def PPP_centers(_tb_tgt, n_ppc, weight_params=[2, 0, 0], random_seed=0, use_multiprocessing=True, backup=False, fixed_ppc_pa=0.0):
+# -----------------------------------------------------------------------------
+# Queue-mode PPC optimization
+# -----------------------------------------------------------------------------
+
+
+def PPP_centers(
+    _tb_tgt,
+    n_ppc,
+    weight_params=[2, 0, 0],
+    random_seed=0,
+    use_multiprocessing=True,
+    backup=False,
+    fixed_ppc_pa=None,
+    config=None,
+):
+    """Determine PPC centers for queue-mode planning across multiple proposals."""
     start_time = time.time()
     rng = np.random.default_rng(random_seed)
     logger.info("[S2] Determine pointing centers started")
@@ -315,46 +650,161 @@ def PPP_centers(_tb_tgt, n_ppc, weight_params=[2, 0, 0], random_seed=0, use_mult
     total_fh_goal = float(np.sum(proposal_fh_goal))
     incomplete_proposal_ids = list(tb_proposal_progress["proposal_id"])
     tb_tgt_remaining = _select_tb_tgt_remaining(_tb_tgt, incomplete_proposal_ids)
-    while (((sum((tb_proposal_progress["FH_done"] >= tb_proposal_progress["FH_goal"]) * (tb_proposal_progress["N_done"] > 0.0)) < len(tb_proposal_progress)) and len(tb_tgt_remaining) > 0 and len(ppc_records) < n_ppc)):
+    while (
+        (
+            sum(
+                (tb_proposal_progress["FH_done"] >= tb_proposal_progress["FH_goal"])
+                * (tb_proposal_progress["N_done"] > 0.0)
+            )
+            < len(tb_proposal_progress)
+        )
+        and len(tb_tgt_remaining) > 0
+        and len(ppc_records) < n_ppc
+    ):
         if incomplete_proposal_ids:
             undone_str = ", ".join(map(str, incomplete_proposal_ids))
             print("-----------------------------------------")
             print(f"The non-complete proposals: {undone_str}")
         else:
             print("All proposals complete.")
-        _tb_tgt["priority"][_tb_tgt["exptime_done"] > 0] = 999
-        tb_tgt_group_primary, initial_ra, initial_dec = _select_ppc_seed(tb_tgt_remaining, rng, use_multiprocessing)
-        optimization_result = minimize(objective_ppc_assignment, [initial_ra, initial_dec], args=(tb_tgt_group_primary, fixed_ppc_pa), method="Nelder-Mead", options={"xatol": 0.1, "fatol": 0.1, "maxiter": 25, "maxfev": 25})
+        #_tb_tgt["priority"][_tb_tgt["exptime_done"] > 0] = 999
+        tb_tgt_group_primary, initial_ra, initial_dec = _select_ppc_seed(
+            tb_tgt_remaining, rng, use_multiprocessing
+        )
+        seed_ppc_pa = fixed_ppc_pa if _is_provided_ppc_pa_value(fixed_ppc_pa) else -90.0
+        optimization_result = minimize(
+            objective_ppc_assignment,
+            [initial_ra, initial_dec],
+            args=(tb_tgt_group_primary, seed_ppc_pa),
+            method="Powell",
+            bounds=[
+                (initial_ra - 2.0, initial_ra + 2.0),
+                (initial_dec - 2.0, initial_dec + 2.0),
+            ],
+            options={"xatol": 0.01, "fatol": 0.01, "maxiter": 100, "maxfev": 100},
+        )
         print(f"The optimal PPC center: {optimization_result.x}")
         best_ppc_ra, best_ppc_dec = optimization_result.x[0], optimization_result.x[1]
-        best_ppc_pa = fixed_ppc_pa
-        assigned_target_ids = fiber_allocate(tb_tgt_remaining, single_ppc_mode=True, ppc_candidate=(best_ppc_ra, best_ppc_dec, best_ppc_pa))
+        best_ppc_pa = seed_ppc_pa
+        assigned_target_ids = []
+        ppc_score = -np.inf
+        ppc_term_values = {"fh": 0.0, "n_assigned": 0.0}
         retry_count = 0
-        while len(assigned_target_ids) == 0 and retry_count < 2:
+        while retry_count < 3:
+            if _is_provided_ppc_pa_value(fixed_ppc_pa):
+                best_ppc_pa = _normalize_ppc_pa(fixed_ppc_pa)
+                fixed_pa_observation_time = _resolve_pa_constraint_observation_time(
+                    np.array([[0, best_ppc_ra, best_ppc_dec, best_ppc_pa, 0]], dtype=object),
+                    config=config,
+                )
+                if isinstance(config, dict) and fixed_pa_observation_time is not None:
+                    from .validation import _warn_too_bright_guidestars
+
+                    df_guidestars_toobright = _warn_too_bright_guidestars(
+                        float(best_ppc_ra),
+                        float(best_ppc_dec),
+                        float(best_ppc_pa),
+                        _coerce_utc_datetime(fixed_pa_observation_time),
+                        config,
+                    )
+                    per_camera_counts = {}
+                    if len(df_guidestars_toobright) > 0 and "agId" in df_guidestars_toobright.columns:
+                        camera_ids, camera_counts = np.unique(
+                            np.asarray(df_guidestars_toobright["agId"], dtype=int),
+                            return_counts=True,
+                        )
+                        per_camera_counts = {
+                            int(camera_id): int(camera_count)
+                            for camera_id, camera_count in zip(camera_ids, camera_counts)
+                        }
+                    print(
+                        "[S2] {} bright guide stars in AG cameras for queue PPC {} at RA={:.6f}, Dec={:.6f}, PA={:.1f} (per_cam={})".format(
+                            len(df_guidestars_toobright),
+                            len(ppc_records) + 1,
+                            float(best_ppc_ra),
+                            float(best_ppc_dec),
+                            float(best_ppc_pa),
+                            per_camera_counts,
+                        )
+                    )
+                assigned_target_ids = fiber_allocate(
+                    tb_tgt_remaining,
+                    single_ppc_mode=True,
+                    ppc_candidate=(best_ppc_ra, best_ppc_dec, best_ppc_pa),
+                )
+                ppc_score, ppc_term_values = _score_single_ppc_assignment(
+                    _tb_tgt, assigned_target_ids
+                )
+            else:
+                pa_result = _optimize_single_pointing_pa(
+                    tb_tgt_remaining,
+                    best_ppc_ra,
+                    best_ppc_dec,
+                    initial_pa=seed_ppc_pa,
+                    config=config,
+                    label=f"queue PPC {len(ppc_records) + 1}",
+                )
+                best_ppc_pa = pa_result["pa"]
+                assigned_target_ids = pa_result["assigned_target_ids"]
+                ppc_score = pa_result["score"]
+                ppc_term_values = pa_result["term_values"]
+            if len(assigned_target_ids) > 0:
+                break
             best_ppc_ra += rng.uniform(-0.15, 0.15)
             best_ppc_dec += rng.uniform(-0.15, 0.15)
-            assigned_target_ids = fiber_allocate(tb_tgt_remaining, single_ppc_mode=True, ppc_candidate=(best_ppc_ra, best_ppc_dec, best_ppc_pa), observation_time="2026-01-10T10:00:00Z")
             retry_count += 1
         tb_tgt_assigned_mask = np.isin(_tb_tgt["identify_code"], assigned_target_ids)
         _tb_tgt["exptime_PPP"][tb_tgt_assigned_mask] -= single_exptime
         _tb_tgt["exptime_done"][tb_tgt_assigned_mask] += single_exptime
-        _tb_tgt["priority"][_tb_tgt["exptime_done"] > 0] = 999
-        tb_tgt_assigned, assigned_credit_seconds, total_assigned_weight, assigned_fh_by_proposal = _summarize_tb_tgt_assignment(_tb_tgt, tb_tgt_assigned_mask)
+        #_tb_tgt["priority"][_tb_tgt["exptime_done"] > 0] = 999
+        (
+            tb_tgt_assigned,
+            assigned_credit_seconds,
+            total_assigned_weight,
+            assigned_fh_by_proposal,
+        ) = _summarize_tb_tgt_assignment(_tb_tgt, tb_tgt_assigned_mask)
         print(f"{best_ppc_ra}, {best_ppc_dec}, {len(tb_tgt_assigned)}")
-        ppc_records.append(np.array([len(ppc_records), best_ppc_ra, best_ppc_dec, best_ppc_pa, total_assigned_weight, sum(assigned_fh_by_proposal.values()) / total_fh_goal, len(tb_tgt_assigned) / 2394.0, assigned_target_ids], dtype=object))
+        ppc_records.append(
+            np.array(
+                [
+                    len(ppc_records),
+                    best_ppc_ra,
+                    best_ppc_dec,
+                    best_ppc_pa,
+                    ppc_score,
+                    ppc_term_values["fh"],
+                    len(tb_tgt_assigned) / 2394.0,
+                    assigned_target_ids,
+                ],
+                dtype=object,
+            )
+        )
         proposal_mask = np.isin(_tb_tgt["proposal_id"], incomplete_proposal_ids)
-        n_partially_observed_before_filter = sum((_tb_tgt["exptime_done"] > 0) * proposal_mask)
+        n_partially_observed_before_filter = sum(
+            (_tb_tgt["exptime_done"] > 0) * proposal_mask
+        )
         _update_tb_proposal_progress(tb_proposal_progress, _tb_tgt)
-        incomplete_proposal_ids = list(set(tb_proposal_progress["proposal_id"][(tb_proposal_progress["FH_done"] < tb_proposal_progress["FH_goal"]) | (tb_proposal_progress["N_done"] == 0.0)]))
+        incomplete_proposal_ids = list(
+            set(
+                tb_proposal_progress["proposal_id"][
+                    (tb_proposal_progress["FH_done"] < tb_proposal_progress["FH_goal"])
+                    | (tb_proposal_progress["N_done"] == 0.0)
+                ]
+            )
+        )
         tb_tgt_remaining = _select_tb_tgt_remaining(_tb_tgt, incomplete_proposal_ids)
         n_partially_observed_after_filter = sum(tb_tgt_remaining["exptime_done"] > 0)
-        print(f"PPC_{len(ppc_records):3d}: {len(_tb_tgt)-len(tb_tgt_remaining):5d}/{len(_tb_tgt):10d} targets are finished (w={total_assigned_weight:.2f}). (partial = {n_partially_observed_before_filter}, {n_partially_observed_after_filter})")
+        print(
+            f"PPC_{len(ppc_records):3d}: {len(_tb_tgt)-len(tb_tgt_remaining):5d}/{len(_tb_tgt):10d} targets are finished (score={ppc_score:.3f}, fh={ppc_term_values['fh']:.3f}). (partial = {n_partially_observed_before_filter}, {n_partially_observed_after_filter})"
+        )
         Table.pprint_all(tb_proposal_progress)
     if len(ppc_records) == 0:
         logger.warning("[S2] No valid PPC centers were determined")
         return np.array(ppc_records), Table()
     elif len(ppc_records) > n_ppc:
-        final_ppc_records = sorted(ppc_records, key=lambda x: x[4], reverse=True)[:n_ppc]
+        final_ppc_records = sorted(ppc_records, key=lambda x: x[4], reverse=True)[
+            :n_ppc
+        ]
     else:
         final_ppc_records = sorted(ppc_records, key=lambda x: x[4], reverse=True)
     final_ppc_records = np.asarray(final_ppc_records, dtype=object)
@@ -364,17 +814,25 @@ def PPP_centers(_tb_tgt, n_ppc, weight_params=[2, 0, 0], random_seed=0, use_mult
         sort_order = np.argsort(-np.asarray(final_ppc_records[:, 4], dtype=float))
         final_ppc_records = final_ppc_records[sort_order]
     ppc_list_table = _build_ppc_list_table(final_ppc_records, _tb_tgt, backup)
-    logger.info(f"[S2] Determine pointing centers done ( nppc = {len(final_ppc_records):.0f}; takes {round(time.time()-start_time,3)} sec)")
+    logger.info(
+        f"[S2] Determine pointing centers done ( nppc = {len(final_ppc_records):.0f}; takes {round(time.time()-start_time,3)} sec)"
+    )
     return final_ppc_records, ppc_list_table
 
 
 def objective_single_program_ppc_assignment(trial_ppc, tb_tgt, ppc_pa=0.0):
+    """Score a classic-mode PPC candidate for a single proposal."""
     ppc_ra, ppc_dec = trial_ppc
-    assigned_target_ids = fiber_allocate(tb_tgt, single_ppc_mode=True, ppc_candidate=(ppc_ra, ppc_dec, ppc_pa))
+    assigned_target_ids = fiber_allocate(
+        tb_tgt, single_ppc_mode=True, ppc_candidate=(ppc_ra, ppc_dec, ppc_pa)
+    )
+    score, term_values = _score_single_ppc_assignment(tb_tgt, assigned_target_ids)
     assigned_mask = np.isin(tb_tgt["identify_code"], assigned_target_ids)
     proposal_policy = _get_proposal_policy(_single_program_proposal_id(tb_tgt))
-    tracked_priorities = proposal_policy.get("tracked_priorities", _DEFAULT_SINGLE_PROGRAM_PRIORITY_POLICY["tracked_priorities"])
-    emphasized_priority = proposal_policy.get("emphasized_priority", _DEFAULT_SINGLE_PROGRAM_PRIORITY_POLICY["emphasized_priority"])
+    tracked_priorities = proposal_policy.get(
+        "tracked_priorities",
+        _DEFAULT_SINGLE_PROGRAM_PRIORITY_POLICY["tracked_priorities"],
+    )
     priority_values = np.asarray(tb_tgt["priority"])
     assigned_counts = {}
     total_counts = {}
@@ -382,13 +840,40 @@ def objective_single_program_ppc_assignment(trial_ppc, tb_tgt, ppc_pa=0.0):
         priority_mask = priority_values == priority
         assigned_counts[priority] = int(np.sum(assigned_mask & priority_mask))
         total_counts[priority] = int(np.sum(priority_mask))
-    priority_summary = ", ".join(f"N{priority} = {assigned_counts[priority]}/{total_counts[priority]}" for priority in tracked_priorities)
-    print(f"{ppc_ra}, {ppc_dec}, {ppc_pa}, Nall = {len(assigned_target_ids)}/{len(tb_tgt)}, {priority_summary}")
-    score = 1.0 * len(assigned_target_ids) + 0.5 * assigned_counts[emphasized_priority] + 1.50 * assigned_counts[999]
+    priority_summary = ", ".join(
+        f"N{priority} = {assigned_counts[priority]}/{total_counts[priority]}"
+        for priority in tracked_priorities
+    )
+    print(
+        "{:.6f}, {:.6f}, {:.1f}, Nassigned = {:.0f}/{:.0f}, NP0 = {:.0f}, "
+        "NP1 = {:.0f}, Ncomplete = {:.0f}, Npartial = {:.0f}, {}, FH = {:.3f}, "
+        "Finish = {:.3f}, Continue = {:.3f}, Prio = {:.3f}, Fill = {:.3f}, "
+        "NewPartial = {:.3f}, Over = {:.3f}, Score = {:.3f}".format(
+            ppc_ra,
+            ppc_dec,
+            ppc_pa,
+            term_values["n_assigned"],
+            len(tb_tgt),
+            term_values["n_p0"],
+            term_values["n_p1"],
+            term_values["n_finish"],
+            term_values["n_partial"],
+            priority_summary,
+            term_values["fh"],
+            term_values["finish"],
+            term_values["cont"],
+            term_values["prio"],
+            term_values["fill"],
+            term_values["new_partial"],
+            term_values["overshoot"],
+            score,
+        )
+    )
     return -score
 
 
 def _single_program_proposal_id(tb_tgt):
+    """Return the unique proposal ID when a table contains one proposal only."""
     proposal_ids = sorted(set(np.asarray(tb_tgt["proposal_id"], dtype=str)))
     if len(proposal_ids) == 1:
         return proposal_ids[0]
@@ -396,31 +881,79 @@ def _single_program_proposal_id(tb_tgt):
 
 
 def _filter_single_program_targets(tb_tgt, proposal_id, ppc_index):
-    threshold = _get_proposal_policy(proposal_id).get("single_program_filter_thresholds", {}).get(ppc_index)
+    """Apply proposal-specific target filtering before a classic PPC step."""
+    threshold = (
+        _get_proposal_policy(proposal_id)
+        .get("single_program_filter_thresholds", {})
+        .get(ppc_index)
+    )
     if threshold is None:
         return tb_tgt
-    priority_mask = tb_tgt["priority"] == 999
+    #priority_mask = tb_tgt["priority"] == 999
     remaining_exptime_mask = tb_tgt["exptime_PPP"] < threshold
     return tb_tgt[priority_mask | remaining_exptime_mask]
 
 
-def _optimize_fixed_pa_single_program_pointing(tb_tgt, central_ra, central_dec, fixed_ppc_pa, priority_limit, bounds, label):
+def _optimize_fixed_pa_single_program_pointing(
+    tb_tgt, central_ra, central_dec, fixed_ppc_pa, priority_limit, bounds, label
+):
+    """Optimize a single-program pointing around a fixed position-angle seed."""
+    seed_ppc_pa = fixed_ppc_pa if _is_provided_ppc_pa_value(fixed_ppc_pa) else 0.0
+
     def optimize_pointing_objective(coords):
+        """Evaluate how well a local pointing covers high-priority targets."""
         test_ra, test_dec = coords
-        assigned_ids = fiber_allocate(tb_tgt, single_ppc_mode=True, ppc_candidate=(test_ra, test_dec, fixed_ppc_pa))
+        assigned_ids = fiber_allocate(
+            tb_tgt,
+            single_ppc_mode=True,
+            ppc_candidate=(test_ra, test_dec, seed_ppc_pa),
+        )
+        score, term_values = _score_single_ppc_assignment(tb_tgt, assigned_ids)
         index_assign = np.isin(tb_tgt["identify_code"], assigned_ids)
         assigned_targets = tb_tgt[index_assign]
         priority_mask = tb_tgt["priority"] <= priority_limit
         n_priority_targets_total = int(np.sum(priority_mask))
-        n_priority_targets_assigned = int(np.sum(assigned_targets["priority"] <= priority_limit))
+        n_priority_targets_assigned = int(
+            np.sum(assigned_targets["priority"] <= priority_limit)
+        )
         n_total = len(assigned_ids)
-        priority_norm = n_priority_targets_assigned / n_priority_targets_total if n_priority_targets_total > 0 else 0.0
-        total_norm = n_total / len(tb_tgt) if len(tb_tgt) > 0 else 0.0
-        score = -(5 * priority_norm + total_norm)
-        print(f"Testing RA={test_ra:.6f}, Dec={test_dec:.6f}: P<= {priority_limit}={n_priority_targets_assigned}, Total={n_total}, Score={score:.3f}")
-        return score
-    print(f"\nOptimizing pointing position for {label} around RA={central_ra}, Dec={central_dec}")
-    result = minimize(optimize_pointing_objective, [central_ra, central_dec], method="L-BFGS-B", bounds=bounds, options={"ftol": 1.0, "eps": 0.01})
+        print(
+            "Testing RA={:.6f}, Dec={:.6f}: P<= {} = {}/{}, Nassigned={}, "
+            "NP0={}, NP1={}, Ncomplete={}, Npartial={}, FH={:.3f}, "
+            "Finish={:.3f}, Continue={:.3f}, Prio={:.3f}, Fill={:.3f}, "
+            "New={:.3f}, Over={:.3f}, Score={:.3f}".format(
+                test_ra,
+                test_dec,
+                priority_limit,
+                n_priority_targets_assigned,
+                n_priority_targets_total,
+                n_total,
+                int(term_values["n_p0"]),
+                int(term_values["n_p1"]),
+                int(term_values["n_finish"]),
+                int(term_values["n_partial"]),
+                term_values["fh"],
+                term_values["finish"],
+                term_values["cont"],
+                term_values["prio"],
+                term_values["fill"],
+                term_values["new_partial"],
+                term_values["overshoot"],
+                score,
+            )
+        )
+        return -score
+
+    print(
+        f"\nOptimizing pointing position for {label} around RA={central_ra}, Dec={central_dec}"
+    )
+    result = minimize(
+        optimize_pointing_objective,
+        [central_ra, central_dec],
+        method="L-BFGS-B",
+        bounds=bounds,
+        options={"ftol": 1.0, "eps": 0.01},
+    )
     optimized_ra, optimized_dec = result.x
     print(f"\nOptimal position found: RA={optimized_ra:.6f}, Dec={optimized_dec:.6f}")
     print(f"Optimization result: {result.message}")
@@ -428,22 +961,42 @@ def _optimize_fixed_pa_single_program_pointing(tb_tgt, central_ra, central_dec, 
 
 
 def _optimize_single_program_from_initial_guess(tb_tgt, initial_guess):
+    """Optimize a single-program pointing starting from a proposal-defined seed."""
     special_ppc_pa = initial_guess[2]
-    result = minimize(partial(objective_single_program_ppc_assignment, tb_tgt=tb_tgt, ppc_pa=special_ppc_pa), initial_guess[:2], method="Nelder-Mead")
+    result = minimize(
+        partial(
+            objective_single_program_ppc_assignment,
+            tb_tgt=tb_tgt,
+            ppc_pa=special_ppc_pa,
+        ),
+        initial_guess[:2],
+        method="Nelder-Mead",
+    )
     print(result.x)
     return result.x[0], result.x[1], special_ppc_pa
 
 
-def _select_special_single_program_pointing(tb_tgt_current, proposal_id, ppc_index, fixed_ppc_pa):
+def _select_special_single_program_pointing(
+    tb_tgt_current, proposal_id, ppc_index, fixed_ppc_pa
+):
+    """Select any proposal-specific pointing rule before falling back to default."""
     proposal_policy = _get_proposal_policy(proposal_id)
-    tb_tgt_current = _filter_single_program_targets(tb_tgt_current, proposal_id, ppc_index)
+    tb_tgt_current = _filter_single_program_targets(
+        tb_tgt_current, proposal_id, ppc_index
+    )
     single_program_pointings = proposal_policy.get("single_program_pointings", {})
     pointing_spec = single_program_pointings.get(ppc_index)
     if pointing_spec is not None:
         if pointing_spec["mode"] == "fixed":
-            return tb_tgt_current, (pointing_spec["ra"], pointing_spec["dec"], pointing_spec["pa"])
+            return tb_tgt_current, (
+                pointing_spec["ra"],
+                pointing_spec["dec"],
+                pointing_spec["pa"],
+            )
         if pointing_spec["mode"] == "optimize_initial_guess":
-            return tb_tgt_current, _optimize_single_program_from_initial_guess(tb_tgt_current, pointing_spec["initial_guess"])
+            return tb_tgt_current, _optimize_single_program_from_initial_guess(
+                tb_tgt_current, pointing_spec["initial_guess"]
+            )
     single_program_fixed_pointing = proposal_policy.get("single_program_fixed_pointing")
     if single_program_fixed_pointing is not None:
         ra, dec = single_program_fixed_pointing
@@ -452,11 +1005,21 @@ def _select_special_single_program_pointing(tb_tgt_current, proposal_id, ppc_ind
     if optimization_policy is not None:
         max_ppc_count = optimization_policy.get("max_ppc_count")
         if max_ppc_count is None or ppc_index < max_ppc_count:
-            return tb_tgt_current, _optimize_fixed_pa_single_program_pointing(tb_tgt_current, optimization_policy["central_ra"], optimization_policy["central_dec"], fixed_ppc_pa, priority_limit=optimization_policy["priority_limit"], bounds=optimization_policy["bounds"], label=proposal_id)
+            return tb_tgt_current, _optimize_fixed_pa_single_program_pointing(
+                tb_tgt_current,
+                optimization_policy["central_ra"],
+                optimization_policy["central_dec"],
+                fixed_ppc_pa,
+                priority_limit=optimization_policy["priority_limit"],
+                bounds=optimization_policy["bounds"],
+                label=proposal_id,
+            )
     return tb_tgt_current, None
 
 
 def _determine_default_single_program_pointing(tb_tgt, fixed_ppc_pa):
+    """Derive the default classic pointing by clustering plus local optimization."""
+    seed_ppc_pa = fixed_ppc_pa if _is_provided_ppc_pa_value(fixed_ppc_pa) else 0.0
     tb_tgt_groups = target_clustering(tb_tgt, 1.38)
     tb_tgt_primary = tb_tgt_groups[0]
     df_tgt_primary = Table.to_pandas(tb_tgt_primary)
@@ -464,28 +1027,772 @@ def _determine_default_single_program_pointing(tb_tgt, fixed_ppc_pa):
     df_tgt_primary = df_tgt_primary.sample(n_tgt, ignore_index=True, random_state=1)
     tb_tgt_sample = Table.from_pandas(df_tgt_primary)
     _, _, _, peak_x, peak_y = KDE(tb_tgt_sample, False)
-    result = minimize(partial(objective_single_program_ppc_assignment, tb_tgt=tb_tgt_primary, ppc_pa=fixed_ppc_pa), [peak_x, peak_y], method="Nelder-Mead", options={"xatol": 0.01, "fatol": 0.001})
+    result = minimize(
+        partial(
+            objective_single_program_ppc_assignment,
+            tb_tgt=tb_tgt_primary,
+            ppc_pa=seed_ppc_pa,
+        ),
+        [peak_x, peak_y],
+        method="Nelder-Mead",
+        options={"xatol": 0.01, "fatol": 0.001},
+    )
     print(result.x)
     return result.x[0], result.x[1], fixed_ppc_pa
 
 
 def _build_classic_ppc_list_table(final_ppc_records, tb_tgt, n_ppc):
+    """Build the PPC table for classic single-program planning output."""
     resol = tb_tgt["resolution"][0]
     proposal_id = tb_tgt["proposal_id"][0]
+    single_exptime = float(tb_tgt.meta["single_exptime"])
     proposal_policy = _get_proposal_policy(proposal_id)
     custom_prefix = proposal_policy.get("classic_ppc_prefix")
     if custom_prefix is not None:
         ppc_code = [f"{custom_prefix}_{n + 1}" for n in np.arange(n_ppc)]
     else:
-        ppc_code = [f"cla_{resol}_{proposal_id.split('-')[1]}_{n + 1}" for n in np.arange(n_ppc)]
+        ppc_code = [
+            f"cla_{resol}_{proposal_id.split('-')[1]}_{n + 1}" for n in np.arange(n_ppc)
+        ]
     return Table(
-        [ppc_code, final_ppc_records[:, 1], final_ppc_records[:, 2], final_ppc_records[:, 3], ["J2000"] * n_ppc, [0] * n_ppc, [0] * n_ppc, [900.0] * n_ppc, [1200.0] * n_ppc, [resol] * n_ppc, final_ppc_records[:, -1], final_ppc_records[:, -2], [""] * n_ppc],
-        names=["ppc_code", "ppc_ra", "ppc_dec", "ppc_pa", "ppc_equinox", "ppc_priority", "ppc_priority_usr", "ppc_exptime", "ppc_totaltime", "ppc_resolution", "ppc_fiber_usage_frac", "ppc_allocated_targets", "ppc_comment"],
-        dtype=[np.str_, np.float64, np.float64, np.float64, np.str_, np.float64, np.float64, np.float64, np.float64, np.str_, np.float64, object, np.str_],
+        [
+            ppc_code,
+            final_ppc_records[:, 1],
+            final_ppc_records[:, 2],
+            final_ppc_records[:, 3],
+            ["J2000"] * n_ppc,
+            [0] * n_ppc,
+            [0] * n_ppc,
+            [single_exptime] * n_ppc,
+            [single_exptime + 300.0] * n_ppc,
+            [resol] * n_ppc,
+            final_ppc_records[:, -1],
+            final_ppc_records[:, -2],
+            [""] * n_ppc,
+        ],
+        names=[
+            "ppc_code",
+            "ppc_ra",
+            "ppc_dec",
+            "ppc_pa",
+            "ppc_equinox",
+            "ppc_priority",
+            "ppc_priority_usr",
+            "ppc_exptime",
+            "ppc_totaltime",
+            "ppc_resolution",
+            "ppc_fiber_usage_frac",
+            "ppc_allocated_targets",
+            "ppc_comment",
+        ],
+        dtype=[
+            np.str_,
+            np.float64,
+            np.float64,
+            np.float64,
+            np.str_,
+            np.float64,
+            np.float64,
+            np.float64,
+            np.float64,
+            np.str_,
+            np.float64,
+            object,
+            np.str_,
+        ],
     )
 
 
-def PPP_centers_for_single_program(_tb_tgt, n_ppc, weight_para=_DEFAULT_PPP_WEIGHT_PARAMS, fixed_ppc_pa=0.0, write_ppc_list=False, output_dir=None):
+def _normalize_ppc_pa(ppc_pa):
+    """Wrap a position angle into the instrument-valid [-90, 270] range."""
+    pa = float(np.mod(float(ppc_pa), 360.0))
+    if pa > 270.0:
+        pa -= 360.0
+    return pa
+
+
+def _is_provided_ppc_pa_value(ppc_pa):
+    """Return whether a PA value is explicitly provided and finite."""
+    if np.ma.is_masked(ppc_pa) or ppc_pa is None:
+        return False
+    try:
+        ppc_pa_float = float(ppc_pa)
+    except (TypeError, ValueError):
+        return False
+    return bool(np.isfinite(ppc_pa_float))
+
+
+def _normalize_optional_ppc_pa(ppc_pa):
+    """Normalize provided PA values and return NaN when missing."""
+    if not _is_provided_ppc_pa_value(ppc_pa):
+        return np.nan
+    return _normalize_ppc_pa(ppc_pa)
+
+
+def _coerce_ppc_list_array(ppc_list):
+    """Convert a PPC list-like object into the 2D object array used internally."""
+    ppc_array = np.array(ppc_list, dtype=object, copy=True)
+    if ppc_array.size == 0:
+        return ppc_array.reshape(0, 0)
+    if ppc_array.ndim == 1:
+        ppc_array = ppc_array.reshape(1, -1)
+    if ppc_array.shape[1] > 3:
+        ppc_array[:, 3] = [
+            _normalize_optional_ppc_pa(ppc_pa) for ppc_pa in ppc_array[:, 3]
+        ]
+    return ppc_array
+
+
+def _ppc_list_has_provided_pa(ppc_list):
+    """Return whether every pointing in a PPC list already has a PA."""
+    ppc_array = _coerce_ppc_list_array(ppc_list)
+    if ppc_array.size == 0 or ppc_array.shape[1] <= 3:
+        return False
+    return all(_is_provided_ppc_pa_value(ppc_pa) for ppc_pa in ppc_array[:, 3])
+
+
+def _apply_shared_pa_to_ppc_list(ppc_list, shared_pa):
+    """Return a PPC list copy with one common PA applied to every pointing."""
+    ppc_array = _coerce_ppc_list_array(ppc_list)
+    if ppc_array.size == 0:
+        return ppc_array
+    ppc_array[:, 3] = _normalize_ppc_pa(shared_pa)
+    return ppc_array
+
+
+def _coerce_utc_datetime(observation_time):
+    """Normalize a string or datetime-like observation time into UTC."""
+    if isinstance(observation_time, str):
+        observation_time = datetime.fromisoformat(
+            observation_time.replace("Z", "+00:00")
+        )
+    elif hasattr(observation_time, "to_pydatetime"):
+        observation_time = observation_time.to_pydatetime()
+    if observation_time.tzinfo is None:
+        return observation_time.replace(tzinfo=_UTC_TZ)
+    return observation_time.astimezone(_UTC_TZ)
+
+
+def _extract_scheduled_dates_local(config):
+    """Return configured qplan observing dates when available."""
+    if not isinstance(config, dict):
+        return None
+    qplan_config = config.get("qplan", {})
+    obs_dates = qplan_config.get("obs_dates")
+    if obs_dates is None or len(obs_dates) == 0:
+        return None
+    return list(obs_dates)
+
+
+def _build_inr_night_sample_times(observation_time, step_minutes):
+    """Build UTC sample times spanning the selected HST night."""
+    observation_time_utc = _coerce_utc_datetime(observation_time)
+    observation_time_hst = observation_time_utc.astimezone(_HAWAII_TZ)
+    night_date = observation_time_hst.date()
+    if observation_time_hst.hour < 12:
+        night_date -= timedelta(days=1)
+
+    night_start_hst = datetime(
+        night_date.year,
+        night_date.month,
+        night_date.day,
+        18,
+        0,
+        0,
+        tzinfo=_HAWAII_TZ,
+    )
+    next_date = night_date + timedelta(days=1)
+    night_stop_hst = datetime(
+        next_date.year,
+        next_date.month,
+        next_date.day,
+        6,
+        0,
+        0,
+        tzinfo=_HAWAII_TZ,
+    )
+
+    sample_times_utc = []
+    current_time = night_start_hst.astimezone(_UTC_TZ)
+    stop_time = night_stop_hst.astimezone(_UTC_TZ)
+    while current_time <= stop_time:
+        sample_times_utc.append(current_time)
+        current_time += timedelta(minutes=int(step_minutes))
+    return sample_times_utc
+
+
+def _normalize_signed_angle_deg(angle_deg):
+    """Wrap an angle into the signed [-180, 180) degree range."""
+    wrapped_angle = (float(angle_deg) + 180.0) % 360.0 - 180.0
+    return wrapped_angle
+
+
+def _evaluate_ppc_inr_continuity(ppc_ra, ppc_dec, ppc_pa, sample_times_utc):
+    """Check that one PPC does not cross the wrapped InR boundary overnight."""
+    from .validation import calc_inr
+
+    inr_values = []
+    for obstime in sample_times_utc:
+        inr_value, _ = calc_inr(
+            {"ppc_ra": ppc_ra, "ppc_dec": ppc_dec, "ppc_pa": ppc_pa},
+            obstime,
+        )
+        inr_scalar = float(np.asarray(inr_value, dtype=float).reshape(-1)[0])
+        if not np.isfinite(inr_scalar):
+            return False, {
+                "max_jump": np.inf,
+                "inr_values": inr_values,
+                "wrap_crossings": [],
+            }
+        inr_values.append(_normalize_signed_angle_deg(inr_scalar))
+
+    inr_values = np.asarray(inr_values, dtype=float)
+    if len(inr_values) <= 1:
+        return True, {
+            "max_jump": 0.0,
+            "inr_values": inr_values,
+            "wrap_crossings": [],
+        }
+
+    consecutive_pairs = np.column_stack((inr_values[:-1], inr_values[1:]))
+    jump_sizes = np.abs(np.diff(inr_values))
+    wrap_crossings = []
+    for pair_index, (inr_start, inr_stop) in enumerate(consecutive_pairs):
+        crosses_wrap = (
+            (inr_start >= _PA_INR_WRAP_EDGE_DEG and inr_stop <= -_PA_INR_WRAP_EDGE_DEG)
+            or (
+                inr_start <= -_PA_INR_WRAP_EDGE_DEG
+                and inr_stop >= _PA_INR_WRAP_EDGE_DEG
+            )
+        )
+        if crosses_wrap:
+            wrap_crossings.append((pair_index, float(inr_start), float(inr_stop)))
+
+    max_jump = float(np.max(jump_sizes))
+    return len(wrap_crossings) == 0, {
+        "max_jump": max_jump,
+        "inr_values": inr_values,
+        "wrap_crossings": wrap_crossings,
+    }
+
+
+def _evaluate_inr_continuity_for_ppc_list(ppc_list, observation_time):
+    """Return whether all pointings keep continuous InR through the night."""
+    ppc_array = _coerce_ppc_list_array(ppc_list)
+    sample_times_utc = _build_inr_night_sample_times(
+        observation_time,
+        step_minutes=_PA_INR_NIGHT_STEP_MINUTES,
+    )
+    max_jump = 0.0
+    failed_indices = []
+    wrap_crossings_by_pointing = {}
+    for pointing_index, ppc_row in enumerate(ppc_array):
+        is_continuous, metrics = _evaluate_ppc_inr_continuity(
+            float(ppc_row[1]),
+            float(ppc_row[2]),
+            float(ppc_row[3]),
+            sample_times_utc,
+        )
+        max_jump = max(max_jump, float(metrics["max_jump"]))
+        if not is_continuous:
+            failed_indices.append(pointing_index)
+            wrap_crossings_by_pointing[pointing_index] = metrics["wrap_crossings"]
+
+    return len(failed_indices) == 0, {
+        "failed_indices": failed_indices,
+        "max_jump": max_jump,
+        "sample_count": len(sample_times_utc),
+        "wrap_crossings_by_pointing": wrap_crossings_by_pointing,
+    }
+
+
+def _evaluate_pa_constraints_for_ppc_list(ppc_list, observation_time):
+    """Evaluate PA-dependent constraints shared by queue and classic flows."""
+    inr_is_continuous, inr_metrics = _evaluate_inr_continuity_for_ppc_list(
+        ppc_list,
+        observation_time,
+    )
+    return {
+        "ok": bool(inr_is_continuous),
+        "inr_ok": bool(inr_is_continuous),
+        "max_inr_jump": inr_metrics["max_jump"],
+        "failed_inr_indices": inr_metrics["failed_indices"],
+        "sample_count": inr_metrics["sample_count"],
+        "wrap_crossings_by_pointing": inr_metrics["wrap_crossings_by_pointing"],
+    }
+
+
+def _score_fixed_pointings_with_pa_constraints(
+    tb_tgt,
+    ppc_list,
+    shared_pa,
+    observation_time=None,
+):
+    """Evaluate a single shared PA across a fixed pointing list."""
+    ppc_list_shared_pa = _apply_shared_pa_to_ppc_list(ppc_list, shared_pa)
+    pa_constraint_metrics = _evaluate_pa_constraints_for_ppc_list(
+        ppc_list_shared_pa,
+        observation_time,
+    )
+    if not pa_constraint_metrics["ok"]:
+        return {
+            "ppc_list": ppc_list_shared_pa,
+            "tb_ppc": Table(),
+            "score": -np.inf,
+            "priority_sum": -np.inf,
+            "n_allocated": 0,
+            "usage_sum": 0.0,
+            "inr_ok": False,
+            "max_inr_jump": pa_constraint_metrics["max_inr_jump"],
+            "failed_inr_indices": pa_constraint_metrics["failed_inr_indices"],
+            "wrap_crossings_by_pointing": pa_constraint_metrics[
+                "wrap_crossings_by_pointing"
+            ],
+        }
+
+    tb_tgt_trial = tb_tgt.copy(copy_data=True)
+    tb_tgt_trial.meta = dict(tb_tgt.meta)
+    tb_tgt_trial.meta["PPC"] = ppc_list_shared_pa
+
+    tb_ppc_trial = fiber_allocate(
+        tb_tgt_trial,
+        queue_mode=False,
+        observation_time=observation_time,
+    )
+    if len(tb_ppc_trial) == 0:
+        return {
+            "ppc_list": ppc_list_shared_pa,
+            "tb_ppc": tb_ppc_trial,
+            "score": -np.inf,
+            "priority_sum": -np.inf,
+            "n_allocated": 0,
+            "usage_sum": 0.0,
+            "inr_ok": True,
+            "max_inr_jump": pa_constraint_metrics["max_inr_jump"],
+            "failed_inr_indices": [],
+            "wrap_crossings_by_pointing": {},
+        }
+
+    allocated_target_ids = set()
+    for allocated_ids in tb_ppc_trial["ppc_allocated_targets"]:
+        allocated_target_ids.update(np.asarray(allocated_ids, dtype=str).tolist())
+
+    priority_sum = float(
+        np.nansum(np.asarray(tb_ppc_trial["ppc_priority_usr"], dtype=float))
+    )
+    usage_sum = float(
+        np.nansum(np.asarray(tb_ppc_trial["ppc_fiber_usage_frac"], dtype=float))
+    )
+    return {
+        "ppc_list": ppc_list_shared_pa,
+        "tb_ppc": tb_ppc_trial,
+        "score": priority_sum,
+        "priority_sum": priority_sum,
+        "n_allocated": len(allocated_target_ids),
+        "usage_sum": usage_sum,
+        "inr_ok": True,
+        "max_inr_jump": pa_constraint_metrics["max_inr_jump"],
+        "failed_inr_indices": [],
+        "wrap_crossings_by_pointing": {},
+    }
+
+
+def _resolve_pa_constraint_observation_time(ppc_list, config=None):
+    """Pick the representative observation time used for PA-dependent checks."""
+    ppc_array = _coerce_ppc_list_array(ppc_list)
+    observation_time, _ = select_good_observation_time(
+        np.asarray(ppc_array[:, 1], dtype=float),
+        np.asarray(ppc_array[:, 2], dtype=float),
+        dates_local=_extract_scheduled_dates_local(config),
+    )
+    return observation_time
+
+
+def _evaluate_bright_guidestar_constraints(
+    ppc_ra,
+    ppc_dec,
+    ppc_pa,
+    observation_time=None,
+    config=None,
+):
+    """Return bright guide-star safety metrics for one pointing."""
+    if not isinstance(config, dict) or observation_time is None:
+        return {
+            "ok": True,
+            "n_bright_guidestars": 0,
+            "bright_guidestars_per_camera": {},
+        }
+
+    from .validation import _warn_too_bright_guidestars
+
+    df_guidestars_toobright = _warn_too_bright_guidestars(
+        float(ppc_ra),
+        float(ppc_dec),
+        float(ppc_pa),
+        _coerce_utc_datetime(observation_time),
+        config,
+    )
+    per_camera_counts = {}
+    if len(df_guidestars_toobright) > 0 and "agId" in df_guidestars_toobright.columns:
+        camera_ids, camera_counts = np.unique(
+            np.asarray(df_guidestars_toobright["agId"], dtype=int),
+            return_counts=True,
+        )
+        per_camera_counts = {
+            int(camera_id): int(camera_count)
+            for camera_id, camera_count in zip(camera_ids, camera_counts)
+        }
+    return {
+        "ok": len(df_guidestars_toobright) == 0,
+        "n_bright_guidestars": int(len(df_guidestars_toobright)),
+        "bright_guidestars_per_camera": per_camera_counts,
+    }
+
+
+def _single_pointing_pa_candidates(initial_pa=None, pa_step_deg=_PA_GRID_STEP_DEG):
+    """Return the PA grid used for per-pointing optimization."""
+    pa_candidates = np.arange(-90.0, 270.0, float(pa_step_deg), dtype=float)
+    if _is_provided_ppc_pa_value(initial_pa):
+        pa_candidates = np.concatenate((pa_candidates, [_normalize_ppc_pa(initial_pa)]))
+    return np.array(
+        sorted({_normalize_ppc_pa(candidate_pa) for candidate_pa in pa_candidates}),
+        dtype=float,
+    )
+
+
+def _score_single_pointing_pa(
+    tb_tgt,
+    ppc_ra,
+    ppc_dec,
+    ppc_pa,
+    observation_time=None,
+    config=None,
+):
+    """Evaluate one PA candidate for a single pointing."""
+    ppc_list = np.array([[0, ppc_ra, ppc_dec, ppc_pa, 0]], dtype=object)
+    pa_constraint_metrics = _evaluate_pa_constraints_for_ppc_list(
+        ppc_list,
+        observation_time,
+    )
+    if not pa_constraint_metrics["ok"]:
+        return {
+            "pa": float(ppc_pa),
+            "score": -np.inf,
+            "assigned_target_ids": [],
+            "term_values": {"n_assigned": 0.0, "fill": 0.0},
+            "max_inr_jump": pa_constraint_metrics["max_inr_jump"],
+            "failed_inr_indices": pa_constraint_metrics["failed_inr_indices"],
+            "wrap_crossings_by_pointing": pa_constraint_metrics[
+                "wrap_crossings_by_pointing"
+            ],
+            "inr_ok": False,
+            "guidestar_ok": True,
+            "n_bright_guidestars": 0,
+            "bright_guidestars_per_camera": {},
+        }
+
+    guidestar_metrics = _evaluate_bright_guidestar_constraints(
+        ppc_ra,
+        ppc_dec,
+        ppc_pa,
+        observation_time=observation_time,
+        config=config,
+    )
+    if not guidestar_metrics["ok"]:
+        return {
+            "pa": float(ppc_pa),
+            "score": -np.inf,
+            "assigned_target_ids": [],
+            "term_values": {"n_assigned": 0.0, "fill": 0.0},
+            "max_inr_jump": pa_constraint_metrics["max_inr_jump"],
+            "failed_inr_indices": [],
+            "wrap_crossings_by_pointing": {},
+            "inr_ok": True,
+            "guidestar_ok": False,
+            "n_bright_guidestars": guidestar_metrics["n_bright_guidestars"],
+            "bright_guidestars_per_camera": guidestar_metrics[
+                "bright_guidestars_per_camera"
+            ],
+        }
+
+    assigned_target_ids = fiber_allocate(
+        tb_tgt,
+        single_ppc_mode=True,
+        ppc_candidate=(ppc_ra, ppc_dec, ppc_pa),
+        observation_time=observation_time,
+    )
+    score, term_values = _score_single_ppc_assignment(tb_tgt, assigned_target_ids)
+    return {
+        "pa": float(ppc_pa),
+        "score": score,
+        "assigned_target_ids": assigned_target_ids,
+        "term_values": term_values,
+        "max_inr_jump": pa_constraint_metrics["max_inr_jump"],
+        "failed_inr_indices": [],
+        "wrap_crossings_by_pointing": {},
+        "inr_ok": True,
+        "guidestar_ok": True,
+        "n_bright_guidestars": guidestar_metrics["n_bright_guidestars"],
+        "bright_guidestars_per_camera": guidestar_metrics[
+            "bright_guidestars_per_camera"
+        ],
+    }
+
+
+def _optimize_single_pointing_pa(
+    tb_tgt,
+    ppc_ra,
+    ppc_dec,
+    initial_pa=None,
+    config=None,
+    label=None,
+):
+    """Optimize PA for one pointing using shared queue/classic constraints."""
+    label_text = label or "pointing"
+    observation_time = _resolve_pa_constraint_observation_time(
+        np.array([[0, ppc_ra, ppc_dec, 0.0, 0]], dtype=object),
+        config=config,
+    )
+    pa_candidates = _single_pointing_pa_candidates(initial_pa=initial_pa)
+    best_result = None
+    for ppc_pa in pa_candidates:
+        trial_result = _score_single_pointing_pa(
+            tb_tgt,
+            ppc_ra,
+            ppc_dec,
+            ppc_pa,
+            observation_time=observation_time,
+            config=config,
+        )
+        if not trial_result["inr_ok"]:
+            logger.info(
+                "[S2] {} PA trial {:.1f} deg rejected by PA constraints: InR wrap crossing detected ({})".format(
+                    label_text,
+                    ppc_pa,
+                    trial_result["wrap_crossings_by_pointing"],
+                )
+            )
+            continue
+        if not trial_result["guidestar_ok"]:
+            logger.info(
+                "[S2] {} PA trial {:.1f} deg rejected by guide-star constraints: {} bright guide stars in AG cameras (per_cam={})".format(
+                    label_text,
+                    ppc_pa,
+                    trial_result["n_bright_guidestars"],
+                    trial_result["bright_guidestars_per_camera"],
+                )
+            )
+            continue
+        logger.info(
+            "[S2] {} PA trial {:.1f} deg: score={:.3f}, n_assigned={:.0f}, max_inr_jump={:.1f}, bright_guidestars={}".format(
+                label_text,
+                ppc_pa,
+                trial_result["score"],
+                trial_result["term_values"]["n_assigned"],
+                trial_result["max_inr_jump"],
+                trial_result["n_bright_guidestars"],
+            )
+        )
+        if best_result is None:
+            best_result = trial_result
+            continue
+        if trial_result["score"] > best_result["score"]:
+            best_result = trial_result
+            continue
+        if trial_result["score"] == best_result["score"] and (
+            trial_result["term_values"]["n_assigned"]
+            > best_result["term_values"]["n_assigned"]
+        ):
+            best_result = trial_result
+
+    if best_result is None:
+        message = (
+            "No PA passed the PA-dependent constraints for {} "
+            "(observation_time={})"
+        ).format(label_text, observation_time)
+        logger.error(f"[S2] {message}")
+        raise ValueError(message)
+
+    best_result["observation_time"] = observation_time
+    return best_result
+
+
+def optimize_shared_pa_for_fixed_pointings(
+    tb_tgt,
+    ppc_list,
+    fixed_ppc_pa=None,
+    pa_step_deg=_PA_GRID_STEP_DEG,
+    label=None,
+    config=None,
+):
+    """Optimize one global PA shared by all fixed pointings.
+
+    The PA constraint checks in this routine are shared infrastructure for
+    both queue and classic PA optimization paths.
+    """
+    ppc_array = _coerce_ppc_list_array(ppc_list)
+    if ppc_array.size == 0:
+        return ppc_array, {
+            "best_pa": _normalize_optional_ppc_pa(fixed_ppc_pa),
+            "score": 0.0,
+            "n_allocated": 0,
+            "usage_sum": 0.0,
+            "message": "No PPCs supplied",
+        }
+
+    label_text = label or "fixed pointings"
+    observation_time = _resolve_pa_constraint_observation_time(
+        ppc_array,
+        config=config,
+    )
+    if _is_provided_ppc_pa_value(fixed_ppc_pa):
+        ppc_array = _apply_shared_pa_to_ppc_list(ppc_array, fixed_ppc_pa)
+        if isinstance(config, dict) and observation_time is not None:
+            from .validation import _warn_too_bright_guidestars
+
+            for pointing_index, ppc_row in enumerate(ppc_array):
+                df_guidestars_toobright = _warn_too_bright_guidestars(
+                    float(ppc_row[1]),
+                    float(ppc_row[2]),
+                    float(ppc_row[3]),
+                    _coerce_utc_datetime(observation_time),
+                    config,
+                )
+                per_camera_counts = {}
+                if len(df_guidestars_toobright) > 0 and "agId" in df_guidestars_toobright.columns:
+                    camera_ids, camera_counts = np.unique(
+                        np.asarray(df_guidestars_toobright["agId"], dtype=int),
+                        return_counts=True,
+                    )
+                    per_camera_counts = {
+                        int(camera_id): int(camera_count)
+                        for camera_id, camera_count in zip(camera_ids, camera_counts)
+                    }
+                print(
+                    "[S2] {} bright guide stars in AG cameras for {} pointing {} at RA={:.6f}, Dec={:.6f}, PA={:.1f} (per_cam={})".format(
+                        len(df_guidestars_toobright),
+                        label_text,
+                        pointing_index + 1,
+                        float(ppc_row[1]),
+                        float(ppc_row[2]),
+                        float(ppc_row[3]),
+                        per_camera_counts,
+                    )
+                )
+        return ppc_array, {
+            "best_pa": _normalize_ppc_pa(fixed_ppc_pa),
+            "score": np.nan,
+            "n_allocated": 0,
+            "usage_sum": 0.0,
+            "observation_time": observation_time,
+            "message": "Used provided shared PA",
+        }
+    pa_candidates = np.arange(0.0, 360.0, float(pa_step_deg), dtype=float)
+    pa_candidates = np.concatenate(
+        (
+            pa_candidates,
+            np.asarray(ppc_array[:, 3], dtype=float),
+        )
+    )
+    pa_candidates = np.array(
+        sorted({_normalize_ppc_pa(candidate_pa) for candidate_pa in pa_candidates}),
+        dtype=float,
+    )
+
+    logger.info(
+        "[S2] Optimizing a shared PA for {} fixed pointings ({}, observation_time={})".format(
+            len(ppc_array),
+            label_text,
+            observation_time,
+        )
+    )
+
+    best_result = None
+    for shared_pa in pa_candidates:
+        trial_result = _score_fixed_pointings_with_pa_constraints(
+            tb_tgt,
+            ppc_array,
+            shared_pa,
+            observation_time=observation_time,
+        )
+        if not trial_result["inr_ok"]:
+            logger.info(
+                "[S2] Shared PA trial {:.1f} deg rejected by PA constraints: InR wrap crossing detected (failed_pointings={}, crossings={})".format(
+                    shared_pa,
+                    trial_result["failed_inr_indices"],
+                    trial_result["wrap_crossings_by_pointing"],
+                )
+            )
+            continue
+        logger.info(
+            "[S2] Shared PA trial {:.1f} deg: priority_sum={:.3f}, n_allocated={}, usage_sum={:.2f}, max_inr_jump={:.1f}".format(
+                shared_pa,
+                trial_result["priority_sum"],
+                trial_result["n_allocated"],
+                trial_result["usage_sum"],
+                trial_result["max_inr_jump"],
+            )
+        )
+        if best_result is None:
+            best_result = trial_result
+            continue
+        if trial_result["score"] > best_result["score"]:
+            best_result = trial_result
+            continue
+        if trial_result["score"] == best_result["score"]:
+            if trial_result["n_allocated"] > best_result["n_allocated"]:
+                best_result = trial_result
+                continue
+            if (
+                trial_result["n_allocated"] == best_result["n_allocated"]
+                and trial_result["usage_sum"] > best_result["usage_sum"]
+            ):
+                best_result = trial_result
+
+    if best_result is None:
+        message = (
+            "No shared PA passed the PA-dependent constraints for {} "
+            "(observation_time={})"
+        ).format(label_text, observation_time)
+        logger.error(f"[S2] {message}")
+        raise ValueError(message)
+
+    best_pa = float(best_result["ppc_list"][0, 3])
+    logger.info(
+        "[S2] Best shared PA for {} is {:.1f} deg (priority_sum={:.3f}, n_allocated={}, usage_sum={:.2f}, max_inr_jump={:.1f})".format(
+            label_text,
+            best_pa,
+            best_result["priority_sum"],
+            best_result["n_allocated"],
+            best_result["usage_sum"],
+            best_result["max_inr_jump"],
+        )
+    )
+    return best_result["ppc_list"], {
+        "best_pa": best_pa,
+        "score": best_result["score"],
+        "n_allocated": best_result["n_allocated"],
+        "usage_sum": best_result["usage_sum"],
+        "observation_time": observation_time,
+        "message": "Completed shared PA grid search",
+    }
+
+
+# -----------------------------------------------------------------------------
+# Classic single-program PPC optimization
+# -----------------------------------------------------------------------------
+
+
+def PPP_centers_for_single_program(
+    _tb_tgt,
+    n_ppc,
+    weight_para=_DEFAULT_PPP_WEIGHT_PARAMS,
+    fixed_ppc_pa=None,
+    write_ppc_list=False,
+    output_dir=None,
+    config=None,
+):
+    """Determine PPC centers for classic planning of a single proposal."""
     time_start = time.time()
     logger.info("[S2] Determine pointing centers started")
     ppc_lst = []
@@ -500,40 +1807,131 @@ def PPP_centers_for_single_program(_tb_tgt, n_ppc, weight_para=_DEFAULT_PPP_WEIG
     proposal_id = _single_program_proposal_id(tb_tgt)
     while len(tb_tgt_current) > 0 and len(ppc_lst) < n_ppc:
         ppc_index = len(ppc_lst)
-        tb_tgt_current, pointing = _select_special_single_program_pointing(tb_tgt_current, proposal_id, ppc_index, fixed_ppc_pa)
+        tb_tgt_current, pointing = _select_special_single_program_pointing(
+            tb_tgt_current, proposal_id, ppc_index, fixed_ppc_pa
+        )
         if len(tb_tgt_current) == 0:
-            logger.warning("[S2] no remaining targets after proposal-specific filtering")
+            logger.warning(
+                "[S2] no remaining targets after proposal-specific filtering"
+            )
             break
         if pointing is None:
-            pointing = _determine_default_single_program_pointing(tb_tgt_current, fixed_ppc_pa)
+            pointing = _determine_default_single_program_pointing(
+                tb_tgt_current, fixed_ppc_pa
+            )
         ra, dec, pa = pointing
-        lst_tgtID_assign = fiber_allocate(tb_tgt_current, single_ppc_mode=True, ppc_candidate=(ra, dec, pa))
-        index_in = PFS_FoV(ra, dec, pa, tb_tgt_current)
-        ppc_lst.append(np.array([len(ppc_lst), ra, dec, pa, 0, lst_tgtID_assign, len(lst_tgtID_assign) / 2394.0 * 100.0], dtype=object))
+        if not _is_provided_ppc_pa_value(pa):
+            pa_result = _optimize_single_pointing_pa(
+                tb_tgt_current,
+                ra,
+                dec,
+                initial_pa=-90.0,
+                config=config,
+                label=f"{proposal_id} PPC {ppc_index + 1}",
+            )
+            pa = pa_result["pa"]
+            lst_tgtID_assign = pa_result["assigned_target_ids"]
+        else:
+            fixed_pa_observation_time = _resolve_pa_constraint_observation_time(
+                np.array([[0, ra, dec, pa, 0]], dtype=object),
+                config=config,
+            )
+            if isinstance(config, dict) and fixed_pa_observation_time is not None:
+                from .validation import _warn_too_bright_guidestars
+
+                df_guidestars_toobright = _warn_too_bright_guidestars(
+                    float(ra),
+                    float(dec),
+                    float(pa),
+                    _coerce_utc_datetime(fixed_pa_observation_time),
+                    config,
+                )
+                per_camera_counts = {}
+                if len(df_guidestars_toobright) > 0 and "agId" in df_guidestars_toobright.columns:
+                    camera_ids, camera_counts = np.unique(
+                        np.asarray(df_guidestars_toobright["agId"], dtype=int),
+                        return_counts=True,
+                    )
+                    per_camera_counts = {
+                        int(camera_id): int(camera_count)
+                        for camera_id, camera_count in zip(camera_ids, camera_counts)
+                    }
+                print(
+                    "[S2] {} bright guide stars in AG cameras for {} PPC {} at RA={:.6f}, Dec={:.6f}, PA={:.1f} (per_cam={})".format(
+                        len(df_guidestars_toobright),
+                        proposal_id,
+                        ppc_index + 1,
+                        float(ra),
+                        float(dec),
+                        float(pa),
+                        per_camera_counts,
+                    )
+                )
+            lst_tgtID_assign = fiber_allocate(
+                tb_tgt_current, single_ppc_mode=True, ppc_candidate=(ra, dec, pa)
+            )
+        tb_tgt_near_ppc = _filter_targets_near_ppc(
+            tb_tgt_current,
+            [(ra, dec)],
+            radius_deg=2.0,
+        )
+        index_in = np.isin(
+            np.asarray(tb_tgt_current["identify_code"], dtype=str),
+            np.asarray(tb_tgt_near_ppc["identify_code"], dtype=str),
+        )
+        ppc_lst.append(
+            np.array(
+                [
+                    len(ppc_lst),
+                    ra,
+                    dec,
+                    pa,
+                    0,
+                    lst_tgtID_assign,
+                    len(lst_tgtID_assign) / 2394.0 * 100.0,
+                ],
+                dtype=object,
+            )
+        )
         index_assign = np.isin(tb_tgt_current["identify_code"], lst_tgtID_assign)
         from collections import Counter
+
         print(dict(Counter(tb_tgt_current["exptime_PPP"][index_in])))
         print(dict(Counter(tb_tgt_current["exptime_PPP"][index_assign])))
         tb_tgt_current["exptime_PPP"][index_assign] -= single_exptime
         tb_tgt_current["exptime_done"][index_assign] += single_exptime
-        tb_tgt_current["priority"][tb_tgt_current["exptime_done"] > 0] = 999
+        #tb_tgt_current["priority"][tb_tgt_current["exptime_done"] > 0] = 999
         proposal_policy = _get_proposal_policy(proposal_id)
-        remaining_priority_increment_value = proposal_policy.get("remaining_priority_increment_value")
-        remaining_priority_increment_exptime_ppp = proposal_policy.get("remaining_priority_increment_exptime_ppp")
-        if remaining_priority_increment_value is not None and remaining_priority_increment_exptime_ppp is not None:
-            tb_tgt_current["priority"][(tb_tgt_current["exptime_done"] == 0) & (tb_tgt_current["exptime_PPP"] == remaining_priority_increment_exptime_ppp)] += remaining_priority_increment_value
+        remaining_priority_increment_value = proposal_policy.get(
+            "remaining_priority_increment_value"
+        )
+        remaining_priority_increment_exptime_ppp = proposal_policy.get(
+            "remaining_priority_increment_exptime_ppp"
+        )
+        if (
+            remaining_priority_increment_value is not None
+            and remaining_priority_increment_exptime_ppp is not None
+        ):
+            tb_tgt_current["priority"][
+                (tb_tgt_current["exptime_done"] == 0)
+                & (
+                    tb_tgt_current["exptime_PPP"]
+                    == remaining_priority_increment_exptime_ppp
+                )
+            ] += remaining_priority_increment_value
         tb_tgt_current = tb_tgt_current[tb_tgt_current["exptime_PPP"] > 0]
-        print(sum(tb_tgt_current["priority"] == 999))
+        #print(sum(tb_tgt_current["priority"] == 999))
     ppc_lst_fin = np.array(ppc_lst)
     ppcList = _build_classic_ppc_list_table(ppc_lst_fin, tb_tgt, n_ppc)
     if write_ppc_list:
         if output_dir is None:
             raise ValueError("output_dir must be provided when write_ppc_list=True")
-        ppcList.write(os.path.join(output_dir, "ppcList_1by1.ecsv"), format="ascii.ecsv", overwrite=True)
-    logger.info(f"[S2] Determine pointing centers done ( nppc = {len(ppc_lst_fin):.0f}; takes {round(time.time()-time_start,3)} sec)")
+        ppcList.write(
+            os.path.join(output_dir, "ppcList_1by1.ecsv"),
+            format="ascii.ecsv",
+            overwrite=True,
+        )
+    logger.info(
+        f"[S2] Determine pointing centers done ( nppc = {len(ppc_lst_fin):.0f}; takes {round(time.time()-time_start,3)} sec)"
+    )
     return ppc_lst_fin
-
-
-def run(*args, **kwargs):
-    from .run_for_classic import run as classic_run
-    return classic_run(*args, **kwargs)

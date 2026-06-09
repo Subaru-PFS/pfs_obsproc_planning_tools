@@ -14,6 +14,51 @@ _DEFAULT_SINGLE_PROGRAM_PRIORITY_POLICY = {
 def get_single_proposal_requirements(proposal_id):
     proposalId = str(proposal_id) if proposal_id is not None else None
 
+    if proposalId == "S26A-104":
+        return {
+            #"fixed_ppc_pa": 0.0,
+            "import_user_ppc_from_db": True,
+            "optimize_costs": True,
+            "single_exptime_override": 4500.0,
+            "single_program_mode": "LR",
+        }
+        
+    if proposalId == "S26A-027":
+        return {
+            "fixed_ppc_pa": 230.0,
+            "import_user_ppc_from_db": True,
+            "optimize_costs": True,
+            "single_exptime_override": 10800.0,
+            "single_program_mode": "LR",
+        }
+         
+    if proposalId == "S26A-OT04":
+        return {
+            "fixed_ppc_pa": 250.41,
+            "import_user_ppc_from_db": True,
+            "optimize_costs": True,
+            "single_exptime_override": 1200.0,
+            "single_program_mode": "LR",
+        }
+        
+    if proposalId == "S26A-UH018-A":
+        return {
+            "fixed_ppc_pa": 120.15,
+            "import_user_ppc_from_db": True,
+            "optimize_costs": True,
+            "single_exptime_override": 10800.0,
+            "single_program_mode": "LR",
+        }
+    
+    if proposalId == "S26A-126":
+        return {
+            "fixed_ppc_pa": 240.0,
+            "import_user_ppc_from_db": True,
+            "optimize_costs": True,
+            "single_exptime_override": 3600.0,
+            "single_program_mode": "LR",
+        }
+
     if proposalId == "S25A-UH006-B":
         return {
             "tracked_priorities": list(range(20, 30)) + [999],
@@ -118,6 +163,35 @@ def _get_single_program_mode(proposal_id):
     if proposal_id is None:
         return None
     return _get_proposal_policy(proposal_id).get("single_program_mode")
+
+
+def _get_single_program_fixed_ppc_pa(proposal_id, default=None):
+    if proposal_id is None:
+        return default
+    proposal_policy = _get_proposal_policy(proposal_id)
+    if "fixed_ppc_pa" in proposal_policy:
+        fixed_ppc_pa = proposal_policy["fixed_ppc_pa"]
+    else:
+        fixed_ppc_pa = proposal_policy.get("ppc_pa", default)
+    if fixed_ppc_pa != default:
+        logger.warning(f"Fixed PPC PA is set to {fixed_ppc_pa} for {proposal_id}.")
+    return fixed_ppc_pa
+
+
+def _get_single_program_ppc_pa(proposal_id, default=None):
+    return _get_single_program_fixed_ppc_pa(proposal_id, default=default)
+
+
+def _get_import_user_ppc_from_db(proposal_id, default=True):
+    if proposal_id is None:
+        return default
+    return _get_proposal_policy(proposal_id).get("import_user_ppc_from_db", default)
+
+
+def _get_optimize_costs(proposal_id, default=False):
+    if proposal_id is None:
+        return default
+    return _get_proposal_policy(proposal_id).get("optimize_costs", default)
 
 
 def _apply_configured_row_level_adjustments(tb_tgt):

@@ -5,6 +5,7 @@ import argparse
 import os
 import sys
 import time
+import re
 import warnings
 from datetime import timedelta, datetime, date
 from pathlib import Path
@@ -21,6 +22,7 @@ from dateutil import parser as ps
 from loguru import logger
 import ets_fiber_assigner.netflow as nf
 from pfs_design_tool import reconfigure_fibers_ppp as sfa
+from pfs_design_tool import utils
 from pfs_design_tool.pointing_utils import nfutils
 
 from .utils.make_opefile import OpeFile
@@ -28,6 +30,9 @@ from .utils.make_opefile import OpeFile
 warnings.filterwarnings("ignore")
 
 hawaii_tz = pytz.timezone("Pacific/Honolulu")
+
+_PFS_UTILS_DIR = utils.get_pfs_utils_path()
+_PFS_INSTDATA_DIR = utils.get_pfs_instdata_path()
 
 
 def merge_nested_dicts(base_config, override_config):
@@ -42,11 +47,58 @@ def merge_nested_dicts(base_config, override_config):
     return merged
 
 
+def _merge_duplicate_toml_tables(raw_text):
+    merged_lines = []
+    table_blocks = {}
+    table_order = []
+    current_table = None
+
+    for line in raw_text.splitlines():
+        stripped_line = line.strip()
+        table_match = re.match(r"^\[(.+)\]$", stripped_line)
+
+        if table_match and not stripped_line.startswith("[["):
+            current_table = table_match.group(1)
+            if current_table not in table_blocks:
+                table_blocks[current_table] = []
+                table_order.append(current_table)
+            continue
+
+        if current_table is None:
+            merged_lines.append(line)
+        else:
+            table_blocks[current_table].append(line)
+
+    rebuilt_lines = list(merged_lines)
+    if rebuilt_lines and rebuilt_lines[-1] != "":
+        rebuilt_lines.append("")
+
+    for table_name in table_order:
+        rebuilt_lines.append(f"[{table_name}]")
+        rebuilt_lines.extend(table_blocks[table_name])
+        rebuilt_lines.append("")
+
+    return "\n".join(rebuilt_lines)
+
+
+def _load_toml_config(config_path):
+    with config_path.open("rb") as f:
+        try:
+            return tomllib.load(f)
+        except tomllib.TOMLDecodeError as error:
+            if "Cannot declare" not in str(error):
+                raise
+
+    raw_text = config_path.read_text(encoding="utf-8")
+    logger.warning(
+        f"Detected duplicate TOML tables in {config_path}; merging repeated sections"
+    )
+    return tomllib.loads(_merge_duplicate_toml_tables(raw_text))
+
+
 def read_conf(conf):
     primary_path = Path(conf).expanduser().resolve()
-
-    with primary_path.open("rb") as f:
-        primary_config = tomllib.load(f)
+    primary_config = _load_toml_config(primary_path)
 
     packages_config = primary_config.get("packages", {})
     secondary_config_path = packages_config.get("config_path")
@@ -57,12 +109,23 @@ def read_conf(conf):
     secondary_path = Path(secondary_config_path).expanduser()
     if not secondary_path.is_absolute():
         secondary_path = (primary_path.parent / secondary_path).resolve()
-
-    with secondary_path.open("rb") as f:
-        secondary_config = tomllib.load(f)
+    secondary_config = _load_toml_config(secondary_path)
 
     logger.info(f"Loaded extra config from {secondary_path}")
-    return merge_nested_dicts(secondary_config, primary_config)
+    merged_config = merge_nested_dicts(secondary_config, primary_config)
+
+    primary_ppp_config = primary_config.get("ppp", {})
+    secondary_ppp_config = secondary_config.get("ppp", {})
+    merged_ppp_config = merged_config.get("ppp", {})
+    ppp_mode = str(merged_ppp_config.get("mode", primary_ppp_config.get("mode", ""))).lower()
+
+    if ppp_mode == "queue":
+        for proposal_key in ["proposalIds", "proposalIds_backup"]:
+            if proposal_key in secondary_ppp_config:
+                merged_ppp_config[proposal_key] = secondary_ppp_config[proposal_key]
+
+    merged_config["ppp"] = merged_ppp_config
+    return merged_config
 
 
 def clear_folder(folder):
@@ -255,11 +318,6 @@ class GeneratePfsDesign(object):
         ]:
             check_version_pfs(self, package_)
 
-        import pfs.utils
-
-        repo_path = os.path.join(pfs.utils.__path__[0], "../../../")
-        os.environ["PFS_UTILS_DIR"] = os.path.join(pfs.utils.__path__[0], "../../../")
-
         return None
 
     def update_config(self):
@@ -274,7 +332,7 @@ class GeneratePfsDesign(object):
     #"""
 
     def runPPP(self, n_pccs_l, n_pccs_m, backup=False):
-        if "queue" in self.workDir:
+        if self.conf["ppp"]["mode"] == "queue":
             from .utils import run_for_queue as PPP
         else:
             from .utils import run_for_classic as PPP
@@ -321,8 +379,11 @@ class GeneratePfsDesign(object):
             },
         }
 
+        utils.get_pfs_instdata_path()
+        utils.get_pfs_utils_path()
+
         bench_info = nfutils.getBench(
-            self.conf["packages"]["pfs_instdata_dir"],
+            _PFS_INSTDATA_DIR,
             self.conf["sfa"]["cobra_coach_dir"],
             None,
             self.conf["sfa"]["sm"],

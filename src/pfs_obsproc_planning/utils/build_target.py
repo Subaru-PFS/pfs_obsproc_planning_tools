@@ -17,7 +17,12 @@ from qplan import entity
 from qplan.util.eph_cache import EphemerisCache
 from qplan.util.site import site_subaru as observer
 
-from .classic_for_single_proposal import apply_proposal_target_adjustments
+from .classic_for_single_proposal import (
+    _get_import_user_ppc_from_db,
+    _get_proposal_policy,
+    _get_single_program_fixed_ppc_pa,
+    apply_proposal_target_adjustments,
+)
 from .db_query import database_info, query_target_from_db, query_user_ppc_from_db
 
 warnings.filterwarnings("ignore")
@@ -251,6 +256,17 @@ def load_user_ppc_table(path_ppc):
 
 
 def build_ppc_meta_array(tb_ppc_tem, resolution=None):
+    def normalize_ppc_pa_value(ppc_pa):
+        if np.ma.is_masked(ppc_pa) or ppc_pa is None:
+            return np.nan
+        try:
+            ppc_pa_float = float(ppc_pa)
+        except (TypeError, ValueError):
+            return np.nan
+        if not np.isfinite(ppc_pa_float):
+            return np.nan
+        return ppc_pa_float
+
     ppc_rows = []
     for index, row in enumerate(tb_ppc_tem):
         if resolution is not None and row["ppc_resolution"] != resolution:
@@ -260,7 +276,7 @@ def build_ppc_meta_array(tb_ppc_tem, resolution=None):
                 index,
                 row["ppc_ra"],
                 row["ppc_dec"],
-                row["ppc_pa"],
+                normalize_ppc_pa_value(row["ppc_pa"]),
                 row["ppc_priority"],
             ]
         )
@@ -316,6 +332,16 @@ def apply_db_ppc_metadata(tb_tgt, tb_tgt_l, tb_tgt_m, para_db):
     finally:
         tgt_db.dispose()
 
+    if len(proposal_ids) == 1:
+        proposal_id = proposal_ids[0]
+        proposal_policy = _get_proposal_policy(proposal_id)
+        if (
+            ("fixed_ppc_pa" in proposal_policy or "ppc_pa" in proposal_policy)
+            and len(tb_ppc_tem) > 0
+        ):
+            tb_ppc_tem = tb_ppc_tem.copy(copy_data=True)
+            tb_ppc_tem["ppc_pa"] = _get_single_program_fixed_ppc_pa(proposal_id)
+
     apply_ppc_metadata(tb_tgt, tb_tgt_l, tb_tgt_m, tb_ppc_tem, "target DB")
     return True
 
@@ -349,10 +375,10 @@ def read_target_classic(mode, params):
             tb_tgt["is_medium_resolution"].astype(str) == "True", "M", "L"
         )
     if "exptime" not in tb_tgt.colnames:
-        tb_tgt.rename_column("exptime_usr", "exptime")
+        tb_tgt["exptime"] = tb_tgt["exptime_usr"]
 
     if "allocated_time" not in tb_tgt.colnames:
-        tb_tgt.rename_column("allocated_time_tac", "allocated_time")
+        tb_tgt["allocated_time"] = tb_tgt["allocated_time_tac"]
 
     if np.any(tb_tgt["allocated_time"] < 0):
         tb_tgt["allocated_time"] = np.sum(tb_tgt["exptime"] / 3600.0)
@@ -379,10 +405,20 @@ def read_target_classic(mode, params):
     tb_tgt_l = tb_tgt[tb_tgt["resolution"] == "L"]
     tb_tgt_m = tb_tgt[tb_tgt["resolution"] == "M"]
 
+    import_user_ppc_from_db = True
+    proposal_ids = sorted(set(tb_tgt["proposal_id"].astype(str)))
+    if len(proposal_ids) == 1:
+        import_user_ppc_from_db = _get_import_user_ppc_from_db(
+            proposal_ids[0],
+            default=import_user_ppc_from_db,
+        )
+
     if len(params["localPath_ppc"]) > 0:
         apply_user_ppc_metadata(tb_tgt, tb_tgt_l, tb_tgt_m, params["localPath_ppc"])
-    else:
+    elif import_user_ppc_from_db:
         apply_db_ppc_metadata(tb_tgt, tb_tgt_l, tb_tgt_m, params["DBPath_tgt"])
+    else:
+        logger.info("[S1] DB user PPC import is disabled; PPCs will be determined automatically unless provided locally.")
 
     if len(tb_tgt.meta.get("PPC", [])) == 0:
         logger.warning("[S1] No PPC is provided, PPCs would be determined automatically.")

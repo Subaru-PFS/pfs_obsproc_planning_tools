@@ -110,7 +110,7 @@ def get_ag_counts(df_ag, threshold=19, radius=245.0):
 
 
 # ---------------------- Drawing helpers ----------------------
-def _draw_fov_points(ax, df_fib, df_ag, unfib_bright, fiber_id_n2, c, alpha, s):
+def _draw_fov_points(ax, df_fib, df_ag, unfib_bright, fiber_id_n2, c, alpha, s, conf):
     """Draw scatter points on the FoV axes (unassigned, sky, std, sci, AGs).
 
      This consolidates the multiple consecutive scatter() calls into a single
@@ -204,16 +204,42 @@ def _draw_fov_points(ax, df_fib, df_ag, unfib_bright, fiber_id_n2, c, alpha, s):
         label=f"FLUXSTD ({len(df_fib[df_fib.targetType==3].pfi_y)})",
     )
 
+    proposal_ids_primary = set()
+    if isinstance(conf, dict):
+        proposal_ids_primary = {
+            str(proposal_id) for proposal_id in conf.get("ppp", {}).get("proposalIds", [])
+        }
+
+    science_mask = df_fib.targetType == 1
+    if len(proposal_ids_primary) == 0:
+        science_primary_mask = science_mask
+        science_other_mask = science_mask & False
+    else:
+        science_primary_mask = science_mask & df_fib.proposalId.astype(str).isin(proposal_ids_primary)
+        science_other_mask = science_mask & ~science_primary_mask
+
     ax.scatter(
-        df_fib[df_fib.targetType == 1].pfi_x,
-        df_fib[df_fib.targetType == 1].pfi_y,
-        c=c["sci"],
+        df_fib[science_primary_mask].pfi_x,
+        df_fib[science_primary_mask].pfi_y,
+        c=c["sci_primary"],
         marker="o",
         s=s,
         alpha=alpha,
         lw=0,
-        label=f"SCIENCE ({len(df_fib[df_fib.targetType==1].pfi_y)})",
+        label=f"SCIENCE primary ({len(df_fib[science_primary_mask].pfi_y)})",
     )
+
+    if science_other_mask.any():
+        ax.scatter(
+            df_fib[science_other_mask].pfi_x,
+            df_fib[science_other_mask].pfi_y,
+            c=c["sci_other"],
+            marker="o",
+            s=s * 0.55,
+            alpha=alpha * 0.55,
+            lw=0,
+            label=f"SCIENCE filler ({len(df_fib[science_other_mask].pfi_y)})",
+        )
 
     # special highlight (kept for backward compatibility)
     mask_special = df_fib.obCode == "M31_30410_R31_02730_v2"
@@ -322,7 +348,27 @@ def _draw_histograms(ax2, ax3, df_fib, df_ag, conf):
     }
 
     # Flux standard histogram
-    filtername_std = df_fib[df_fib.targetType == 3].pfsflux_plot_filter.values[0]
+    std = df_fib[df_fib.targetType == 3]
+
+    proposal_counts = (
+        std["proposalId"]
+        .dropna()
+        .astype(str)
+        .str.strip()
+        .value_counts()
+    )
+
+    proposal_detail = "\n".join(
+        f"{pid}: {cnt}" for pid, cnt in proposal_counts.items() if pid != "N/A"
+    )
+
+    df_std = df_fib[df_fib.targetType == 3]
+
+    if len(df_std) > 0:
+        filtername_std = df_std.pfsflux_plot_filter.values[0]
+    else:
+        filtername_std = None
+    
     ax2.hist(
         df_fib[df_fib.targetType == 3]["pfsMag_plot"],
         bins=bins,
@@ -330,7 +376,7 @@ def _draw_histograms(ax2, ax3, df_fib, df_ag, conf):
         color=c["fstar"],
         lw=0,
         alpha=0.4,
-        label=f"Std star ({filtername_std}, {len(df_fib[df_fib.targetType==3]['pfsMag_plot'])})",
+        label=f"Std star ({filtername_std}, {len(std)}, \n {proposal_detail})",
     )
 
     # stacked histogram per proposal/filter
@@ -364,18 +410,18 @@ def _draw_histograms(ax2, ax3, df_fib, df_ag, conf):
     for k, v in df_mags.groups.items():
         if k[0] == "N/A":
             continue
-
+        
         mags = df_fib.loc[v, "pfsMag_plot"].values
         n_mags = len(mags)
         n_too_bright = np.sum(mags < 13)
 
         if conf["ppp"]["mode"] == "classic":
             if k[0] in conf["sfa"]["proposalIds_obsFiller"]:
-                label = f"obs. filler ({n_mags}; {n_too_bright}<13mag)"
+                label = f"obs. filler ({k[1]}, {n_mags}; {n_too_bright}<13mag)"
             elif k[0] in conf["ppp"]["proposalIds"]:
-                label = f"{k[0]} ({n_mags}; {n_too_bright}<13mag)"
+                label = f"{k[0]} ({k[1]}, {n_mags}; {n_too_bright}<13mag)"
             else:
-                label = f"usr filler ({n_mags}; {n_too_bright}<13mag)"
+                label = f"usr filler ({k[1]}, {n_mags}; {n_too_bright}<13mag)"
         else:
             label = f"{k[0]} ({k[1]}, {n_mags}; {n_too_bright}<13mag)"
 
@@ -577,7 +623,8 @@ def plot_FoV(
         "sky": "deepskyblue",  # KEEP
         "fstar": "green",  # KEEP
         # --- de-emphasized ---
-        "sci": "#F2C6C6",  # faint salmon (soft, background-level)
+        "sci_primary": "#F2C6C6",  # soft salmon for primary proposals
+        "sci_other": "#F2C6C6",  # lighter same-family salmon for other proposals
         # --- others ---
         "ag": "blueviolet",  # unchanged
     }
@@ -587,7 +634,7 @@ def plot_FoV(
     s = 10.0
 
     # draw scatter points and guide stars on the main FoV axes (delegated)
-    _draw_fov_points(ax1, df_fib, df_ag, unfib_bright, fiber_id_n2, c, alpha, s)
+    _draw_fov_points(ax1, df_fib, df_ag, unfib_bright, fiber_id_n2, c, alpha, s, conf)
 
     # store AG counts and annotation positions
     agnum_threshold = 19

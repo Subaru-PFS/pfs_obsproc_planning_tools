@@ -652,6 +652,8 @@ class PFSConfigApp:
         ppp_config = self.config_data.setdefault("ppp", {})
         mode = ppp_config.get("mode", "queue")
         mode = "classic" if str(mode).lower() == "classic" else "queue"
+        if mode == "classic":
+            ppp_config["daily_plan"] = False
         proposal_ids = ppp_config.get("proposalIds", [])
 
         selected_proposal = None
@@ -673,6 +675,8 @@ class PFSConfigApp:
     def _apply_mode_to_widgets(self, mode, selected_proposal=None, rerender=True):
         ppp_config = self.config_data.setdefault("ppp", {})
         ppp_config["mode"] = mode
+        if mode == "classic":
+            ppp_config["daily_plan"] = False
 
         if mode == "queue":
             self.proposal_select.options = [QUEUE_ONLY_ID]
@@ -754,6 +758,9 @@ class PFSConfigApp:
 
     def _reset_observation_text(self, event=None):
         self.observation_text.value = self.default_observation_text
+        if self._sync_qplan_from_observation_text():
+            self._render_config_panel()
+            self._update_status()
 
     def _on_mode_change(self, event):
         if self._mode_guard:
