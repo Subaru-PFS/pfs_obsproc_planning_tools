@@ -474,8 +474,10 @@ def run_netflow(
     forbidden_pairs = [[] for _ in range(n_visit)]
     already_observed = {}
     if tb_tgt.meta.get("cobra_feature_flag", True):
+        print("Now n2 flag has been applied")
         cobra_feature_flags = _get_cobra_feature_flags()
     else:
+        print("No n2 flag has been applied")
         cobra_feature_flags = None
 
     problem = nf.buildProblem(
