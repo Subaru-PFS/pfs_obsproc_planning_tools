@@ -28,6 +28,7 @@ import subprocess
 import sys
 import tomllib
 from pathlib import Path
+import urllib.parse
 
 from loguru import logger
 
@@ -112,9 +113,25 @@ def get_installed_info(pip_name: str) -> dict | None:
     if direct_url_text:
         try:
             data = json.loads(direct_url_text)
-            vcs_info = data.get("vcs_info", {})
-            info["revision"] = vcs_info.get("requested_revision")
-            info["commit_id"] = vcs_info.get("commit_id")
+            if data["url"].startswith("file://"):
+                repo_path = urllib.parse.urlparse(data["url"]).path
+            
+                revision = subprocess.check_output(
+                    ["git", "-C", repo_path, "describe", "--tags"],
+                    text=True
+                ).strip()
+            
+                commit_id = subprocess.check_output(
+                    ["git", "-C", repo_path, "rev-parse", "HEAD"],
+                    text=True
+                ).strip()
+            else:
+                vcs_info = data.get("vcs_info", {})
+                revision = vcs_info.get("requested_revision")
+                commit_id = vcs_info.get("commit_id")
+                
+            info["revision"] = revision
+            info["commit_id"] = commit_id
         except json.JSONDecodeError:
             pass
 
