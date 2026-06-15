@@ -385,8 +385,6 @@ class GeneratePfsDesign(object):
         bench_info = nfutils.getBench(
             _PFS_INSTDATA_DIR,
             self.conf["sfa"]["cobra_coach_dir"],
-            None,
-            self.conf["sfa"]["sm"],
             self.conf["sfa"]["dot_margin"],
         )
 

@@ -1016,8 +1016,6 @@ class GeneratePfsDesign_ssp(object):
                 dict(self.conf["gurobi"]) if self.conf["netflow"]["use_gurobi"] else None,
                 self.conf["packages"]["pfs_instdata_dir"],
                 self.conf["sfa"]["cobra_coach_dir"],
-                None,
-                self.conf["sfa"]["sm"],
                 self.conf["sfa"]["dot_margin"],
                 None,
                 None,

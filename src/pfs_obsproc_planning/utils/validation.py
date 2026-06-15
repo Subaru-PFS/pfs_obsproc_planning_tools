@@ -524,8 +524,6 @@ def validation(parentPath, figpath, save, show, ssp, conf):
     bench = sfa.nfutils.getBench(
         conf["packages"]["pfs_instdata_dir"],
         conf["sfa"]["cobra_coach_dir"],
-        conf["sfa"]["cobra_coach_module_version"],
-        conf["sfa"]["sm"],
         conf["sfa"]["dot_margin"],
     )
 
