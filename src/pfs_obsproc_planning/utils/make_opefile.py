@@ -202,8 +202,9 @@ class OpeFile(object):
             tmpl_longexp = self.contents2_main
             total_exptime = val[7]
             nframe = int(val[8])
+            nframe = max(2, nframe)  # require at least 2 sub-exposures per pointing
             single_exptime = total_exptime / nframe
-            nframe_long = int(np.ceil(1800.0 / single_exptime))
+            nframe_long = max(2, int(np.ceil(1800.0 / single_exptime)))
 
             # add PPC code
             repl1 = "### SCIENCE:START ###"
