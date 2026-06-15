@@ -14,6 +14,7 @@ from .run_netflow import (
     check_netflow_assign_exptime,
     fiber_allocate,
     set_bench,
+    set_netflow_params,
 )
 
 
@@ -264,6 +265,7 @@ def run(
         raise ValueError("config must not be None")
 
     set_bench(bench_model)
+    set_netflow_params(config)
 
     today = date.today().strftime("%Y%m%d")
     tb_queuedb_filename = os.path.join(output_dir, f"tgt_queueDB_{today}.csv")

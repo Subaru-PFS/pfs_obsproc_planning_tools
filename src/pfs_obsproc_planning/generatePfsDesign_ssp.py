@@ -1030,6 +1030,8 @@ class GeneratePfsDesign_ssp(object):
                 force_exptime=900.0,
                 two_stage=self.conf["netflow"]["two_stage"],
                 apply_nir_flag=self.apply_nir_flag,
+                brokenCobrasMargin=self.conf["netflow"]["broken_cobras_margin"],
+                fiducialsAvoidDistance=self.conf["netflow"]["fiducials_avoid_distance"],
                 design_ready=True,
             )
             #"""
