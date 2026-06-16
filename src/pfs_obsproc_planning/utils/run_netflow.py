@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import contextlib
+import os
 import time
 from datetime import datetime, timedelta
 
@@ -500,35 +502,36 @@ def run_netflow(
         print("No n2 flag has been applied")
         cobra_feature_flags = None
 
-    problem = nf.buildProblem(
-        bench,
-        netflow_targets,
-        focal_plane_positions,
-        class_dict,
-        single_exptime,
-        visit_costs,
-        cobraMoveCost=cobra_move_cost,
-        collision_distance=2.0,
-        elbow_collisions=True,
-        gurobi=True,
-        gurobiOptions=gurobi_options,
-        alreadyObserved=already_observed,
-        forbiddenPairs=forbidden_pairs,
-        cobraLocationGroup=cobra_location_group,
-        minSkyTargetsPerLocation=min_sky_targets_per_location,
-        locationGroupPenalty=location_group_penalty,
-        cobraInstrumentRegion=cobra_instrument_region,
-        minSkyTargetsPerInstrumentRegion=min_sky_targets_per_instrument_region,
-        instrumentRegionPenalty=instrument_region_penalty,
-        blackDotPenalty=black_dot_penalty_cost,
-        numReservedFibers=num_reserved_fibers,
-        fiberNonAllocationCost=fiber_non_allocation_cost,
-        obsprog_time_budget=proposal_fh_limits,
-        cobraSafetyMargin=cobraSafetyMargin,
-        cobraFeatureFlags=cobra_feature_flags,
-        brokenCobrasMargin=brokenCobrasMargin,
-        fiducialsAvoidDistance=fiducialsAvoidDistance,
-    )
+    with open(os.devnull, "w") as _devnull, contextlib.redirect_stdout(_devnull):
+        problem = nf.buildProblem(
+            bench,
+            netflow_targets,
+            focal_plane_positions,
+            class_dict,
+            single_exptime,
+            visit_costs,
+            cobraMoveCost=cobra_move_cost,
+            collision_distance=2.0,
+            elbow_collisions=True,
+            gurobi=True,
+            gurobiOptions=gurobi_options,
+            alreadyObserved=already_observed,
+            forbiddenPairs=forbidden_pairs,
+            cobraLocationGroup=cobra_location_group,
+            minSkyTargetsPerLocation=min_sky_targets_per_location,
+            locationGroupPenalty=location_group_penalty,
+            cobraInstrumentRegion=cobra_instrument_region,
+            minSkyTargetsPerInstrumentRegion=min_sky_targets_per_instrument_region,
+            instrumentRegionPenalty=instrument_region_penalty,
+            blackDotPenalty=black_dot_penalty_cost,
+            numReservedFibers=num_reserved_fibers,
+            fiberNonAllocationCost=fiber_non_allocation_cost,
+            obsprog_time_budget=proposal_fh_limits,
+            cobraSafetyMargin=cobraSafetyMargin,
+            cobraFeatureFlags=cobra_feature_flags,
+            brokenCobrasMargin=brokenCobrasMargin,
+            fiducialsAvoidDistance=fiducialsAvoidDistance,
+        )
 
     problem.solve()
 
