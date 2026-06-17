@@ -1279,6 +1279,7 @@ class GeneratePfsDesign_ssp(object):
                     "pfs_design_id",
                     "ppc_ra_str",
                     "ppc_dec_str",
+                    "ppc_pa",
                     "obstime_in_hst",
                     "single_exptime",
                     "n_split_frame",
