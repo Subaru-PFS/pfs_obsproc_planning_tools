@@ -358,6 +358,7 @@ def read_target_classic(mode, params):
     tb_tgt["ra"] = tb_tgt["ra"].astype(float)
     tb_tgt["dec"] = tb_tgt["dec"].astype(float)
     tb_tgt["ob_code"] = tb_tgt["ob_code"].astype(str)
+    
 
     if "proposal_id" in tb_tgt.colnames:
         tb_tgt["identify_code"] = np.char.add(
@@ -516,7 +517,7 @@ def read_target_queue(mode, para, tb_queuedb):
                     f"{proposal_id} ({'LR' if resolution == 'L' else 'MR'}): allocated FH = {fh_allocated:.2f}, achieved FH = {fh_completed:.2f}, CR = {fh_completed/fh_allocated*100.0:.2f}%"
                 )
 
-    tb_tgt["allocated_time"] = tb_tgt["allocated_time_tac"] - tb_tgt["allocated_time_done"]
+    tb_tgt["allocated_time"] = tb_tgt["allocated_time_tac"] #- tb_tgt["allocated_time_done"]
     tb_tgt["allocated_time"][tb_tgt["allocated_time"] < 0] = 0
     tb_tgt = tb_tgt[tb_tgt["allocated_time"] > 0]
 
