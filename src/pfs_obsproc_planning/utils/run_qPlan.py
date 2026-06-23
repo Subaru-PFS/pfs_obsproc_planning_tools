@@ -286,6 +286,13 @@ def run(
         default_stop_time = observer.morning_twilight_18() + timedelta(
             minutes=30
         )  # extend TW18 by 30 min for real operation, just in case
+        
+        # Ensure timezone-aware comparisons
+        hst_tz = ZoneInfo("US/Hawaii")
+        if default_start_time.tzinfo is None:
+            default_start_time = default_start_time.replace(tzinfo=hst_tz)
+        if default_stop_time.tzinfo is None:
+            default_stop_time = default_stop_time.replace(tzinfo=hst_tz)
 
         start_override = None
         stop_override = None
@@ -294,25 +301,24 @@ def run(
             next_date = (
                 datetime.strptime(date_, "%Y-%m-%d") + timedelta(days=1)
             ).strftime("%Y-%m-%d")
-            if (date_ in item) and parser.parse(f"{item} HST") >= default_start_time:
-                start_override = parser.parse(f"{item} HST")
+            parsed_time = parser.parse(f"{item} HST").astimezone(hst_tz)
+            if (date_ in item) and parsed_time >= default_start_time:
+                start_override = parsed_time
                 start_time_list.remove(item)
                 break
             elif (
                 (date_ in item)
-                and (parser.parse(f"{item} HST") < default_start_time)
+                and (parsed_time < default_start_time)
                 and (
-                    parser.parse(f"{item} HST")
+                    parsed_time
                     > default_start_time - timedelta(hours=1)
                 )
             ):
                 start_override = default_start_time
                 start_time_list.remove(item)
                 break
-            elif (next_date in item) and parser.parse(
-                f"{item} HST"
-            ) <= default_stop_time:
-                start_override = parser.parse(f"{item} HST")
+            elif (next_date in item) and parsed_time <= default_stop_time:
+                start_override = parsed_time
                 start_time_list.remove(item)
                 break
 
@@ -320,21 +326,20 @@ def run(
             next_date = (
                 datetime.strptime(date_, "%Y-%m-%d") + timedelta(days=1)
             ).strftime("%Y-%m-%d")
-            if (date_ in item) and parser.parse(f"{item} HST") >= default_start_time:
-                stop_override = parser.parse(f"{item} HST")
+            parsed_time = parser.parse(f"{item} HST").astimezone(hst_tz)
+            if (date_ in item) and parsed_time >= default_start_time:
+                stop_override = parsed_time
                 stop_time_list.remove(item)
                 break
-            elif (next_date in item) and parser.parse(
-                f"{item} HST"
-            ) <= default_stop_time:
-                stop_override = parser.parse(f"{item} HST")
+            elif (next_date in item) and parsed_time <= default_stop_time:
+                stop_override = parsed_time
                 stop_time_list.remove(item)
                 break
             elif (
                 (next_date in item)
-                and (parser.parse(f"{item} HST") > default_stop_time)
+                and (parsed_time > default_stop_time)
                 and (
-                    parser.parse(f"{item} HST")
+                    parsed_time
                     <= default_stop_time + timedelta(hours=1)
                 )
             ):
