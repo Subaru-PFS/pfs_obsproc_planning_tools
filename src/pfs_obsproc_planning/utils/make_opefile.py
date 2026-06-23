@@ -200,14 +200,15 @@ class OpeFile(object):
         for i, val in enumerate(info):
             tmpl = self.contents2
             tmpl_longexp = self.contents2_main
-            total_exptime = val[7]
-            nframe = int(val[8])
+            total_exptime = val[8]
+            nframe = int(val[9])
+            nframe = max(2, nframe)  # require at least 2 sub-exposures per pointing
             single_exptime = total_exptime / nframe
-            nframe_long = int(np.ceil(1800.0 / single_exptime))
+            nframe_long = max(2, int(np.ceil(1800.0 / single_exptime)))
 
             # add PPC code
             repl1 = "### SCIENCE:START ###"
-            repl2 = f"### {val[0]} ###\n### OBSTIME: {val[6]} ###"
+            repl2 = f"### {val[0]} PA={val[6]} ###\n### OBSTIME: {val[7]} ###"
             tmpl = tmpl.replace(repl1, repl2)
             tmpl_longexp = tmpl_longexp.replace(repl1, repl2)
 

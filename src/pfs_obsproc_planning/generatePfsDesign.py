@@ -385,8 +385,6 @@ class GeneratePfsDesign(object):
         bench_info = nfutils.getBench(
             _PFS_INSTDATA_DIR,
             self.conf["sfa"]["cobra_coach_dir"],
-            None,
-            self.conf["sfa"]["sm"],
             self.conf["sfa"]["dot_margin"],
         )
 
@@ -439,12 +437,13 @@ class GeneratePfsDesign(object):
                 pd.to_datetime(obstime_str) for obstime_str in self.df_qplan["obstime"]
             ]
             self.resQPlan = {
-                ppc_code: (obstime, ppc_ra, ppc_dec)
-                for obstime, ppc_code, ppc_ra, ppc_dec in zip(
+                ppc_code: (obstime, ppc_ra, ppc_dec, ppc_pa)
+                for obstime, ppc_code, ppc_ra, ppc_dec, ppc_pa in zip(
                     obstimes,
                     self.df_qplan["ppc_code"],
                     self.df_qplan["ppc_ra"],
                     self.df_qplan["ppc_dec"],
+                    self.df_qplan["ppc_pa"],
                 )
             }
             return None
@@ -463,12 +462,13 @@ class GeneratePfsDesign(object):
                 plotVisibility=plotVisibility,
             )
             self.resQPlan = {
-                ppc_code: (obstime, ppc_ra, ppc_dec)
-                for obstime, ppc_code, ppc_ra, ppc_dec in zip(
+                ppc_code: (obstime, ppc_ra, ppc_dec, ppc_pa)
+                for obstime, ppc_code, ppc_ra, ppc_dec, ppc_pa in zip(
                     self.df_qplan["obstime"],
                     self.df_qplan["ppc_code"],
                     self.df_qplan["ppc_ra"],
                     self.df_qplan["ppc_dec"],
+                    self.df_qplan["ppc_pa"],
                 )
             }
 
@@ -553,12 +553,13 @@ class GeneratePfsDesign(object):
                         [self.df_qplan, self.df_qplan_], ignore_index=True
                     )
                     self.resQPlan_ = {
-                        ppc_code: (obstime, ppc_ra, ppc_dec)
-                        for obstime, ppc_code, ppc_ra, ppc_dec in zip(
+                        ppc_code: (obstime, ppc_ra, ppc_dec, ppc_pa)
+                        for obstime, ppc_code, ppc_ra, ppc_dec, ppc_pa in zip(
                             self.df_qplan_["obstime"],
                             self.df_qplan_["ppc_code"],
                             self.df_qplan_["ppc_ra"],
                             self.df_qplan_["ppc_dec"],
+                            self.df_qplan_["ppc_pa"],
                         )
                     }
                     self.resQPlan = {**self.resQPlan, **self.resQPlan_}
@@ -816,6 +817,7 @@ class GeneratePfsDesign(object):
                     res = self.resQPlan[pointing]
                     ppc_ra_ = res[1]
                     ppc_dec_ = res[2]
+                    ppc_pa_ = res[3] if len(res) > 3 else np.nan
 
                     if isinstance(ppc_ra_, str) and (":" in ppc_ra_):
                         ppc_ra_t = ppc_ra_.replace(":", "")
@@ -836,6 +838,7 @@ class GeneratePfsDesign(object):
                             v,
                             ppc_ra_t,
                             ppc_dec_t,
+                            ppc_pa_,
                             k,
                             dictPointings[pointing.lower()]["single_exptime"],
                             self.conf["ope"]["n_split_frame"],
@@ -850,6 +853,7 @@ class GeneratePfsDesign(object):
                     "pfs_design_id",
                     "ppc_ra",
                     "ppc_dec",
+                    "ppc_pa",
                     "obstime_in_hst",
                     "single_exptime",
                     "n_split_frame",

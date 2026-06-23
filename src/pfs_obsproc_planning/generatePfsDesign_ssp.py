@@ -1016,8 +1016,6 @@ class GeneratePfsDesign_ssp(object):
                 dict(self.conf["gurobi"]) if self.conf["netflow"]["use_gurobi"] else None,
                 self.conf["packages"]["pfs_instdata_dir"],
                 self.conf["sfa"]["cobra_coach_dir"],
-                None,
-                self.conf["sfa"]["sm"],
                 self.conf["sfa"]["dot_margin"],
                 None,
                 None,
@@ -1032,6 +1030,8 @@ class GeneratePfsDesign_ssp(object):
                 force_exptime=900.0,
                 two_stage=self.conf["netflow"]["two_stage"],
                 apply_nir_flag=self.apply_nir_flag,
+                brokenCobrasMargin=self.conf["netflow"]["broken_cobras_margin"],
+                fiducialsAvoidDistance=self.conf["netflow"]["fiducials_avoid_distance"],
                 design_ready=True,
             )
             #"""
@@ -1279,6 +1279,7 @@ class GeneratePfsDesign_ssp(object):
                     "pfs_design_id",
                     "ppc_ra_str",
                     "ppc_dec_str",
+                    "ppc_pa",
                     "obstime_in_hst",
                     "single_exptime",
                     "n_split_frame",

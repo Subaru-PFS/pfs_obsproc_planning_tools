@@ -29,6 +29,7 @@ from .run_netflow import (
     fiber_allocation_classic,
     optimize_non_observation_costs,
     set_bench,
+    set_netflow_params,
 )
 
 from loguru import logger
@@ -214,6 +215,7 @@ def run(
         raise TypeError(f"Unexpected keyword argument(s): {unexpected_keys}")
 
     set_bench(bench_info)
+    set_netflow_params(config)
 
     tb_tgt, tb_tgt_l, tb_tgt_m = read_target_classic(
         readtgt_con["mode_readtgt"], readtgt_con["para_readtgt"]
