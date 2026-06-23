@@ -1,1 +1,1 @@
-../src/pfs_obsproc_planning/pfs_packages.py
+../src/pfs_obsproc_planning/utils/pfs_packages.py
