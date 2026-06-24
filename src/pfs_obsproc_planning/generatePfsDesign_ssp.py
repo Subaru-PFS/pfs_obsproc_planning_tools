@@ -694,13 +694,13 @@ class GeneratePfsDesign_ssp(object):
             )
             return Table(), Table(), Table()
         else:
-            tb_sci = Table.read(filepath_sci)
+            tb_sci = Table.read(filepath_sci, format="ecsv")
 
         if not os.path.isfile(filepath_sky):
             logger.error(f"[read_tgt] Missing sky file for {ppc_code}: {filepath_sky}")
             return Table(), Table(), Table()
         else:
-            tb_sky = Table.read(filepath_sky)
+            tb_sky = Table.read(filepath_sky, format="ecsv")
 
         if not os.path.isfile(filepath_fluxstd):
             logger.error(
@@ -708,7 +708,7 @@ class GeneratePfsDesign_ssp(object):
             )
             return Table(), Table(), Table()
         else:
-            tb_fluxstd = Table.read(filepath_fluxstd)
+            tb_fluxstd = Table.read(filepath_fluxstd, format="ecsv")
 
         tb_sci["cidx"] = tb_sci["cobraId"] - 1
         tb_sky["cidx"] = tb_sky["cobraId"] - 1
@@ -885,7 +885,7 @@ class GeneratePfsDesign_ssp(object):
         ppc_path = os.path.join(self.workDir, "targets", WG, "ppcList.ecsv")
 
         try:
-            tb_ppc = Table.read(ppc_path)
+            tb_ppc = Table.read(ppc_path, format="ecsv")
         except Exception:
             logger.error(f"Missing ppcList.ecsv for WG={WG}: {ppc_path}")
             return Table()
@@ -1298,7 +1298,7 @@ class GeneratePfsDesign_ssp(object):
             ppc_path = os.path.join(self.workDir, "targets", wg_, "ppcList.ecsv")
 
             if os.path.exists(ppc_path):
-                tb_ppc = Table.read(ppc_path)
+                tb_ppc = Table.read(ppc_path, format="ecsv")
             else:
                 logger.error(
                     f"[Validation of ppcList] ({wg_}) File not found: {ppc_path}"

@@ -24,17 +24,17 @@ warnings.filterwarnings("ignore")
 
 def run(conf, workDir="."):
     # read obList
-    tb_tgt = Table.read(os.path.join(workDir, "ppp/obList_tot.ecsv"))
+    tb_tgt = Table.read(os.path.join(workDir, "ppp/obList_tot.ecsv"), format="ecsv")
     try:
-        tb_tgt_backup = Table.read(os.path.join(workDir, "ppp/obList_backup.ecsv"))
+        tb_tgt_backup = Table.read(os.path.join(workDir, "ppp/obList_backup.ecsv"), format="ecsv")
     except Exception:
         tb_tgt_backup = Table()
     tb_tgt = vstack([tb_tgt, tb_tgt_backup])
 
     # read ppclist
-    tb_ppc = Table.read(os.path.join(workDir, "ppp/ppcList.ecsv"))
+    tb_ppc = Table.read(os.path.join(workDir, "ppp/ppcList.ecsv"), format="ecsv")
     try:
-        tb_ppc_backup = Table.read(os.path.join(workDir, "ppp/ppcList_backup.ecsv"))
+        tb_ppc_backup = Table.read(os.path.join(workDir, "ppp/ppcList_backup.ecsv"), format="ecsv")
     except Exception:
         tb_ppc_backup = Table()
     tb_ppc = vstack([tb_ppc, tb_ppc_backup])

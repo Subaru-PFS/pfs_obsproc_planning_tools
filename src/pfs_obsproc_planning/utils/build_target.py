@@ -242,13 +242,13 @@ def visibility_checker(tb_tgt, obstimes, start_time_list, stop_time_list):
 
 def load_user_ppc_table(path_ppc):
     if path_ppc.endswith(".ecsv"):
-        return Table.read(path_ppc)
+        return Table.read(path_ppc, format="ecsv")
 
     from glob import glob
 
     tables = []
     for index, file in enumerate(glob(path_ppc + "*"), start=1):
-        tbl = Table.read(file)
+        tbl = Table.read(file, format="ecsv")
         tbl["ppc_code"] = [f"{code}_{index}" for code in tbl["ppc_code"]]
         tables.append(tbl)
 
