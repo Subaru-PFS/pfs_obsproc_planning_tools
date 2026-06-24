@@ -468,7 +468,7 @@ def _load_ppp_targets_qa_reference_n(parentPath: str) -> pd.DataFrame:
         return pd.DataFrame()
 
     try:
-        tbl = Table.read(oblist_path, format="ascii.ecsv")
+        tbl = Table.read(oblist_path, format="ecsv")
         df = tbl.to_pandas()
     except Exception as e:
         logger.warning(f"Failed to read PPP obList.ecsv ({oblist_path}): {e}")

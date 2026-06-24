@@ -589,9 +589,9 @@ class GeneratePfsDesign(object):
         self.update_config()
 
         ## get a list of OBs ##
-        t1 = Table.read(os.path.join(self.outputDirPPP, "obList.ecsv"))
+        t1 = Table.read(os.path.join(self.outputDirPPP, "obList.ecsv"), format="ecsv")
         try:
-            t2 = Table.read(os.path.join(self.outputDirPPP, "obList_backup.ecsv"))
+            t2 = Table.read(os.path.join(self.outputDirPPP, "obList_backup.ecsv"), format="ecsv")
         except Exception:
             t2 = Table()
         t = vstack([t1, t2])
@@ -718,10 +718,10 @@ class GeneratePfsDesign(object):
         logger.info(len(obList))
 
         ## get a list of assigned OBs ## FIXME (maybe we don't need to use this)
-        tb_ppp = Table.read(os.path.join(self.outputDirPPP, "ppcList.ecsv"))
+        tb_ppp = Table.read(os.path.join(self.outputDirPPP, "ppcList.ecsv"), format="ecsv")
         try:
             tb_ppp_backup = Table.read(
-                os.path.join(self.outputDirPPP, "ppcList_backup.ecsv")
+                os.path.join(self.outputDirPPP, "ppcList_backup.ecsv"), format="ecsv"
             )
         except Exception:
             tb_ppp_backup = Table()
