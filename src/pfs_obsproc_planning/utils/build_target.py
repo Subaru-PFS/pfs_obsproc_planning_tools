@@ -248,7 +248,10 @@ def load_user_ppc_table(path_ppc):
 
     tables = []
     for index, file in enumerate(glob(path_ppc + "*"), start=1):
-        tbl = Table.read(file, format="ecsv")
+        if file.endswith(".ecsv"):
+            tbl = Table.read(file, format="ecsv")
+        else:
+            tbl = Table.read(file)
         tbl["ppc_code"] = [f"{code}_{index}" for code in tbl["ppc_code"]]
         tables.append(tbl)
 
