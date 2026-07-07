@@ -102,12 +102,13 @@ def save_proposal_sum_csv(conf, workDir):
 
     output_path = os.path.join(workDir, "proposal_nppc.csv")
 
-    # Find all semester queue runs (e.g. run_2603/S26A-queue, run_2605/S26A-queue)
-    # from the common base directory that contains run_*.
-    base_dir = os.path.abspath(os.path.join(workDir, "..", ".."))
+    # Find all semester queue runs (e.g. /work/wanqqq/run_2603/S26A-queue,
+    # /work/wanqqq/run_2605/S26A-queue) under the common run root.
+    base_dir = "/work/wanqqq"
     run_queue_dirs = sorted(glob(os.path.join(base_dir, "run_*", f"{semester_code}-queue")))
 
-    # Map design FITS filename -> absolute path from all run outputs/design
+    # Map design FITS filename -> absolute path from all
+    # /work/wanqqq/run_YYMM/Sxxx-queue/output_YYMMDD/design/*.fits
     design_path_map = {}
     for run_queue_dir in run_queue_dirs:
         for fits_path in glob(os.path.join(run_queue_dir, "output_*", "design", "pfsDesign-0x*.fits")):
@@ -123,20 +124,21 @@ def save_proposal_sum_csv(conf, workDir):
     try:
         sql = """
         SELECT
+            pfs_visit.pfs_visit_id,
             pfs_visit.pfs_design_id,
             onsite_processing_status.started_at
         FROM exposure_time
             JOIN pfs_visit ON exposure_time.pfs_visit_id = pfs_visit.pfs_visit_id
             JOIN onsite_processing_status ON onsite_processing_status.pfs_visit_id = pfs_visit.pfs_visit_id
         WHERE pfs_visit.pfs_design_id IS NOT NULL AND pfs_visit.pfs_visit_id >=129587
-        ORDER BY onsite_processing_status.started_at ASC;
+        ORDER BY onsite_processing_status.started_at ASC, pfs_visit.pfs_visit_id ASC;
         """
 
         with conn.cursor() as cur:
             cur.execute(sql)
             df_design_done = pd.DataFrame(
                 cur.fetchall(),
-                columns=["pfs_design_id", "started_at"],
+                columns=["pfs_visit_id", "pfs_design_id", "started_at"],
             )
     except Exception as e:
         logger.error(f"[proposal_nppc] Failed to query qaDB: {e}")
@@ -149,17 +151,60 @@ def save_proposal_sum_csv(conf, workDir):
         pd.DataFrame(columns=["date"]).to_csv(output_path, index=False)
         return None
 
-    # Accumulate nppc(date, proposal_id): count 1 per design if proposal appears in targetType==1
-    # (excluding observed filler proposal S25A-000QF).
-    per_date_counts = {}
+    # Convert each visit timestamp into HST night date:
+    # e.g., 2026-05-14 05:00 belongs to night 2026-05-13.
+    def hst_night_date(ts):
+        t = pd.to_datetime(ts)
+        if pd.isna(t):
+            return None
+        if t.hour < 12:
+            t = t - pd.Timedelta(days=1)
+        return t.date().isoformat()
+
+    # Treat adjacent visits of the same design within the same HST night
+    # as one pointing (2 adjacent visits => 1 count).
+    # For a run length N, pointing count is ceil(N/2) == (N + 1) // 2.
+    visit_runs = {}
+    prev_key = None
+    run_len = 0
 
     for _, row in df_design_done.iterrows():
         design_id = row["pfs_design_id"]
         if pd.isna(design_id):
             continue
 
+        obs_date = hst_night_date(row["started_at"])
+        if obs_date is None:
+            continue
+
         try:
-            fname = f"pfsDesign-0x{int(design_id):016x}.fits"
+            design_id_int = int(design_id)
+        except Exception:
+            continue
+
+        key = (obs_date, design_id_int)
+        if key == prev_key:
+            run_len += 1
+        else:
+            if prev_key is not None and run_len > 0:
+                visit_runs[prev_key] = visit_runs.get(prev_key, 0) + (run_len + 1) // 2
+            prev_key = key
+            run_len = 1
+
+    if prev_key is not None and run_len > 0:
+        visit_runs[prev_key] = visit_runs.get(prev_key, 0) + (run_len + 1) // 2
+
+    # Cache proposal IDs present in each design FITS once.
+    design_proposals_cache = {}
+
+    # Accumulate nppc(date, proposal_id) from collapsed pointing counts.
+    # Count design if proposal appears in targetType==1
+    # (excluding observed filler proposal S25A-000QF).
+    per_date_counts = {}
+
+    for (obs_date, design_id_int), n_pointings in visit_runs.items():
+        try:
+            fname = f"pfsDesign-0x{design_id_int:016x}.fits"
         except Exception:
             continue
 
@@ -167,36 +212,37 @@ def save_proposal_sum_csv(conf, workDir):
         if filepath is None:
             continue
 
-        started_at = row["started_at"]
-        if pd.isna(started_at):
-            continue
-        obs_date = pd.to_datetime(started_at).date().isoformat()
+        if design_id_int not in design_proposals_cache:
+            try:
+                with fits.open(filepath, memmap=True) as hdul:
+                    data = hdul[1].data
+                    if data is None or len(data) == 0:
+                        design_proposals_cache[design_id_int] = []
+                        continue
 
-        try:
-            with fits.open(filepath, memmap=True) as hdul:
-                data = hdul[1].data
-                if data is None or len(data) == 0:
-                    continue
+                    mask_science = data["targetType"] == 1
+                    raw_ids = np.unique(data["proposalId"][mask_science])
+                    proposal_ids_in_design = []
+                    for raw_pid in raw_ids:
+                        if isinstance(raw_pid, (bytes, np.bytes_)):
+                            pid = raw_pid.decode("utf-8", errors="ignore").strip()
+                        else:
+                            pid = str(raw_pid).strip()
 
-                mask_science = data["targetType"] == 1
-                raw_ids = np.unique(data["proposalId"][mask_science])
-                proposal_ids_in_design = []
-                for raw_pid in raw_ids:
-                    if isinstance(raw_pid, (bytes, np.bytes_)):
-                        pid = raw_pid.decode("utf-8", errors="ignore").strip()
-                    else:
-                        pid = str(raw_pid).strip()
+                        if pid.startswith(semester_code) and pid != "S25A-000QF":
+                            proposal_ids_in_design.append(pid)
 
-                    if pid.startswith(semester_code) and pid != "S25A-000QF":
-                        proposal_ids_in_design.append(pid)
-        except Exception:
-            continue
+                    design_proposals_cache[design_id_int] = proposal_ids_in_design
+            except Exception:
+                continue
+
+        proposal_ids_in_design = design_proposals_cache.get(design_id_int, [])
 
         if obs_date not in per_date_counts:
             per_date_counts[obs_date] = {}
 
         for pid in proposal_ids_in_design:
-            per_date_counts[obs_date][pid] = per_date_counts[obs_date].get(pid, 0) + 1
+            per_date_counts[obs_date][pid] = per_date_counts[obs_date].get(pid, 0) + n_pointings
 
     # Build wide table: one row per date, one column per proposal_id
     configured_semester_proposals = {
