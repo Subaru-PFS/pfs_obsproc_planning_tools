@@ -100,7 +100,7 @@ def calc_inr(df, obstime):
     return inr, el
 
 
-def save_visibility_plot(summary_csv_path, output_path, selected_date):
+def save_visibility_plot(summary_csv_path, output_path, selected_date=None):
     """Save a visibility plot PNG for the selected date and return the path.
 
     The plot shows elevation (solid), InR (dashed), moon elevation, and
@@ -115,6 +115,14 @@ def save_visibility_plot(summary_csv_path, output_path, selected_date):
         1200, unit="s"
     )
     df_vis = df_vis.sort_values("observation_time").reset_index(drop=True)
+
+    # selected_date is determined from data by default (HST date of first observation)
+    if selected_date is None:
+        selected_date = (
+            df_vis["observation_time"]
+            .dt.tz_convert("Pacific/Honolulu")
+            .dt.date.iloc[0]
+        )
 
     hst_start = pd.Timestamp(selected_date).tz_localize("Pacific/Honolulu") + pd.Timedelta(hours=19)
     hst_stop = pd.Timestamp(selected_date).tz_localize("Pacific/Honolulu") + pd.Timedelta(
@@ -625,6 +633,18 @@ def validation(parentPath, figpath, save, show, ssp, conf):
     """
     # Load design summary and normalize observation times
     pfsDesignDir, df_design = _load_design_summary(parentPath, ssp)
+
+    # Save visibility plot alongside validation_report.html during validation step.
+    # selected_date is derived from summary CSV observation_time in save_visibility_plot().
+    summary_csv_path = os.path.join(parentPath, "summary_reconfigure_ppp-ppp+qplan_output.csv")
+    visibility_png_path = os.path.join(figpath, "visibility_plot.png")
+    if os.path.exists(summary_csv_path):
+        try:
+            save_visibility_plot(summary_csv_path, visibility_png_path)
+        except Exception as e:
+            logger.warning(f"Failed to save visibility plot: {e}")
+    else:
+        logger.warning(f"Visibility summary CSV not found: {summary_csv_path}")
 
     # open-use only: read target table first and keep only qa_reference_arm == 'n'
     if not ssp:
