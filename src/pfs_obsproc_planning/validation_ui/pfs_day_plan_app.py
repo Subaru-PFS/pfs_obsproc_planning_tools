@@ -1,13 +1,14 @@
-import pandas as pd
-import panel as pn
-from datetime import datetime, timedelta
+import csv
 import glob
-import os
-from bs4 import BeautifulSoup
 import re
+from datetime import datetime
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
+
+from bs4 import BeautifulSoup
+import pandas as pd
+import panel as pn
 
 # Compact/scale the calendar popup so it doesn't take excessive screen
 # space. The CSS is kept in a separate file `styles.css` in this
@@ -24,6 +25,7 @@ pn.extension(
 
 # Path to CSV produced by the daily processing pipeline. Adjust as needed.
 CSV_PATH = "/home/wanqiu/data/HE/PFS_frame/git/work/wanqqq/daily_process_status.csv"
+PROPOSAL_SUM_CSV_PATH = "/home/wanqiu/data/HE/PFS_frame/git/work/wanqqq/run_2605/S26A-queue/proposal_sum.csv"
 HIGHLIGHT_STYLE = (
     "background-color: #FCE59F;"
     "font-weight: bold;"
@@ -39,6 +41,24 @@ def color_status(status: str) -> str:
         "running": "orange",
         "pending": "gray",
     }[status]
+
+
+def semester_code_for_date(selected_date):
+    if selected_date.month == 1:
+        return f"S{(selected_date.year - 1) % 100:02d}B"
+    if selected_date.month <= 7:
+        return f"S{selected_date.year % 100:02d}A"
+    return f"S{selected_date.year % 100:02d}B"
+
+
+def proposal_nppc_csv_path(selected_date):
+    semester_code = semester_code_for_date(selected_date)
+    yymm = selected_date.strftime("%y%m")
+    ymd = selected_date.strftime("%Y%m%d")
+    return (
+        "/home/wanqiu/data/HE/PFS_frame/git/work/wanqqq/"
+        f"run_{yymm}/{semester_code}-queue/output_{ymd}/proposal_nppc.csv"
+    )
 
 
 def load_status() -> pd.DataFrame:
@@ -300,9 +320,6 @@ def validation_view(selected_date, _):
 
     cell_highlight = find_highlighted_cells(html_path) # find highlighted cells
 
-    # collect rows that have any highlighted cells
-    rows_flagged = {row for (row, _) in cell_highlight}
-
 
     def styler_from_cell_highlight(df, cell_highlight):
         styles = pd.DataFrame("", index=df.index, columns=df.columns)
@@ -342,12 +359,7 @@ def validation_view(selected_date, _):
 def observation_progress_view(selected_date, _):
     start_date = selected_date if selected_date is not None else datetime.now().date()
 
-    if start_date.month == 1:
-        semester_code = f"S{(start_date.year - 1) % 100:02d}B"
-    elif start_date.month <= 7:
-        semester_code = f"S{start_date.year % 100:02d}A"
-    else:
-        semester_code = f"S{start_date.year % 100:02d}B"
+    semester_code = semester_code_for_date(start_date)
 
     program_id = f"{semester_code}-999QN"
     url = (
@@ -374,6 +386,47 @@ def observation_progress_view(selected_date, _):
     remaining_nights = 0.0
     remaining_hours = 0.0
     remaining_segments = []
+    gB_nppc_req = {}
+    gB_nppc = {}
+
+    try:
+        with open(PROPOSAL_SUM_CSV_PATH, "r", encoding="utf-8") as f:
+            sheet_rows = csv.DictReader(f)
+            for sheet_row in sheet_rows:
+                if (sheet_row.get("grade") or "").strip() != "B":
+                    continue
+
+                proposal_id = (sheet_row.get("proposal_id") or "").strip()
+                if not proposal_id.startswith(semester_code):
+                    continue
+
+                comment = (sheet_row.get("comment") or "").strip()
+                match = re.search(r"nppc\s*=\s*(\d+)", comment)
+                if match:
+                    gB_nppc_req[proposal_id] = int(match.group(1))
+                    gB_nppc[proposal_id] = 0
+    except Exception:
+        pn.state.notifications.warning(  # type: ignore[union-attr]
+            f"Could not read proposal summary file: {PROPOSAL_SUM_CSV_PATH}",
+            duration=5000,
+        )
+        gB_nppc_req = {}
+        gB_nppc = {}
+
+    if gB_nppc_req:
+        proposal_nppc_path = proposal_nppc_csv_path(start_date)
+
+        try:
+            df_nppc = pd.read_csv(proposal_nppc_path)
+            for proposal_id in gB_nppc_req:
+                if proposal_id in df_nppc.columns:
+                    total_nppc = pd.to_numeric(df_nppc[proposal_id], errors="coerce").fillna(0).sum()
+                    gB_nppc[proposal_id] = int(round(total_nppc / 2.0))
+        except Exception:
+            pn.state.notifications.warning(  # type: ignore[union-attr]
+                f"Could not read proposal nppc file: {proposal_nppc_path}",
+                duration=5000,
+            )
 
     for row in soup.find_all("tr"):
         cells = [" ".join(cell.stripped_strings) for cell in row.find_all(["td", "th"])]
@@ -394,15 +447,11 @@ def observation_progress_view(selected_date, _):
             continue
 
         row_text = " ".join(cells)
-        if f"(Arai; {program_id})" not in row_text:
-            continue
 
         for time_range, fraction_text, segment_text in re.findall(
             r"(\d{1,2}:\d{2}-\d{1,2}:\d{2})\s*\{([0-9.]+)\}\s*(.*?)(?=\d{1,2}:\d{2}-\d{1,2}:\d{2}\s*\{|$)",
             row_text,
         ):
-            if f"(Arai; {program_id})" not in segment_text:
-                continue
             if "[Observation Canceled]" in segment_text:
                 continue
 
@@ -415,14 +464,51 @@ def observation_progress_view(selected_date, _):
             if end_total_minutes < start_total_minutes:
                 end_total_minutes += 24 * 60
 
-            remaining_hours += (end_total_minutes - start_total_minutes) / 60.0
-            remaining_nights += fraction
-            remaining_segments.append((row_date, time_range, fraction))
+            duration_hours = (end_total_minutes - start_total_minutes) / 60.0
+
+            if f"(Arai; {program_id})" in segment_text:
+                remaining_hours += duration_hours
+                remaining_nights += fraction
+                remaining_segments.append((row_date, time_range, fraction))
+
     remaining_pointings = round(remaining_hours * 3)
     description = "&#10;".join(
         f"{date.strftime('%Y-%m-%d')}, {time_range}, {fraction:.2f} night"
         for date, time_range, fraction in remaining_segments
     )
+    gB_remaining_pointings = sum(
+        gB_nppc_req[proposal_id] - gB_nppc.get(proposal_id, 0)
+        for proposal_id in gB_nppc_req
+    )
+    gB_table = ""
+    if gB_nppc_req:
+        proposal_cells = "".join(
+            f"<td style='padding:4px 8px; border:1px solid #ddd;'><b>{proposal_id}</b></td>"
+            for proposal_id in gB_nppc_req
+        )
+        pointing_cells = "".join(
+            (
+                f"<td style='padding:4px 8px; border:1px solid #ddd; text-align:center;'>{obs} ({(100.0 * obs / req):.0f}%)</td>"
+                if req > 0
+                else f"<td style='padding:4px 8px; border:1px solid #ddd; text-align:center;'>{obs} (0%)</td>"
+            )
+            for proposal_id in gB_nppc_req
+            for obs, req in [(gB_nppc.get(proposal_id, 0), gB_nppc_req[proposal_id])]
+        )
+        requested_cells = "".join(
+            f"<td style='padding:4px 8px; border:1px solid #ddd; text-align:center;'>{gB_nppc_req[proposal_id]}</td>"
+            for proposal_id in gB_nppc_req
+        )
+        gB_table = (
+            "<table style='margin-top:10px; border-collapse:collapse; font-size:14px;'>"
+            "<tr><th style='padding:4px 8px; border:1px solid #ddd; background:#f7f7f7;'>Proposal ID</th>"
+            f"{proposal_cells}</tr>"
+            "<tr><th style='padding:4px 8px; border:1px solid #ddd; background:#f7f7f7;'>Nppc (observed)</th>"
+            f"{pointing_cells}</tr>"
+            "<tr><th style='padding:4px 8px; border:1px solid #ddd; background:#f7f7f7;'>Nppc (uploader)</th>"
+            f"{requested_cells}</tr>"
+            "</table>"
+        )
 
     return pn.pane.HTML(
         (
@@ -432,6 +518,9 @@ def observation_progress_view(selected_date, _):
             f"<b>{remaining_pointings}</b> pointings remaining ({semester_code})."
             " <span style='color:#6A5AA3; font-weight:bold; cursor:help;'>?</span>"
             "</span>"
+            "<br>"
+            f"<b>{gB_remaining_pointings}</b> pointings still needed to complete grade B programs under good weather conditions."
+            f"{gB_table}"
             "</div>"
         ),
         sizing_mode="stretch_width",
@@ -464,12 +553,6 @@ pdf_pane = pn.pane.PDF(
     sizing_mode="stretch_width",
     height=800,
 )
- 
-observation_progress_pane = pn.pane.HTML(
-    "<div style='font-size:18px; color:#666;'>Observation Progress</div>",
-    sizing_mode="stretch_width",
-)
-
 tabs = pn.Tabs(
     ("Validation Table", validation_view),
     ("Design Figure", pdf_pane),
