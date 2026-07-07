@@ -73,8 +73,157 @@ def run(conf, workDir="."):
     plot_schedule(workDir, pdf)
     plot_EET(workDir, tb_queue, pdf)
     plot_CR(conf, tb_tgt, tb_queue, workDir, pdf)
+    save_proposal_sum_csv(conf, workDir)
 
     pdf.close()
+
+
+def save_proposal_sum_csv(conf, workDir):
+    """Save per-date per-proposal executed pointing counts (nppc) as CSV.
+
+    The output file is saved in the same folder as the completion PDF:
+    ``{workDir}/proposal_sum.csv``.
+    """
+    try:
+        from pfs_design_tool.pointing_utils.dbutils import connect_qadb
+    except Exception as e:
+        logger.error(f"[proposal_sum] Failed to import connect_qadb: {e}")
+        return None
+
+    # infer semester from proposal IDs in config (e.g. S26A)
+    proposal_ids = conf.get("ppp", {}).get("proposalIds", []) + conf.get("ppp", {}).get(
+        "proposalIds_backup", []
+    )
+    if len(proposal_ids) == 0:
+        logger.warning("[proposal_sum] No proposalIds found in config.")
+        return None
+
+    semester_code = str(proposal_ids[0]).split("-")[0]
+
+    output_path = os.path.join(workDir, "proposal_nppc.csv")
+
+    # Find all semester queue runs (e.g. run_2603/S26A-queue, run_2605/S26A-queue)
+    # from the common base directory that contains run_*.
+    base_dir = os.path.abspath(os.path.join(workDir, "..", ".."))
+    run_queue_dirs = sorted(glob(os.path.join(base_dir, "run_*", f"{semester_code}-queue")))
+
+    # Map design FITS filename -> absolute path from all run outputs/design
+    design_path_map = {}
+    for run_queue_dir in run_queue_dirs:
+        for fits_path in glob(os.path.join(run_queue_dir, "output_*", "design", "pfsDesign-0x*.fits")):
+            design_path_map[os.path.basename(fits_path)] = fits_path
+
+    if len(design_path_map) == 0:
+        logger.warning(f"[proposal_nppc] No design FITS found for {semester_code} under {base_dir}")
+        pd.DataFrame(columns=["date"]).to_csv(output_path, index=False)
+        return None
+
+    # Query qaDB: executed visits with pfs_design_id and started_at
+    conn = connect_qadb(conf)
+    try:
+        sql = """
+        SELECT
+            pfs_visit.pfs_design_id,
+            onsite_processing_status.started_at
+        FROM exposure_time
+            JOIN pfs_visit ON exposure_time.pfs_visit_id = pfs_visit.pfs_visit_id
+            JOIN onsite_processing_status ON onsite_processing_status.pfs_visit_id = pfs_visit.pfs_visit_id
+        WHERE pfs_visit.pfs_design_id IS NOT NULL AND pfs_visit.pfs_visit_id >=129587
+        ORDER BY onsite_processing_status.started_at ASC;
+        """
+
+        with conn.cursor() as cur:
+            cur.execute(sql)
+            df_design_done = pd.DataFrame(
+                cur.fetchall(),
+                columns=["pfs_design_id", "started_at"],
+            )
+    except Exception as e:
+        logger.error(f"[proposal_nppc] Failed to query qaDB: {e}")
+        return None
+    finally:
+        conn.close()
+
+    if df_design_done.empty:
+        logger.warning("[proposal_nppc] qaDB returned no executed designs.")
+        pd.DataFrame(columns=["date"]).to_csv(output_path, index=False)
+        return None
+
+    # Accumulate nppc(date, proposal_id): count 1 per design if proposal appears in targetType==1
+    # (excluding observed filler proposal S25A-000QF).
+    per_date_counts = {}
+
+    for _, row in df_design_done.iterrows():
+        design_id = row["pfs_design_id"]
+        if pd.isna(design_id):
+            continue
+
+        try:
+            fname = f"pfsDesign-0x{int(design_id):016x}.fits"
+        except Exception:
+            continue
+
+        filepath = design_path_map.get(fname)
+        if filepath is None:
+            continue
+
+        started_at = row["started_at"]
+        if pd.isna(started_at):
+            continue
+        obs_date = pd.to_datetime(started_at).date().isoformat()
+
+        try:
+            with fits.open(filepath, memmap=True) as hdul:
+                data = hdul[1].data
+                if data is None or len(data) == 0:
+                    continue
+
+                mask_science = data["targetType"] == 1
+                raw_ids = np.unique(data["proposalId"][mask_science])
+                proposal_ids_in_design = []
+                for raw_pid in raw_ids:
+                    if isinstance(raw_pid, (bytes, np.bytes_)):
+                        pid = raw_pid.decode("utf-8", errors="ignore").strip()
+                    else:
+                        pid = str(raw_pid).strip()
+
+                    if pid.startswith(semester_code) and pid != "S25A-000QF":
+                        proposal_ids_in_design.append(pid)
+        except Exception:
+            continue
+
+        if obs_date not in per_date_counts:
+            per_date_counts[obs_date] = {}
+
+        for pid in proposal_ids_in_design:
+            per_date_counts[obs_date][pid] = per_date_counts[obs_date].get(pid, 0) + 1
+
+    # Build wide table: one row per date, one column per proposal_id
+    configured_semester_proposals = {
+        str(pid) for pid in proposal_ids if str(pid).startswith(semester_code)
+    }
+    counted_proposals = {
+        pid for date_counts in per_date_counts.values() for pid in date_counts.keys()
+    }
+    all_proposals = sorted(configured_semester_proposals | counted_proposals)
+
+    rows = []
+    for date_str in sorted(per_date_counts.keys()):
+        row = {"date": date_str}
+        for pid in all_proposals:
+            row[pid] = per_date_counts[date_str].get(pid, 0)
+        rows.append(row)
+
+    df_out = pd.DataFrame(rows)
+    if not df_out.empty:
+        df_out = df_out.sort_values("date").reset_index(drop=True)
+    else:
+        df_out = pd.DataFrame(columns=["date"] + all_proposals)
+
+    df_out.to_csv(output_path, index=False)
+    logger.info(f"[proposal_sum] Saved {output_path}")
+
+    return None
 
 
 def plot_ppc(conf, tb_tgt, tb_ppc, pdf):
