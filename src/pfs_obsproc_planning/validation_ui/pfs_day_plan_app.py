@@ -105,30 +105,6 @@ def validation_html_path(selected_date):
 
     return matches[0]
 
-
-def summary_csv_path(selected_date):
-    yymm = selected_date.strftime("%y%m")
-    ymd = selected_date.strftime("%Y%m%d")
-
-    base_dir = f"/home/wanqiu/data/HE/PFS_frame/git/work/wanqqq/run_{yymm}"
-    pattern = f"{base_dir}/*queue/output_{ymd}/summary_reconfigure_ppp-ppp+qplan_output.csv"
-    matches = glob.glob(pattern)
-
-    if len(matches) == 0:
-        pn.state.notifications.warning(  # type: ignore[union-attr]
-            f"No summary CSV found for {selected_date}.",
-            duration=4000,
-        )
-        return None
-
-    if len(matches) > 1:
-        pn.state.notifications.warning(  # type: ignore[union-attr]
-            f"Multiple summary CSVs found for {selected_date}. Using the first one.",
-            duration=5000,
-        )
-
-    return matches[0]
-
 def find_highlighted_cells(html_path):
     with open(html_path, "r", encoding="utf-8") as f:
         soup = BeautifulSoup(f, "html.parser")
