@@ -22,8 +22,10 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from astropy.coordinates import SkyCoord
+from astropy import units as u
+from astropy.coordinates import AltAz, EarthLocation, SkyCoord, get_body
 from astropy.table import Table
+from astropy.time import Time
 from loguru import logger
 from mpl_toolkits.mplot3d import Axes3D
 
@@ -40,6 +42,12 @@ from pfs_design_tool import reconfigure_fibers_ppp as sfa
 from . import plot_pfsDesign as pldes
 
 warnings.filterwarnings("ignore")
+
+SUBARU_LOCATION = EarthLocation(
+    lat=19.825556 * u.deg,
+    lon=-155.476111 * u.deg,
+    height=4139 * u.m,
+)
 
 
 # from importlib import reload
@@ -90,6 +98,127 @@ def calc_inr(df, obstime):
         logger.warning(f"Error in calculating InR: {e}")
         inr = np.nan
     return inr, el
+
+
+def save_visibility_plot(summary_csv_path, output_path, selected_date):
+    """Save a visibility plot PNG for the selected date and return the path.
+
+    The plot shows elevation (solid), InR (dashed), moon elevation, and
+    per-pointing moon-separation labels. The figure is saved to `output_path`.
+    """
+    df_vis = pd.read_csv(summary_csv_path)
+    if df_vis.empty:
+        return None
+
+    df_vis["observation_time"] = pd.to_datetime(df_vis["observation_time"], utc=True)
+    df_vis["observation_time_stop"] = df_vis["observation_time"] + pd.to_timedelta(
+        1200, unit="s"
+    )
+    df_vis = df_vis.sort_values("observation_time").reset_index(drop=True)
+
+    hst_start = pd.Timestamp(selected_date).tz_localize("Pacific/Honolulu") + pd.Timedelta(hours=19)
+    hst_stop = pd.Timestamp(selected_date).tz_localize("Pacific/Honolulu") + pd.Timedelta(
+        days=1, hours=5, minutes=30
+    )
+    sample_start = hst_start.tz_convert("UTC")
+    sample_stop = hst_stop.tz_convert("UTC")
+    sample_times = pd.date_range(sample_start, sample_stop, freq="5min", tz="UTC")
+    sample_times_hst = sample_times.tz_convert("Pacific/Honolulu")
+    astropy_times = Time(sample_times.to_pydatetime())
+    moon_coords = get_body("moon", astropy_times)
+    moon_altitude = moon_coords.transform_to(
+        AltAz(obstime=astropy_times, location=SUBARU_LOCATION)
+    ).alt.deg
+
+    fig, ax_el = plt.subplots(figsize=(12, 7))
+    ax_aux = ax_el.twinx()
+    colors = plt.cm.tab20(np.linspace(0, 1, max(len(df_vis), 2)))
+    ax_el.axhspan(32, 75, color="gold", alpha=0.12, zorder=0)
+
+    for idx, row in df_vis.iterrows():
+        color = colors[idx % len(colors)]
+        elevations = []
+        inrs = []
+
+        for obstime in sample_times:
+            inr, el = calc_inr(row, obstime.to_pydatetime())
+            elevations.append(el)
+            inrs.append(inr)
+
+        elevations = np.asarray(elevations, dtype=float)
+        inrs = np.asarray(inrs, dtype=float)
+
+        target = SkyCoord(row["ra_center"] * u.deg, row["dec_center"] * u.deg)
+        moon_separation = target.separation(moon_coords).deg
+
+        label = str(row["pointing"])
+        ax_el.plot(sample_times_hst, elevations, color=color, linewidth=1.0, alpha=0.5)
+        ax_aux.plot(
+            sample_times_hst,
+            inrs,
+            color=color,
+            linestyle="--",
+            linewidth=1.0,
+            alpha=0.5,
+        )
+
+        scheduled_mask = (
+            (sample_times >= row["observation_time"])
+            & (sample_times <= row["observation_time_stop"])
+        )
+        ax_el.plot(
+            sample_times_hst[scheduled_mask],
+            elevations[scheduled_mask],
+            color=color,
+            linewidth=3.0,
+            label=label,
+        )
+
+        if np.any(scheduled_mask):
+            scheduled_indices = np.flatnonzero(scheduled_mask)
+            mid_idx = scheduled_indices[len(scheduled_indices) // 2]
+            ax_el.text(
+                sample_times_hst[mid_idx],
+                min(88, elevations[mid_idx] + 1.2),
+                f"{np.min(moon_separation[scheduled_mask]):.0f}°",
+                color=color,
+                fontsize=8,
+                ha="center",
+                va="bottom",
+                bbox=dict(facecolor="white", edgecolor="none", alpha=0.6, pad=1.5),
+            )
+
+    ax_el.plot(
+        sample_times_hst,
+        moon_altitude,
+        color="black",
+        linewidth=2.0,
+        label="Moon elevation",
+    )
+
+    ax_el.set_title(f"Visibility for {selected_date.strftime('%Y-%m-%d')}")
+    ax_el.set_xlabel("HST")
+    ax_el.set_ylabel("Elevation [deg]")
+    ax_aux.set_ylabel("InR [deg]")
+    ax_el.set_ylim(0, 90)
+    ax_aux.set_ylim(-180, 180)
+    ax_el.set_xlim(hst_start.to_pydatetime(), hst_stop.to_pydatetime())
+    ax_el.grid(True, alpha=0.3)
+
+    handles_el, labels_el = ax_el.get_legend_handles_labels()
+    handles_aux, labels_aux = ax_aux.get_legend_handles_labels()
+    ax_el.legend(
+        handles_el + handles_aux,
+        labels_el + labels_aux,
+        loc="upper left",
+        bbox_to_anchor=(1.02, 1.0),
+        fontsize=8,
+    )
+    fig.autofmt_xdate()
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return output_path
 
 
 def _load_design_summary(parentPath: str, ssp: bool):
