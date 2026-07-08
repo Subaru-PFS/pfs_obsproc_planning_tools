@@ -25,8 +25,8 @@ pn.extension(
 )
 
 # Path to CSV produced by the daily processing pipeline. Adjust as needed.
-CSV_PATH = "/home/wanqiu/data/HE/PFS_frame/git/work/wanqqq/daily_process_status.csv"
-PROPOSAL_SUM_CSV_PATH = "/home/wanqiu/data/HE/PFS_frame/git/work/wanqqq/run_2605/S26A-queue/proposal_sum.csv"
+CSV_PATH = "/work/wanqqq/daily_process_status.csv"
+PROPOSAL_SUM_CSV_PATH = "/home/wanqqq/workDir_pfs/S26A/proposal_sum_S26A.csv"
 HIGHLIGHT_STYLE = (
     "background-color: #FCE59F;"
     "font-weight: bold;"
@@ -57,7 +57,7 @@ def proposal_stat_csv_path(selected_date):
     yymm = selected_date.strftime("%y%m")
     ymd = selected_date.strftime("%Y%m%d")
     return (
-        "/home/wanqiu/data/HE/PFS_frame/git/work/wanqqq/"
+        "/work/wanqqq/"
         f"run_{yymm}/{semester_code}-queue/output_{ymd}/proposal_stat_{yymm}{selected_date.strftime('%d')}.csv"
     )
 
@@ -98,7 +98,7 @@ def validation_html_path(selected_date):
     yymm = selected_date.strftime("%y%m")
     ymd = selected_date.strftime("%Y%m%d")
 
-    base_dir = f"/home/wanqiu/data/HE/PFS_frame/git/work/wanqqq/run_{yymm}"
+    base_dir = f"/work/wanqqq/run_{yymm}"
 
     pattern = (
         f"{base_dir}/*queue/"
