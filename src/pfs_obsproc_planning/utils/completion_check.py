@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 # completion_check.py : Subaru Fiber Allocation software
 import os
+import json
 import random
+import re
 import warnings
 from datetime import datetime, time, timedelta
 from glob import glob
@@ -66,60 +68,79 @@ def run(conf, workDir="."):
     elif len(tb_queue) == 0 and len(tb_queue_backup) > 0:
         tb_queue = tb_queue_backup
 
+    # Save proposal-level summary first, then re-use it downstream.
+    proposal_stat_path = save_proposal_stat_csv(conf, tb_tgt, tb_queue, workDir)
+
     pdf = PdfPages(os.path.join(workDir, "check-S26A-queue.pdf"))
 
     plot_ppc(conf, tb_tgt, tb_ppc, pdf)
     plot_assign(conf, workDir, pdf)
     plot_schedule(workDir, pdf)
     plot_EET(workDir, tb_queue, pdf)
-    plot_CR(conf, tb_tgt, tb_queue, workDir, pdf)
-    save_proposal_sum_csv(conf, workDir)
+    plot_CR(conf, tb_tgt, tb_queue, workDir, pdf, proposal_stat_path=proposal_stat_path)
 
     pdf.close()
 
 
-def save_proposal_sum_csv(conf, workDir):
-    """Save per-date per-proposal executed pointing counts (nppc) as CSV.
+def _get_proposals_from_design_fits(fits_path, semester_code, filler_proposals):
+    """Return semester proposal IDs included in one design FITS science fibers.
 
-    The output file is saved in the same folder as the completion PDF:
-    ``{workDir}/proposal_sum.csv``.
+    - Uses only science fibers (`targetType`/`targettype` == 1)
+    - Excludes filler proposals
+    - Returns unique proposal IDs present in the design
+    """
+    try:
+        with fits.open(fits_path, memmap=True) as hdul:
+            data = hdul[1].data
+            if data is None or len(data) == 0:
+                return []
+
+            target_type_col = "targetType" if "targetType" in data.names else "targettype"
+            proposal_col = "proposalId" if "proposalId" in data.names else "proposalID"
+
+            mask_science = data[target_type_col] == 1
+            raw_ids = np.unique(data[proposal_col][mask_science])
+            out = []
+            for raw_pid in raw_ids:
+                if isinstance(raw_pid, (bytes, np.bytes_)):
+                    pid = raw_pid.decode("utf-8", errors="ignore").strip()
+                else:
+                    pid = str(raw_pid).strip()
+
+                if pid.startswith(semester_code) and pid not in filler_proposals:
+                    out.append(pid)
+            return out
+    except Exception:
+        return []
+
+
+def _observed_nppc_by_proposal(conf, semester_code, proposal_ids, filler_proposals):
+    """Observed nppc from qaDB.
+
+    Counting rules:
+    - Adjacent visits of the same design in one HST night are collapsed
+        as `ceil(N/2)` pointings.
+    - Date is HST night date (post-midnight belongs to previous night).
     """
     try:
         from pfs_design_tool.pointing_utils.dbutils import connect_qadb
     except Exception as e:
-        logger.error(f"[proposal_sum] Failed to import connect_qadb: {e}")
-        return None
+        logger.error(f"[proposal_stat] Failed to import connect_qadb: {e}")
+        return {pid: 0 for pid in proposal_ids}
 
-    # infer semester from proposal IDs in config (e.g. S26A)
-    proposal_ids = conf.get("ppp", {}).get("proposalIds", []) + conf.get("ppp", {}).get(
-        "proposalIds_backup", []
-    )
-    if len(proposal_ids) == 0:
-        logger.warning("[proposal_sum] No proposalIds found in config.")
-        return None
-
-    semester_code = str(proposal_ids[0]).split("-")[0]
-
-    output_path = os.path.join(workDir, "proposal_nppc.csv")
-
-    # Find all semester queue runs (e.g. /work/wanqqq/run_2603/S26A-queue,
-    # /work/wanqqq/run_2605/S26A-queue) under the common run root.
     base_dir = "/work/wanqqq"
     run_queue_dirs = sorted(glob(os.path.join(base_dir, "run_*", f"{semester_code}-queue")))
 
-    # Map design FITS filename -> absolute path from all
-    # /work/wanqqq/run_YYMM/Sxxx-queue/output_YYMMDD/design/*.fits
+    # Map design filename to absolute path across all semester runs.
     design_path_map = {}
     for run_queue_dir in run_queue_dirs:
         for fits_path in glob(os.path.join(run_queue_dir, "output_*", "design", "pfsDesign-0x*.fits")):
             design_path_map[os.path.basename(fits_path)] = fits_path
 
     if len(design_path_map) == 0:
-        logger.warning(f"[proposal_nppc] No design FITS found for {semester_code} under {base_dir}")
-        pd.DataFrame(columns=["date"]).to_csv(output_path, index=False)
-        return None
+        logger.warning(f"[proposal_stat] No design FITS found for {semester_code} under {base_dir}")
+        return {pid: 0 for pid in proposal_ids}
 
-    # Query qaDB: executed visits with pfs_design_id and started_at
     conn = connect_qadb(conf)
     try:
         sql = """
@@ -133,7 +154,6 @@ def save_proposal_sum_csv(conf, workDir):
         WHERE pfs_visit.pfs_design_id IS NOT NULL AND pfs_visit.pfs_visit_id >=129587
         ORDER BY onsite_processing_status.started_at ASC, pfs_visit.pfs_visit_id ASC;
         """
-
         with conn.cursor() as cur:
             cur.execute(sql)
             df_design_done = pd.DataFrame(
@@ -141,15 +161,13 @@ def save_proposal_sum_csv(conf, workDir):
                 columns=["pfs_visit_id", "pfs_design_id", "started_at"],
             )
     except Exception as e:
-        logger.error(f"[proposal_nppc] Failed to query qaDB: {e}")
-        return None
+        logger.error(f"[proposal_stat] Failed to query qaDB: {e}")
+        return {pid: 0 for pid in proposal_ids}
     finally:
         conn.close()
 
     if df_design_done.empty:
-        logger.warning("[proposal_nppc] qaDB returned no executed designs.")
-        pd.DataFrame(columns=["date"]).to_csv(output_path, index=False)
-        return None
+        return {pid: 0 for pid in proposal_ids}
 
     # Convert each visit timestamp into HST night date:
     # e.g., 2026-05-14 05:00 belongs to night 2026-05-13.
@@ -161,16 +179,13 @@ def save_proposal_sum_csv(conf, workDir):
             t = t - pd.Timedelta(days=1)
         return t.date().isoformat()
 
-    # Treat adjacent visits of the same design within the same HST night
-    # as one pointing (2 adjacent visits => 1 count).
-    # For a run length N, pointing count is ceil(N/2) == (N + 1) // 2.
+    # Collapse adjacent visits of the same design within one night.
+    # For run length N, pointing count = ceil(N/2) = (N + 1) // 2.
     visit_runs = {}
     prev_key = None
     run_len = 0
-
     for _, row in df_design_done.iterrows():
-        design_id = row["pfs_design_id"]
-        if pd.isna(design_id):
+        if pd.isna(row["pfs_design_id"]):
             continue
 
         obs_date = hst_night_date(row["started_at"])
@@ -178,7 +193,7 @@ def save_proposal_sum_csv(conf, workDir):
             continue
 
         try:
-            design_id_int = int(design_id)
+            design_id_int = int(row["pfs_design_id"])
         except Exception:
             continue
 
@@ -196,80 +211,247 @@ def save_proposal_sum_csv(conf, workDir):
 
     # Cache proposal IDs present in each design FITS once.
     design_proposals_cache = {}
+    obs_nppc = {pid: 0 for pid in proposal_ids}
 
-    # Accumulate nppc(date, proposal_id) from collapsed pointing counts.
-    # Count design if proposal appears in targetType==1
-    # (excluding observed filler proposal S25A-000QF).
-    per_date_counts = {}
-
-    for (obs_date, design_id_int), n_pointings in visit_runs.items():
-        try:
-            fname = f"pfsDesign-0x{design_id_int:016x}.fits"
-        except Exception:
-            continue
-
+    for (_, design_id_int), n_pointings in visit_runs.items():
+        fname = f"pfsDesign-0x{design_id_int:016x}.fits"
         filepath = design_path_map.get(fname)
         if filepath is None:
             continue
 
         if design_id_int not in design_proposals_cache:
-            try:
-                with fits.open(filepath, memmap=True) as hdul:
-                    data = hdul[1].data
-                    if data is None or len(data) == 0:
-                        design_proposals_cache[design_id_int] = []
-                        continue
+            design_proposals_cache[design_id_int] = _get_proposals_from_design_fits(
+                filepath,
+                semester_code,
+                filler_proposals,
+            )
 
-                    mask_science = data["targetType"] == 1
-                    raw_ids = np.unique(data["proposalId"][mask_science])
-                    proposal_ids_in_design = []
-                    for raw_pid in raw_ids:
-                        if isinstance(raw_pid, (bytes, np.bytes_)):
-                            pid = raw_pid.decode("utf-8", errors="ignore").strip()
-                        else:
-                            pid = str(raw_pid).strip()
+        for pid in design_proposals_cache[design_id_int]:
+            if pid in obs_nppc:
+                obs_nppc[pid] += int(n_pointings)
 
-                        if pid.startswith(semester_code) and pid != "S25A-000QF":
-                            proposal_ids_in_design.append(pid)
+    return obs_nppc
 
-                    design_proposals_cache[design_id_int] = proposal_ids_in_design
-            except Exception:
-                continue
 
-        proposal_ids_in_design = design_proposals_cache.get(design_id_int, [])
+def save_proposal_stat_csv(conf, tb_tgt, tb_queue, workDir):
+    """Save per-proposal status summary to workDir/proposal_stat_YYMMDD.csv.
 
-        if obs_date not in per_date_counts:
-            per_date_counts[obs_date] = {}
+    One row per proposal, including:
+    - FH achieved / expected after tonight
+    - nppc observed / tonight / expected after tonight
+    - completed and partial target counts (now and expected)
+    - extra FH needed to finish partial targets
+    - priority vectors P0..P9 (JSON arrays)
+    """
+    all_psl_ids = conf.get("ppp", {}).get("proposalIds", []) + conf.get("ppp", {}).get(
+        "proposalIds_backup", []
+    )
+    all_psl_ids = [str(pid) for pid in all_psl_ids]
+    all_psl_ids = list(dict.fromkeys(all_psl_ids))
+    if len(all_psl_ids) == 0:
+        logger.warning("[proposal_stat] No proposal IDs found in config.")
+        return None
 
+    semester_code = all_psl_ids[0].split("-")[0]
+    filler_proposals = set(conf.get("sfa", {}).get("proposalIds_obsFiller", [])) | {"S25A-000QF"}
+
+    # Merge queue progress columns into target table.
+    tb_stat = tb_tgt.copy()
+    if len(tb_queue) > 0:
+        tb_stat = join(
+            tb_stat,
+            tb_queue,
+            keys_left=["proposal_id", "ob_code"],
+            keys_right=["psl_id", "ob_code"],
+            join_type="left",
+        )
+        if "ob_code_1" in tb_stat.colnames:
+            tb_stat.rename_column("ob_code_1", "ob_code")
+    else:
+        if "ob_exptime_usr" not in tb_stat.colnames:
+            tb_stat["ob_exptime_usr"] = 0.0
+        tb_stat["eff_exptime_done_real"] = 0.0
+        tb_stat["exptime_done_real"] = 0.0
+
+    def _float_col(tb, name):
+        if name not in tb.colnames:
+            return np.zeros(len(tb), dtype=float)
+        return np.ma.filled(tb[name], 0.0).astype(float)
+
+    # Exposure arrays used by all derived metrics.
+    exptime_usr = _float_col(tb_stat, "ob_exptime_usr")
+    eff_exptime_done_real = _float_col(tb_stat, "eff_exptime_done_real")
+    exptime_done_real = _float_col(tb_stat, "exptime_done_real")
+    eff_exptime_done_rec = np.minimum(exptime_usr, eff_exptime_done_real)
+
+    # Planned extra exposure expected from tonight's design files.
+    exptime_exp = np.zeros(len(tb_stat), dtype=float)
+    ob_codes = np.array([str(v) for v in tb_stat["ob_code"]]) if "ob_code" in tb_stat.colnames else np.array([])
+
+    design_files_tonight = []
+    for subdir in ["design", "designs"]:
+        design_files_tonight.extend(glob(os.path.join(workDir, subdir, "*.fits")))
+    design_files_tonight = sorted(set(design_files_tonight))
+
+    # Planned nppc contribution from tonight's designs.
+    nppc_tonight = {pid: 0 for pid in all_psl_ids}
+
+    for fits_path in design_files_tonight:
+        try:
+            with fits.open(fits_path) as hdul:
+                data = hdul[1].data
+                if data is None or len(data) == 0:
+                    continue
+
+                obcode_assign = [row["obCode"] for row in data if row["obCode"] != "N/A"]
+                if len(ob_codes) > 0:
+                    mask = np.isin(ob_codes, np.array([str(v) for v in obcode_assign]))
+                    exptime_exp[mask] += 900.0
+        except Exception:
+            continue
+
+        proposal_ids_in_design = _get_proposals_from_design_fits(
+            fits_path,
+            semester_code,
+            filler_proposals,
+        )
         for pid in proposal_ids_in_design:
-            per_date_counts[obs_date][pid] = per_date_counts[obs_date].get(pid, 0) + n_pointings
+            if pid in nppc_tonight:
+                nppc_tonight[pid] += 1
 
-    # Build wide table: one row per date, one column per proposal_id
-    configured_semester_proposals = {
-        str(pid) for pid in proposal_ids if str(pid).startswith(semester_code)
-    }
-    counted_proposals = {
-        pid for date_counts in per_date_counts.values() for pid in date_counts.keys()
-    }
-    all_proposals = sorted(configured_semester_proposals | counted_proposals)
+    # "After tonight" effective exposure (capped at user-requested exposure).
+    eff_exptime_expected_after_tonight = np.minimum(
+        exptime_usr,
+        eff_exptime_done_rec + exptime_exp,
+    )
+
+    obs_nppc = _observed_nppc_by_proposal(
+        conf,
+        semester_code,
+        all_psl_ids,
+        filler_proposals,
+    )
+
+    # Priority bins are taken directly from `ob_priority` (guaranteed 0..9).
+    if "ob_priority" in tb_stat.colnames:
+        priorities = np.asarray(np.ma.filled(tb_stat["ob_priority"], 0), dtype=float)
+        priorities = np.rint(priorities).astype(int)
+        priorities = np.clip(priorities, 0, 9)
+    else:
+        logger.warning("[proposal_stat] ob_priority is missing; priority vectors are set to zeros.")
+        priorities = np.full(len(tb_stat), -1, dtype=int)
 
     rows = []
-    for date_str in sorted(per_date_counts.keys()):
-        row = {"date": date_str}
-        for pid in all_proposals:
-            row[pid] = per_date_counts[date_str].get(pid, 0)
-        rows.append(row)
+    proposal_arr = np.array([str(v) for v in tb_stat["proposal_id"]])
+    usr_positive = exptime_usr > 0
 
-    df_out = pd.DataFrame(rows)
-    if not df_out.empty:
-        df_out = df_out.sort_values("date").reset_index(drop=True)
-    else:
-        df_out = pd.DataFrame(columns=["date"] + all_proposals)
+    # Build one output row per proposal.
+    for psl_id in all_psl_ids:
+        mask_psl = proposal_arr == psl_id
 
-    df_out.to_csv(output_path, index=False)
-    logger.info(f"[proposal_sum] Saved {output_path}")
+        fh_tot = float(np.sum(exptime_usr[mask_psl]) / 3600.0)
+        if "allocated_time_tac" in tb_stat.colnames and np.any(mask_psl):
+            alloc_vals = pd.to_numeric(
+                np.asarray(np.ma.filled(tb_stat["allocated_time_tac"][mask_psl], 0)),
+                errors="coerce",
+            )
+            alloc_vals = np.nan_to_num(alloc_vals, nan=0.0)
+            fh_alloc = float(alloc_vals[0]) if len(alloc_vals) > 0 else 0.0
+        else:
+            fh_alloc = 0.0
 
-    return None
+        fh_com = float(
+            np.sum(
+                eff_exptime_done_rec[mask_psl & (eff_exptime_done_rec >= exptime_usr)]
+            )
+            / 3600.0
+        )
+
+        fh_achieved = float(np.sum(eff_exptime_done_rec[mask_psl]) / 3600.0)
+        fh_executed = float(np.sum(exptime_done_real[mask_psl]) / 3600.0)
+        fh_expected_after_tonight = float(
+            (np.sum(eff_exptime_done_rec[mask_psl]) + np.sum(exptime_exp[mask_psl])) / 3600.0
+        )
+
+        mask_complete_now = mask_psl & usr_positive & (eff_exptime_done_rec >= exptime_usr)
+        mask_complete_expected = mask_psl & usr_positive & (
+            eff_exptime_expected_after_tonight >= exptime_usr
+        )
+
+        mask_partial_now = mask_psl & usr_positive & (eff_exptime_done_rec > 0) & (
+            eff_exptime_done_rec < exptime_usr
+        )
+        mask_partial_expected = (
+            mask_psl
+            & usr_positive
+            & (eff_exptime_expected_after_tonight > 0)
+            & (eff_exptime_expected_after_tonight < exptime_usr)
+        )
+
+        partial_fh_needed_now = float(
+            np.sum(exptime_usr[mask_partial_now] - eff_exptime_done_rec[mask_partial_now]) / 3600.0
+        )
+        partial_fh_needed_after_tonight = float(
+            np.sum(
+                exptime_usr[mask_partial_expected]
+                - eff_exptime_expected_after_tonight[mask_partial_expected]
+            )
+            / 3600.0
+        )
+
+        # Priority vectors (P0..P9).
+        total_by_priority = [
+            int(np.sum(mask_psl & (priorities == p)))
+            for p in range(10)
+        ]
+        observed_by_priority = [
+            int(np.sum(mask_psl & (priorities == p) & (eff_exptime_done_rec > 0)))
+            for p in range(10)
+        ]
+        expected_after_tonight_by_priority = [
+            int(
+                np.sum(
+                    mask_psl
+                    & (priorities == p)
+                    & (eff_exptime_expected_after_tonight > 0)
+                )
+            )
+            for p in range(10)
+        ]
+
+        nppc_observed = int(obs_nppc.get(psl_id, 0))
+        nppc_expected_after_tonight = int(nppc_observed + nppc_tonight.get(psl_id, 0))
+
+        rows.append(
+            {
+                "proposal_id": psl_id,
+                "fh_total_requested": round(fh_tot, 3),
+                "fh_allocated": round(fh_alloc, 3),
+                "fh_completed": round(fh_com, 3),
+                "fh_achieved": round(fh_achieved, 3),
+                "fh_executed": round(fh_executed, 3),
+                "fh_expected_after_tonight": round(fh_expected_after_tonight, 3),
+                "nppc_observed": nppc_observed,
+                "nppc_expected_after_tonight": nppc_expected_after_tonight,
+                "nppc_tonight": int(nppc_tonight.get(psl_id, 0)),
+                "n_target_completed": int(np.sum(mask_complete_now)),
+                "n_target_completed_expected_after_tonight": int(np.sum(mask_complete_expected)),
+                "n_target_partial": int(np.sum(mask_partial_now)),
+                "n_target_partial_expected_after_tonight": int(np.sum(mask_partial_expected)),
+                "fh_needed_to_complete_partial_now": round(partial_fh_needed_now, 3),
+                "fh_needed_to_complete_partial_after_tonight": round(partial_fh_needed_after_tonight, 3),
+                "priority_total_P0toP9": json.dumps(total_by_priority),
+                "priority_observed_P0toP9": json.dumps(observed_by_priority),
+                "priority_expected_after_tonight_P0toP9": json.dumps(expected_after_tonight_by_priority),
+            }
+        )
+
+    today_yymmdd = datetime.today().strftime("%y%m%d")
+    output_path = os.path.join(workDir, f"proposal_stat_{today_yymmdd}.csv")
+    pd.DataFrame(rows).to_csv(output_path, index=False)
+    logger.info(f"[proposal_stat] Saved {output_path}")
+
+    return output_path
 
 
 def plot_ppc(conf, tb_tgt, tb_ppc, pdf):
@@ -665,80 +847,124 @@ def plot_EET(workDir, tb_queue, pdf):
     plt.close()
 
 
-def plot_CR(conf, tb_tgt, tb_queue, workDir, pdf):
+def plot_CR(conf, tb_tgt, tb_queue, workDir, pdf, proposal_stat_path=None):
     """
     Plot completion rates (bar charts) for each proposal.
     """
 
-    # --- Prepare target table ---
-    if len(tb_queue) > 0:
-        tb_tgt = join(tb_tgt, tb_queue,
-                        keys_left=["proposal_id", "ob_code"],
-                        keys_right=["psl_id", "ob_code"],
-                        join_type="left")
-        tb_tgt.rename_column("ob_code_1", "ob_code")
-    else:
-        tb_tgt["ob_exptime_usr"] = 0.0
-        tb_tgt["eff_exptime_done_real"] = 0.0
-        tb_tgt["exptime_done_real"] = 0.0
-    
-    exptime_usr = np.ma.filled(tb_tgt["ob_exptime_usr"], 0.0)
-    exptime_done_real = np.ma.filled(tb_tgt["eff_exptime_done_real"], 0.0)
-
-    exptime_usr = exptime_usr.astype(float)
-    exptime_done_real = exptime_done_real.astype(float)
-    
-    tb_tgt["eff_exptime_done_rec"] = np.minimum(exptime_usr, exptime_done_real)
-
-    #cols_to_remove = [c for c in tb_tgt.colnames if c in tb_queuedb.colnames and "ob_code" not in c]
-    #tb_tgt.remove_columns(cols_to_remove)
-
-    tb_tgt["exptime_assign"] = 0.0
-
-    # --- Calculate expected exposure time ---
-    pfsdeg_files = glob(os.path.join(workDir, "design/*.fits"))
-    tb_tgt["exptime_exp"] = 0
-    for file in pfsdeg_files:
-        hdul = fits.open(file)
-        obcode_assign = [
-            row["obCode"] for row in hdul[1].data if row["obCode"] != "N/A"
-        ]
-        mask = np.isin(tb_tgt["ob_code"].data, obcode_assign)
-        tb_tgt["exptime_exp"][mask] += 900
-
     # --- Proposal ID lists ---
     all_psl_ids = conf["ppp"]["proposalIds"] + conf["ppp"]["proposalIds_backup"]
 
-    # --- Collect stats per proposal ---
+    # Try to reuse precomputed proposal statistics from save_proposal_stat_csv().
     fh_tot, fh_alloc, fh_com, fh_achieve, fh_exe, fh_exp = [], [], [], [], [], []
-    for psl_id in all_psl_ids:
-        queue_ = tb_queue[tb_queue["psl_id"] == psl_id]
-        tgt_ = tb_tgt[tb_tgt["proposal_id"] == psl_id]
+    use_cached = False
+    candidate_path = proposal_stat_path
+    if candidate_path is None:
+        candidate_path = os.path.join(workDir, f"proposal_stat_{datetime.today().strftime('%y%m%d')}.csv")
 
-        fh_tot_ = np.sum(tgt_["ob_exptime_usr"]) / 3600.0
-        fh_allo_ = list(set(tgt_["allocated_time_tac"]))[0] if len(tgt_) > 0 else 0
-        fh_com_ = (
-            np.sum(
-                tgt_["eff_exptime_done_rec"][
-                    tgt_["eff_exptime_done_rec"] >= tgt_["ob_exptime_usr"]
-                ]
+    if candidate_path and os.path.exists(candidate_path):
+        try:
+            df_stat = pd.read_csv(candidate_path)
+            required_cols = {
+                "proposal_id",
+                "fh_total_requested",
+                "fh_allocated",
+                "fh_completed",
+                "fh_achieved",
+                "fh_executed",
+                "fh_expected_after_tonight",
+            }
+            if required_cols.issubset(df_stat.columns):
+                df_stat = df_stat.set_index("proposal_id")
+                for psl_id in all_psl_ids:
+                    if psl_id in df_stat.index:
+                        row = df_stat.loc[psl_id]
+                        fh_tot_ = float(row["fh_total_requested"])
+                        fh_allo_ = float(row["fh_allocated"])
+                        fh_com_ = float(row["fh_completed"])
+                        fh_now_ = float(row["fh_achieved"])
+                        fh_real_ = float(row["fh_executed"])
+                        fh_exp_ = float(row["fh_expected_after_tonight"])
+                    else:
+                        fh_tot_, fh_allo_, fh_com_, fh_now_, fh_real_, fh_exp_ = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+                    logger.info(
+                        f"{psl_id}, FH_tot={fh_tot_:.2f}, FH_alloc={fh_allo_}, FH_com={fh_com_:.2f}, FH_achieve={fh_now_:.2f}, FH_exe={fh_real_:.2f}, FH_exp={fh_exp_:.2f}, CR={fh_now_/fh_allo_*100 if fh_allo_ else 0:.2f}%"
+                    )
+
+                    fh_tot.append(fh_tot_)
+                    fh_alloc.append(fh_allo_)
+                    fh_com.append(fh_com_)
+                    fh_achieve.append(fh_now_)
+                    fh_exe.append(fh_real_)
+                    fh_exp.append(fh_exp_)
+                use_cached = True
+        except Exception as e:
+            logger.warning(f"[CR] Failed to load cached proposal stats from {candidate_path}: {e}")
+
+    if not use_cached:
+        # --- Prepare target table ---
+        if len(tb_queue) > 0:
+            tb_tgt = join(tb_tgt, tb_queue,
+                            keys_left=["proposal_id", "ob_code"],
+                            keys_right=["psl_id", "ob_code"],
+                            join_type="left")
+            tb_tgt.rename_column("ob_code_1", "ob_code")
+        else:
+            tb_tgt["ob_exptime_usr"] = 0.0
+            tb_tgt["eff_exptime_done_real"] = 0.0
+            tb_tgt["exptime_done_real"] = 0.0
+
+        exptime_usr = np.ma.filled(tb_tgt["ob_exptime_usr"], 0.0)
+        exptime_done_real = np.ma.filled(tb_tgt["eff_exptime_done_real"], 0.0)
+
+        exptime_usr = exptime_usr.astype(float)
+        exptime_done_real = exptime_done_real.astype(float)
+
+        tb_tgt["eff_exptime_done_rec"] = np.minimum(exptime_usr, exptime_done_real)
+
+        tb_tgt["exptime_assign"] = 0.0
+
+        # --- Calculate expected exposure time ---
+        pfsdeg_files = glob(os.path.join(workDir, "design/*.fits"))
+        tb_tgt["exptime_exp"] = 0
+        for file in pfsdeg_files:
+            hdul = fits.open(file)
+            obcode_assign = [
+                row["obCode"] for row in hdul[1].data if row["obCode"] != "N/A"
+            ]
+            mask = np.isin(tb_tgt["ob_code"].data, obcode_assign)
+            tb_tgt["exptime_exp"][mask] += 900
+
+        # --- Collect stats per proposal ---
+        for psl_id in all_psl_ids:
+            queue_ = tb_queue[tb_queue["psl_id"] == psl_id]
+            tgt_ = tb_tgt[tb_tgt["proposal_id"] == psl_id]
+
+            fh_tot_ = np.sum(tgt_["ob_exptime_usr"]) / 3600.0
+            fh_allo_ = list(set(tgt_["allocated_time_tac"]))[0] if len(tgt_) > 0 else 0
+            fh_com_ = (
+                np.sum(
+                    tgt_["eff_exptime_done_rec"][
+                        tgt_["eff_exptime_done_rec"] >= tgt_["ob_exptime_usr"]
+                    ]
+                )
+                / 3600.0
             )
-            / 3600.0
-        )
-        fh_now_ = np.sum(tgt_["eff_exptime_done_rec"]) / 3600.0
-        fh_real_ = np.sum(tgt_["exptime_done_real"]) / 3600.0
-        fh_exp_ = np.sum(tgt_["exptime_exp"]) / 3600.0 + fh_now_
+            fh_now_ = np.sum(tgt_["eff_exptime_done_rec"]) / 3600.0
+            fh_real_ = np.sum(tgt_["exptime_done_real"]) / 3600.0
+            fh_exp_ = np.sum(tgt_["exptime_exp"]) / 3600.0 + fh_now_
 
-        logger.info(
-            f"{psl_id}, FH_tot={fh_tot_:.2f}, FH_alloc={fh_allo_}, FH_com={fh_com_:.2f}, FH_achieve={fh_now_:.2f}, FH_exe={fh_real_:.2f}, FH_exp={fh_exp_:.2f}, CR={fh_now_/fh_allo_*100 if fh_allo_ else 0:.2f}%"
-        )
+            logger.info(
+                f"{psl_id}, FH_tot={fh_tot_:.2f}, FH_alloc={fh_allo_}, FH_com={fh_com_:.2f}, FH_achieve={fh_now_:.2f}, FH_exe={fh_real_:.2f}, FH_exp={fh_exp_:.2f}, CR={fh_now_/fh_allo_*100 if fh_allo_ else 0:.2f}%"
+            )
 
-        fh_tot.append(fh_tot_)
-        fh_alloc.append(fh_allo_)
-        fh_com.append(fh_com_)
-        fh_achieve.append(fh_now_)
-        fh_exe.append(fh_real_)
-        fh_exp.append(fh_exp_)
+            fh_tot.append(fh_tot_)
+            fh_alloc.append(fh_allo_)
+            fh_com.append(fh_com_)
+            fh_achieve.append(fh_now_)
+            fh_exe.append(fh_real_)
+            fh_exp.append(fh_exp_)
 
     # --- Prepare groups for plotting ---
     ids_B = conf["ppp"]["proposalIds"]
