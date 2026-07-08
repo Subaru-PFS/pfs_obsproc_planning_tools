@@ -1,4 +1,5 @@
 import csv
+import ast
 import glob
 import re
 from datetime import datetime
@@ -51,13 +52,13 @@ def semester_code_for_date(selected_date):
     return f"S{selected_date.year % 100:02d}B"
 
 
-def proposal_nppc_csv_path(selected_date):
+def proposal_stat_csv_path(selected_date):
     semester_code = semester_code_for_date(selected_date)
     yymm = selected_date.strftime("%y%m")
     ymd = selected_date.strftime("%Y%m%d")
     return (
         "/home/wanqiu/data/HE/PFS_frame/git/work/wanqqq/"
-        f"run_{yymm}/{semester_code}-queue/output_{ymd}/proposal_nppc.csv"
+        f"run_{yymm}/{semester_code}-queue/output_{ymd}/proposal_stat_{yymm}{selected_date.strftime('%d')}.csv"
     )
 
 
@@ -388,6 +389,16 @@ def observation_progress_view(selected_date, _):
     remaining_segments = []
     gB_nppc_req = {}
     gB_nppc = {}
+    gB_nppc_tonight = {}
+    gB_fh_alloc = {}
+    gB_fh_achieved = {}
+    gB_fh_expected = {}
+    gB_fh_executed = {}
+    gB_n_target_completed = {}
+    gB_n_target_partial = {}
+    gB_fh_needed_partial = {}
+    gB_priority_total = {}
+    gB_priority_observed = {}
 
     try:
         with open(PROPOSAL_SUM_CSV_PATH, "r", encoding="utf-8") as f:
@@ -405,6 +416,16 @@ def observation_progress_view(selected_date, _):
                 if match:
                     gB_nppc_req[proposal_id] = int(match.group(1))
                     gB_nppc[proposal_id] = 0
+                    gB_nppc_tonight[proposal_id] = 0
+                    gB_fh_alloc[proposal_id] = 0.0
+                    gB_fh_achieved[proposal_id] = 0.0
+                    gB_fh_expected[proposal_id] = 0.0
+                    gB_fh_executed[proposal_id] = 0.0
+                    gB_n_target_completed[proposal_id] = 0
+                    gB_n_target_partial[proposal_id] = 0
+                    gB_fh_needed_partial[proposal_id] = 0.0
+                    gB_priority_total[proposal_id] = [0] * 10
+                    gB_priority_observed[proposal_id] = [0] * 10
     except Exception:
         pn.state.notifications.warning(  # type: ignore[union-attr]
             f"Could not read proposal summary file: {PROPOSAL_SUM_CSV_PATH}",
@@ -414,17 +435,47 @@ def observation_progress_view(selected_date, _):
         gB_nppc = {}
 
     if gB_nppc_req:
-        proposal_nppc_path = proposal_nppc_csv_path(start_date)
+        proposal_stat_path = proposal_stat_csv_path(start_date)
 
         try:
-            df_nppc = pd.read_csv(proposal_nppc_path)
+            df_stat = pd.read_csv(proposal_stat_path)
+            df_stat = df_stat.set_index("proposal_id")
             for proposal_id in gB_nppc_req:
-                if proposal_id in df_nppc.columns:
-                    total_nppc = pd.to_numeric(df_nppc[proposal_id], errors="coerce").fillna(0).sum()
-                    gB_nppc[proposal_id] = int(round(total_nppc / 2.0))
+                if proposal_id not in df_stat.index:
+                    continue
+
+                row = df_stat.loc[proposal_id]
+                gB_nppc[proposal_id] = int(pd.to_numeric(row.get("nppc_observed", 0), errors="coerce"))
+                gB_nppc_tonight[proposal_id] = int(pd.to_numeric(row.get("nppc_tonight", 0), errors="coerce"))
+
+                gB_fh_alloc[proposal_id] = float(pd.to_numeric(row.get("fh_allocated", 0.0), errors="coerce"))
+                gB_fh_achieved[proposal_id] = float(pd.to_numeric(row.get("fh_achieved", 0.0), errors="coerce"))
+                gB_fh_expected[proposal_id] = float(pd.to_numeric(row.get("fh_expected_after_tonight", 0.0), errors="coerce"))
+                gB_fh_executed[proposal_id] = float(pd.to_numeric(row.get("fh_executed", 0.0), errors="coerce"))
+
+                gB_n_target_completed[proposal_id] = int(pd.to_numeric(row.get("n_target_completed", 0), errors="coerce"))
+                gB_n_target_partial[proposal_id] = int(pd.to_numeric(row.get("n_target_partial", 0), errors="coerce"))
+                gB_fh_needed_partial[proposal_id] = float(pd.to_numeric(row.get("fh_needed_to_complete_partial_now", 0.0), errors="coerce"))
+
+                try:
+                    gB_priority_total[proposal_id] = [
+                        int(x) for x in ast.literal_eval(
+                            str(row.get("priority_total_P0toP9", "[0,0,0,0,0,0,0,0,0,0]"))
+                        )
+                    ]
+                except Exception:
+                    gB_priority_total[proposal_id] = [0] * 10
+                try:
+                    gB_priority_observed[proposal_id] = [
+                        int(x) for x in ast.literal_eval(
+                            str(row.get("priority_observed_P0toP9", "[0,0,0,0,0,0,0,0,0,0]"))
+                        )
+                    ]
+                except Exception:
+                    gB_priority_observed[proposal_id] = [0] * 10
         except Exception:
             pn.state.notifications.warning(  # type: ignore[union-attr]
-                f"Could not read proposal nppc file: {proposal_nppc_path}",
+                f"Could not read proposal stat file: {proposal_stat_path}",
                 duration=5000,
             )
 
@@ -480,7 +531,14 @@ def observation_progress_view(selected_date, _):
         gB_nppc_req[proposal_id] - gB_nppc.get(proposal_id, 0)
         for proposal_id in gB_nppc_req
     )
+    gB_remaining_alert_style = (
+        "color:#b91c1c; font-weight:bold;"
+        if gB_remaining_pointings > remaining_pointings * 0.8
+        else ""
+    )
     gB_table = ""
+    gB_fh_table = ""
+    gB_details = ""
     if gB_nppc_req:
         proposal_cells = "".join(
             f"<td style='padding:4px 8px; border:1px solid #ddd;'><b>{proposal_id}</b></td>"
@@ -499,15 +557,95 @@ def observation_progress_view(selected_date, _):
             f"<td style='padding:4px 8px; border:1px solid #ddd; text-align:center;'>{gB_nppc_req[proposal_id]}</td>"
             for proposal_id in gB_nppc_req
         )
+        tonight_cells = "".join(
+            f"<td style='padding:4px 8px; border:1px solid #ddd; text-align:center; color:#b45309; background:#fff7ed; font-weight:bold;'>+{gB_nppc_tonight.get(proposal_id, 0)}</td>"
+            for proposal_id in gB_nppc_req
+        )
         gB_table = (
             "<table style='margin-top:10px; border-collapse:collapse; font-size:14px;'>"
             "<tr><th style='padding:4px 8px; border:1px solid #ddd; background:#f7f7f7;'>Proposal ID</th>"
             f"{proposal_cells}</tr>"
             "<tr><th style='padding:4px 8px; border:1px solid #ddd; background:#f7f7f7;'>Nppc (observed)</th>"
             f"{pointing_cells}</tr>"
+            "<tr><th style='padding:4px 8px; border:1px solid #ddd; background:#ffedd5; color:#9a3412;'>Nppc (tonight)</th>"
+            f"{tonight_cells}</tr>"
             "<tr><th style='padding:4px 8px; border:1px solid #ddd; background:#f7f7f7;'>Nppc (uploader)</th>"
             f"{requested_cells}</tr>"
             "</table>"
+        )
+
+        fh_rows = []
+        for proposal_id in gB_nppc_req:
+            fh_alloc = gB_fh_alloc.get(proposal_id, 0.0)
+            fh_ach = gB_fh_achieved.get(proposal_id, 0.0)
+            fh_exp = gB_fh_expected.get(proposal_id, 0.0)
+            fh_exe = gB_fh_executed.get(proposal_id, 0.0)
+            # Per-proposal normalization: allocated FH defines bar length.
+            scale = max(1.0, fh_alloc)
+            ach_w = min(100.0, 100.0 * fh_ach / scale)
+            exp_w = min(100.0, 100.0 * fh_exp / scale)
+            alloc_w = min(100.0, 100.0 * fh_alloc / scale)
+            exe_x = 100.0 * fh_exe / scale
+            ach_frac = (100.0 * fh_ach / fh_alloc) if fh_alloc > 0 else 0.0
+            ach_frac_text = f"{ach_frac:.0f}%"
+            ach_frac_color = "#15803d" if ach_frac >= 90.0 else "#333"
+            fh_rows.append(
+                "<div style='margin:8px 0 12px 0;'>"
+                f"<div style='font-size:13px; margin-bottom:4px;'><b>{proposal_id}</b> | "
+                f"<span style='color:#6b7280;'>Alloc</span> <span style='color:#374151; font-weight:bold;'>{fh_alloc:.1f}</span> | "
+                f"<span style='color:#1d4ed8;'>Ach</span> <span style='color:#1d4ed8; font-weight:bold;'>{fh_ach:.1f}</span> | "
+                f"<span style='color:#15803d;'>Exp</span> <span style='color:#15803d; font-weight:bold;'>{fh_exp:.1f}</span> | "
+                f"<span style='color:#c2410c;'>Exe</span> <span style='color:#c2410c; font-weight:bold;'>{fh_exe:.1f}</span></div>"
+                "<div style='display:flex; align-items:center; gap:8px; max-width:760px;'>"
+                "<div style='position:relative; height:14px; border:1px solid #ccc; background:#f5f5f5; border-radius:4px; width:620px;'>"
+                f"<div style='position:absolute; left:0; top:0; height:100%; width:{alloc_w:.1f}%; background:#d9d9d9; border-radius:4px;'></div>"
+                f"<div style='position:absolute; left:0; top:0; height:100%; width:{exp_w:.1f}%; background:#a5d6a7; border-radius:4px; opacity:0.9;'></div>"
+                f"<div style='position:absolute; left:0; top:0; height:100%; width:{ach_w:.1f}%; background:#64b5f6; border-radius:4px; opacity:0.95;'></div>"
+                f"<div style='position:absolute; left:{exe_x:.1f}%; top:-2px; height:18px; border-left:3px solid #ff9800;'></div>"
+                "</div>"
+                f"<div style='min-width:52px; font-size:12px; color:{ach_frac_color}; font-weight:bold; text-align:right;'>{ach_frac_text}</div>"
+                "</div>"
+                "</div>"
+            )
+        gB_fh_table = (
+            "<div style='margin-top:12px; padding:10px; border:1px solid #ddd; border-radius:6px; background:#fbfbfb;'>"
+            "<div style='font-weight:bold; margin-bottom:6px;'>Current Observation pregressing for Grade B</div>"
+            + "".join(fh_rows)
+            + "</div>"
+        )
+
+        detail_lines = []
+        for proposal_id in gB_nppc_req:
+            p_total = gB_priority_total.get(proposal_id, [0] * 10)
+            p_obs = gB_priority_observed.get(proposal_id, [0] * 10)
+            highest_p = next((idx for idx, n in enumerate(p_total) if n > 0), None)
+            if highest_p is None:
+                p_label = "N_P-"
+                p_obs_text = "0"
+                p_tot_text = "0"
+            else:
+                p_label = f"N_P{highest_p}"
+                p_obs_text = str(p_obs[highest_p])
+                p_tot_text = str(p_total[highest_p])
+
+            fh_remaining = gB_fh_alloc.get(proposal_id, 0.0) - gB_fh_achieved.get(proposal_id, 0.0)
+            fh_needed = gB_fh_needed_partial.get(proposal_id, 0.0)
+            alert_style = "color:#b91c1c; font-weight:bold;" if fh_needed > fh_remaining * 0.8 else ""
+            detail_lines.append(
+                f"<li><b>{proposal_id}</b>: "
+                f"N_complete = <b>{gB_n_target_completed.get(proposal_id, 0)}</b>, "
+                f"N_partial = <b>{gB_n_target_partial.get(proposal_id, 0)}</b> "
+                f"(<b style='{alert_style}'>{fh_needed:.1f}</b> FHs further needed, "
+                f"<b style='{alert_style}'>{fh_remaining:.1f}</b> FHs remaining), "
+                f"{p_label} = <b>{p_obs_text}</b>/<b>{p_tot_text}</b>"
+                "</li>"
+            )
+        gB_details = (
+            "<div style='margin-top:10px; padding:10px; border:1px solid #ddd; border-radius:6px; background:#fff;'>"
+            "<div style='font-weight:bold; margin-bottom:6px;'>Target-base progressing</div>"
+            "<ul style='margin:0 0 0 18px; font-size:14px; line-height:1.6;'>"
+            + "".join(detail_lines)
+            + "</ul></div>"
         )
 
     return pn.pane.HTML(
@@ -519,8 +657,10 @@ def observation_progress_view(selected_date, _):
             " <span style='color:#6A5AA3; font-weight:bold; cursor:help;'>?</span>"
             "</span>"
             "<br>"
-            f"<b>{gB_remaining_pointings}</b> pointings still needed to complete grade B programs under good weather conditions."
+            f"<span style='{gB_remaining_alert_style}'><b>{gB_remaining_pointings}</b> pointings still needed to complete grade B programs (assuming good weather conditions and uploader simulation results).</span>"
             f"{gB_table}"
+            f"{gB_fh_table}"
+            f"{gB_details}"
             "</div>"
         ),
         sizing_mode="stretch_width",
