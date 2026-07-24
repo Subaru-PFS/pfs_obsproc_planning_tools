@@ -25,8 +25,8 @@ def get_single_proposal_requirements(proposal_id):
         
     if proposalId == "S26A-027":
         return {
-            "fixed_ppc_pa": 230.0,
-            "import_user_ppc_from_db": True,
+            #"fixed_ppc_pa": 230.0,
+            "import_user_ppc_from_db": False,
             "optimize_costs": True,
             "single_exptime_override": 10800.0,
             "single_program_mode": "LR",

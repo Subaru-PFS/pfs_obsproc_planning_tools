@@ -46,7 +46,7 @@ _PPP_OBJECTIVE_LAMBDAS = {
     "new": 0.10,
     "over": 0.05,
 }
-_PPP_PRIORITY_VALUES = {0: 100.0, 1: 5, 2: 1, 3: 1, 4: 0.5, 5: 0.5, 6: 0.4, 9: 0.1}
+_PPP_PRIORITY_VALUES = {0: 10.0, 1: 5, 2: 1, 3: 1, 4: 0.5, 5: 0.5, 6: 0.4, 9: 0.1}
 _PPP_TOTAL_FIBERS = 2394.0
 _PA_GRID_STEP_DEG = 10.0
 _PA_INR_NIGHT_STEP_MINUTES = 20
@@ -681,7 +681,7 @@ def PPP_centers(
                 (initial_ra - 2.0, initial_ra + 2.0),
                 (initial_dec - 2.0, initial_dec + 2.0),
             ],
-            options={"xatol": 0.01, "fatol": 0.01, "maxiter": 100, "maxfev": 100},
+            options={"xatol": 0.01, "fatol": 0.01, "maxiter": 30, "maxfev": 30},
         )
         print(f"The optimal PPC center: {optimization_result.x}")
         best_ppc_ra, best_ppc_dec = optimization_result.x[0], optimization_result.x[1]
@@ -1708,6 +1708,7 @@ def optimize_shared_pa_for_fixed_pointings(
     )
 
     best_result = None
+    backup_result = None
     for shared_pa in pa_candidates:
         trial_result = _score_fixed_pointings_with_pa_constraints(
             tb_tgt,
@@ -1724,6 +1725,10 @@ def optimize_shared_pa_for_fixed_pointings(
                 )
             )
             continue
+
+        if backup_result is None:
+            backup_result = trial_result
+
         logger.info(
             "[S2] Shared PA trial {:.1f} deg: priority_sum={:.3f}, n_allocated={}, usage_sum={:.2f}, max_inr_jump={:.1f}".format(
                 shared_pa,
@@ -1733,6 +1738,10 @@ def optimize_shared_pa_for_fixed_pointings(
                 trial_result["max_inr_jump"],
             )
         )
+
+        if not np.isfinite(float(trial_result["score"])):
+            continue
+
         if best_result is None:
             best_result = trial_result
             continue
@@ -1750,12 +1759,27 @@ def optimize_shared_pa_for_fixed_pointings(
                 best_result = trial_result
 
     if best_result is None:
-        message = (
-            "No shared PA passed the PA-dependent constraints for {} "
-            "(observation_time={})"
-        ).format(label_text, observation_time)
-        logger.error(f"[S2] {message}")
-        raise ValueError(message)
+        if backup_result is None:
+            best_result = _score_fixed_pointings_with_pa_constraints(
+                tb_tgt,
+                ppc_array,
+                0.0,
+                observation_time=observation_time,
+            )
+            logger.warning(
+                "[S2][ALERT] {}: no INR-safe shared PA found; forcing PA=0.0 deg for all pointings.".format(
+                    label_text,
+                )
+            )
+        else:
+            best_result = backup_result
+            logger.warning(
+                "[S2][ALERT] {}: no proper shared PA found after INR filtering; "
+                "using first INR-safe backup PA {:.1f} deg.".format(
+                    label_text,
+                    float(best_result["ppc_list"][0, 3]),
+                )
+            )
 
     best_pa = float(best_result["ppc_list"][0, 3])
     logger.info(
