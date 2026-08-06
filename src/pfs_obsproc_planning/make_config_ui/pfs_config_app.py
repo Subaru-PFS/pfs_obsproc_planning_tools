@@ -21,9 +21,9 @@ pn.extension(
     ],
 )
 
-SEMESTER_URL = "https://www1.subaru.nao.ac.jp/operation/opecenter/ObsProgramS26A.html"
-QUEUE_ONLY_ID = "S26A-999QN"
-EXCLUDED_PROPOSAL_IDS = {"S26A-OT02", "S26A-EN16"}
+SEMESTER_URL = "https://www1.subaru.nao.ac.jp/operation/opecenter/ObsProgramS26B.html"
+QUEUE_ONLY_ID = "S26B-999QN"
+EXCLUDED_PROPOSAL_IDS = {"S26B-OT02", "S26B-EN16"}
 DEFAULT_CONFIG_PATH = (
     Path(__file__).resolve().parents[3] / "examples" / "config_example.toml"
 )
