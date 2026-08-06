@@ -566,7 +566,7 @@ def read_target_queue(mode, para, tb_queuedb):
         mask_100qn = np.char.endswith(proposal_ids, "100QN")
         keep_mask[mask_100qn] = exptime_done[mask_100qn] > 0
 
-        tb_tgt = tb_tgt[keep_mask]
+        #tb_tgt = tb_tgt[keep_mask]
 
     tb_tgt_l = tb_tgt[tb_tgt["resolution"] == "L"]
     tb_tgt_m = tb_tgt[tb_tgt["resolution"] == "M"]
