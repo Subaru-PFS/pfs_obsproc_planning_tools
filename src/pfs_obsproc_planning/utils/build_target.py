@@ -522,7 +522,7 @@ def read_target_queue(mode, para, tb_queuedb):
 
     tb_tgt["allocated_time"] = tb_tgt["allocated_time_tac"] #- tb_tgt["allocated_time_done"]
     tb_tgt["allocated_time"][tb_tgt["allocated_time"] < 0] = 0
-    tb_tgt = tb_tgt[tb_tgt["allocated_time"] > 0]
+    tb_tgt = tb_tgt[tb_tgt["allocated_time"] > tb_tgt["allocated_time_tac"]]
 
     n_tgt1 = len(tb_tgt)
     tb_tgt = tb_tgt[tb_tgt["exptime"] > 0]
@@ -534,6 +534,39 @@ def read_target_queue(mode, para, tb_queuedb):
 
     if para["visibility_check"]:
         tb_tgt = visibility_checker2(tb_tgt)
+
+    # Additional proposal-specific restrictions
+    if len(tb_tgt) > 0 and "proposal_id" in tb_tgt.colnames:
+        proposal_ids = np.asarray(tb_tgt["proposal_id"]).astype(str)
+        exptime_done = np.ma.filled(tb_tgt["exptime_done"], 0.0).astype(float)
+        exptime_now = np.ma.filled(tb_tgt["exptime"], 0.0).astype(float)
+
+        # Priority column fallback
+        priority_values = np.zeros(len(tb_tgt), dtype=float)
+        for c in ["priority", "ob_priority", "ob_priority_usr"]:
+            if c in tb_tgt.colnames:
+                priority_values = np.ma.filled(tb_tgt[c], 0).astype(float)
+                break
+
+        keep_mask = np.ones(len(tb_tgt), dtype=bool)
+
+        # S26A-UH010-AQ: keep only exptime_done > 0
+        mask_uh010 = proposal_ids == "S26A-UH010-AQ"
+        keep_mask[mask_uh010] = exptime_done[mask_uh010] > 0
+
+        # S26A-092QN: keep only exptime_done > 0, priority == 6, exptime < 2000
+        mask_092qn = proposal_ids == "S26A-092QN"
+        keep_mask[mask_092qn] = (
+            (exptime_done[mask_092qn] > 0)
+            & (priority_values[mask_092qn] == 6)
+            & (exptime_now[mask_092qn] < 2000)
+        )
+
+        # *100QN: keep only exptime_done > 0
+        mask_100qn = np.char.endswith(proposal_ids, "100QN")
+        keep_mask[mask_100qn] = exptime_done[mask_100qn] > 0
+
+        tb_tgt = tb_tgt[keep_mask]
 
     tb_tgt_l = tb_tgt[tb_tgt["resolution"] == "L"]
     tb_tgt_m = tb_tgt[tb_tgt["resolution"] == "M"]
