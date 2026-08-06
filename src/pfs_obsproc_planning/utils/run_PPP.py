@@ -469,6 +469,7 @@ def _initialize_tb_proposal_progress(_tb_tgt):
     tb_proposal_progress["N_done"] = 0.0
     tb_proposal_progress["N_obs"] = 0.0
     tb_proposal_progress["N_psl"] = 0.0
+    tb_proposal_progress["N_ppc"] = 0
     return tb_proposal_progress, proposal_fh_goal
 
 
@@ -531,6 +532,17 @@ def _summarize_tb_tgt_assignment(_tb_tgt, tb_tgt_assigned_mask):
         total_assigned_weight,
         assigned_fh_by_proposal,
     )
+
+
+def _update_tb_proposal_ppc_counts(tb_proposal_progress, tb_tgt_assigned):
+    """Count one PPC for each proposal assigned in the current pointing."""
+    if len(tb_tgt_assigned) == 0:
+        return
+
+    assigned_proposal_ids = np.unique(np.asarray(tb_tgt_assigned["proposal_id"], dtype=str))
+    for proposal_id in assigned_proposal_ids:
+        proposal_progress_mask = tb_proposal_progress["proposal_id"] == proposal_id
+        tb_proposal_progress["N_ppc"].data[proposal_progress_mask] += 1
 
 
 def _update_tb_proposal_progress(tb_proposal_progress, _tb_tgt):
@@ -632,6 +644,7 @@ def PPP_centers(
     backup=False,
     fixed_ppc_pa=None,
     config=None,
+    max_pointings_per_proposal=50,
 ):
     """Determine PPC centers for queue-mode planning across multiple proposals."""
     start_time = time.time()
@@ -763,6 +776,7 @@ def PPP_centers(
             total_assigned_weight,
             assigned_fh_by_proposal,
         ) = _summarize_tb_tgt_assignment(_tb_tgt, tb_tgt_assigned_mask)
+        _update_tb_proposal_ppc_counts(tb_proposal_progress, tb_tgt_assigned)
         print(f"{best_ppc_ra}, {best_ppc_dec}, {len(tb_tgt_assigned)}")
         ppc_records.append(
             np.array(
@@ -784,13 +798,16 @@ def PPP_centers(
             (_tb_tgt["exptime_done"] > 0) * proposal_mask
         )
         _update_tb_proposal_progress(tb_proposal_progress, _tb_tgt)
-        incomplete_proposal_ids = list(
-            set(
-                tb_proposal_progress["proposal_id"][
-                    (tb_proposal_progress["FH_done"] < tb_proposal_progress["FH_goal"])
-                    | (tb_proposal_progress["N_done"] == 0.0)
-                ]
+        incomplete_proposal_mask = (
+            (tb_proposal_progress["FH_done"] < tb_proposal_progress["FH_goal"])
+            | (tb_proposal_progress["N_done"] == 0.0)
+        )
+        if max_pointings_per_proposal is not None:
+            incomplete_proposal_mask &= (
+                tb_proposal_progress["N_ppc"] < int(max_pointings_per_proposal)
             )
+        incomplete_proposal_ids = list(
+            set(tb_proposal_progress["proposal_id"][incomplete_proposal_mask])
         )
         tb_tgt_remaining = _select_tb_tgt_remaining(_tb_tgt, incomplete_proposal_ids)
         n_partially_observed_after_filter = sum(tb_tgt_remaining["exptime_done"] > 0)
