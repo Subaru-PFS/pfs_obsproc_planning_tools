@@ -24,7 +24,7 @@ instrument_region_penalty = None
 black_dot_penalty_cost = None
 cobraSafetyMargin = 0.1
 brokenCobrasMargin = None
-fiducialsAvoidDistance = None
+avoidFiducials = None
 _COBRA_FEATURE_FLAGS = None
 _CLASSIC_PPC_TARGET_RADIUS_DEG = 2.0
 _CLASSIC_PPC_CLUSTER_LINK_RADIUS_DEG = 2.0 * _CLASSIC_PPC_TARGET_RADIUS_DEG
@@ -106,10 +106,10 @@ def set_netflow_params(conf):
     Call this once before fiber_allocate() or fiber_allocation_classic() so
     that values from [netflow] in the TOML config are picked up automatically.
     """
-    global cobraSafetyMargin, brokenCobrasMargin, fiducialsAvoidDistance
+    global cobraSafetyMargin, brokenCobrasMargin, avoidFiducials
     cobraSafetyMargin = conf["netflow"].get("cobra_safety_margin", cobraSafetyMargin)
     brokenCobrasMargin = conf["netflow"].get("broken_cobras_margin", brokenCobrasMargin)
-    fiducialsAvoidDistance = conf["netflow"].get("fiducials_avoid_distance", fiducialsAvoidDistance)
+    avoidFiducials = conf["netflow"].get("avoidFiducials", avoidFiducials)
 
 
 def select_good_observation_time(
@@ -452,12 +452,12 @@ def run_netflow(
     for_single_ppc=False,
     classdict_override=None,
     brokenCobrasMargin=None,
-    fiducialsAvoidDistance=None,
+    avoidFiducials=True,
 ):
     if brokenCobrasMargin is None:
         brokenCobrasMargin = globals()["brokenCobrasMargin"] or 0.0
-    if fiducialsAvoidDistance is None:
-        fiducialsAvoidDistance = globals()["fiducialsAvoidDistance"] or 0.0
+    if avoidFiducials is None:
+        avoidFiducials = globals()["avoidFiducials"] or True
     telescope_ra = ppc_list[:, 1]
     telescope_dec = ppc_list[:, 2]
     telescope_pa = ppc_list[:, 3]
@@ -530,7 +530,7 @@ def run_netflow(
             cobraSafetyMargin=cobraSafetyMargin,
             cobraFeatureFlags=cobra_feature_flags,
             brokenCobrasMargin=brokenCobrasMargin,
-            fiducialsAvoidDistance=fiducialsAvoidDistance,
+            avoidFiducials=avoidFiducials,
         )
 
     problem.solve()
