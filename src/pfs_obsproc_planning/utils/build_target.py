@@ -14,7 +14,7 @@ from dateutil import parser, tz
 from ginga.misc.log import get_logger
 from loguru import logger
 from qplan import entity
-from qplan.util.eph_cache import EphemerisCache
+from spot.util.eph_cache import EphemerisCache
 from qplan.util.site import site_subaru as observer
 
 from .classic_for_single_proposal import (
