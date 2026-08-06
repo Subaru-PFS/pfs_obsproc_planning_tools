@@ -522,7 +522,7 @@ def read_target_queue(mode, para, tb_queuedb):
 
     tb_tgt["allocated_time"] = tb_tgt["allocated_time_tac"] #- tb_tgt["allocated_time_done"]
     tb_tgt["allocated_time"][tb_tgt["allocated_time"] < 0] = 0
-    tb_tgt = tb_tgt[tb_tgt["allocated_time"] > tb_tgt["allocated_time_tac"]]
+    tb_tgt = tb_tgt[tb_tgt["allocated_time"] > tb_tgt["allocated_time_done"]]
 
     n_tgt1 = len(tb_tgt)
     tb_tgt = tb_tgt[tb_tgt["exptime"] > 0]
