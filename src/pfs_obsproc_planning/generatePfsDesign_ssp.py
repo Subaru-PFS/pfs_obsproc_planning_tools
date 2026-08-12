@@ -931,6 +931,11 @@ class GeneratePfsDesign_ssp(object):
         validate_success_ppc, ppccode_no_guide = self.ssp_ppc_validate(tb_ppc)
 
         tb_ppc = tb_ppc[~np.isin(tb_ppc["ppc_code"], ppccode_no_guide)]
+        bench = nfutils.getBench(
+            self.conf["packages"]["pfs_instdata_dir"],
+            self.conf["sfa"]["cobra_coach_dir"],
+            self.conf["sfa"]["dot_margin"],
+        )
 
         for tb_ppc_t in tb_ppc:
             ppc_code = tb_ppc_t["ppc_code"]
@@ -1041,7 +1046,6 @@ class GeneratePfsDesign_ssp(object):
             tel = telescopes[0]
             tgt = targets
             tgt_class_dict = target_class_dict
-            bench = None  # do not set bench as it is determined when running netflow
 
             if tb_ppc_t["ppc_resolution"] == "L":
                 arm_ = "brn"
