@@ -222,9 +222,9 @@ class OpeFile(object):
             single_exptime = total_exptime / nframe
             nframe_long = max(2, int(np.ceil(1800.0 / single_exptime)))
 
-            # add PPC code and timing information. New template uses a free-form header comment.
-            repl1 = "### PPC_NAME PA=XXX.X PRIORITY=???"
-            repl2 = f"### {val[0]} PA={val[6]} PRIORITY=???"
+            # add PPC code and timing information using the new template header style
+            repl1 = "### PPC_NAME PA=XXX.X PRIORITY=????"
+            repl2 = f"### {val[0]} PA={val[6]} PRIORITY={val[10]} ###"
             tmpl = tmpl.replace(repl1, repl2)
             tmpl_longexp = tmpl_longexp.replace(repl1, repl2)
 
@@ -250,7 +250,7 @@ class OpeFile(object):
             tmpl = tmpl.replace(repl1, repl2)
             tmpl_longexp = tmpl_longexp.replace(repl1, repl2)
 
-            # add exptime and nframe in the template format required by the PFS OPE
+            # add exptime and nframe
             repl1 = 'EXPTIME="exptime"'
             exptime_value = float(single_exptime)
             if nframe <= nframe_long:
