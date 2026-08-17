@@ -67,46 +67,31 @@ class OpeFile(object):
         self.contents2_main = ""
         self.contents3 = ""
         with open(filename, "r") as file:
-            lines = file.readlines()
-
-        command_start = None
-        command_end = len(lines)
-        for idx, line in enumerate(lines):
-            if line.startswith(":Command"):
-                command_start = idx
-                break
-
-        if command_start is None:
-            raise ValueError(f"Template file {filename} does not contain a :Command section")
-
-        # keep the header and parameters section before the command block
-        self.contents1 = "".join(lines[: command_start + 1])
-
-        # the science template lives in the command section until the calibration section
-        command_lines = lines[command_start + 1 :]
-        for idx, line in enumerate(command_lines):
-            if "### Calibrations" in line or "# Calibrations" in line:
-                command_end = idx
-                break
-
-        self.contents2 = "".join(command_lines[:command_end])
-        self.contents3 = "".join(command_lines[command_end:])
-
-        # keep the core science command template for repeated per-object expansion
-        for line in self.contents2.splitlines():
-            if line.startswith(
-                (
-                    "# SETUPFIELD WITH",
-                    "SETUPFIELD",
-                    "## Get spectrum",
-                    "GETOBJECT",
-                    "### PPC_NAME",
-                    "### OBSTIME:",
-                )
-            ):
-                self.contents2_main += line + "\n"
-                if line.startswith("SETUPFIELD"):
-                    self.contents2_main += "\n"
+            science_part = 0
+            for line in file:
+                if line == "### SCIENCE:START ###\n":
+                    science_part += 1
+                if line == "### SCIENCE:END  ###\n":
+                    science_part += 1
+                if science_part == 0:
+                    self.contents1 += line
+                elif science_part == 1:
+                    self.contents2 += line
+                elif science_part == 2:
+                    self.contents3 += line
+                if line.startswith(
+                    (
+                        "### PPC_NAME",
+                        "### OBSTIME:",
+                        "# SETUPFIELD WITH",
+                        "SETUPFIELD",
+                        "## Get spectrum",
+                        "GETOBJECT",
+                    )
+                ):
+                    self.contents2_main += line
+                    if line.startswith(("SETUPFIELD",)):
+                        self.contents2_main += "\n"
 
     def update_obsdate(self, obsdate, utc=False):
         obsdate_orig = obsdate
@@ -222,14 +207,9 @@ class OpeFile(object):
             single_exptime = total_exptime / nframe
             nframe_long = max(2, int(np.ceil(1800.0 / single_exptime)))
 
-            # add PPC code and timing information using the new template header style
+            # add PPC code
             repl1 = "### PPC_NAME PA=XXX.X PRIORITY=????"
-            repl2 = f"### {val[0]} PA={val[6]} PRIORITY={val[10]} ###"
-            tmpl = tmpl.replace(repl1, repl2)
-            tmpl_longexp = tmpl_longexp.replace(repl1, repl2)
-
-            repl1 = "### OBSTIME: YYYY/MM/DD HH:MM:SS ###"
-            repl2 = f"### OBSTIME: {val[7]} ###"
+            repl2 = f"### {val[0]} PA={val[6]} PRIORITY={val[10]} ###\n### OBSTIME: {val[7]} ###"
             tmpl = tmpl.replace(repl1, repl2)
             tmpl_longexp = tmpl_longexp.replace(repl1, repl2)
 
@@ -239,41 +219,27 @@ class OpeFile(object):
             tmpl = tmpl.replace(repl1, repl2)
             tmpl_longexp = tmpl_longexp.replace(repl1, repl2)
 
-            # add object name to both setup and get-object commands
+            # add objectname
             repl1 = 'OBJECT="objectname"'
             repl2 = f'OBJECT="{val[0]}"'
             tmpl = tmpl.replace(repl1, repl2)
             tmpl_longexp = tmpl_longexp.replace(repl1, repl2)
 
-            repl1 = 'SEQ_NAME="objectname"'
-            repl2 = f'SEQ_NAME="{val[0]}"'
-            tmpl = tmpl.replace(repl1, repl2)
-            tmpl_longexp = tmpl_longexp.replace(repl1, repl2)
-
-            # add exptime and nframe
+            # add exptime
             repl1 = 'EXPTIME="exptime"'
-            exptime_value = float(single_exptime)
+            # if split_frame is true, separate each frame into n sub-frames with an exptime of exptime/n
             if nframe <= nframe_long:
-                repl2 = f'EXPTIME={exptime_value} NFRAME={nframe}'
+                repl2 = f"EXPTIME={single_exptime} NFRAME={nframe}"
             else:
-                repl2 = f'EXPTIME={exptime_value} NFRAME={nframe_long}'
+                repl2 = f"EXPTIME={single_exptime} NFRAME={nframe_long}"
             tmpl = tmpl.replace(repl1, repl2)
-            tmpl_longexp = tmpl_longexp.replace(repl1, repl2)
 
-            # remove placeholder comment text and keep the command block clean
+            # remove unnecessary words
             tmpl = tmpl.replace("#!!! MODIFICATION NEEDED: designId, objectname !!!#", "")
+            tmpl_longexp = tmpl_longexp.replace("#!!! MODIFICATION NEEDED: designId, objectname !!!#", "")
+
             tmpl = tmpl.replace("#!!! MODIFICATION NEEDED: exptime, objectname !!!#", "")
-            tmpl = tmpl.replace("#!!! MODIFICATION NEEDED: objectname !!!#", "")
-            tmpl = tmpl.replace("## Get spectrum", "## Get spectrum")
-            tmpl_longexp = tmpl_longexp.replace(
-                "#!!! MODIFICATION NEEDED: designId, objectname !!!#", ""
-            )
-            tmpl_longexp = tmpl_longexp.replace(
-                "#!!! MODIFICATION NEEDED: exptime, objectname !!!#", ""
-            )
-            tmpl_longexp = tmpl_longexp.replace(
-                "#!!! MODIFICATION NEEDED: objectname !!!#", ""
-            )
+            tmpl_longexp = tmpl_longexp.replace("#!!! MODIFICATION NEEDED: exptime, objectname !!!#", "")
 
             self.contents2_updated += tmpl
 
@@ -281,9 +247,9 @@ class OpeFile(object):
                 repl1 = 'EXPTIME="exptime"'
                 nframe -= nframe_long
                 while nframe > 0:
-                    repl2 = f'EXPTIME="{single_exptime} NFRAME={nframe_long}"'
+                    repl2 = f"EXPTIME={single_exptime} NFRAME={nframe_long}"
                     if nframe <= nframe_long:
-                        repl2 = f'EXPTIME="{single_exptime} NFRAME={nframe}"'
+                        repl2 = f"EXPTIME={single_exptime} NFRAME={nframe}"
                     tmpl_longexp = tmpl_longexp.replace(repl1, repl2)
                     self.contents2_updated += tmpl_longexp + "\n\n"
                     nframe -= nframe_long
