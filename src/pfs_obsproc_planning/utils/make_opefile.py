@@ -71,7 +71,7 @@ class OpeFile(object):
             for line in file:
                 if line == "### SCIENCE:START ###\n":
                     science_part += 1
-                if line == "### SCIENCE:END  ###\n":
+                if line == "### SCIENCE:END ###\n":
                     science_part += 1
                 if science_part == 0:
                     self.contents1 += line
@@ -193,7 +193,7 @@ class OpeFile(object):
             "#!!! MODIFICATION NEEDED !!!#", ""
         )
         self.contents1_updated = self.contents1_updated.replace(
-            "#!!! WHOLE LIST NEED TO BE MODIFIED !!!#", ""
+            "#!!! WHOLE LIST NEEDS TO BE MODIFIED !!!#", ""
         )
 
         # update "Science Exposure" part
@@ -208,7 +208,7 @@ class OpeFile(object):
             nframe_long = max(2, int(np.ceil(1800.0 / single_exptime)))
 
             # add PPC code
-            repl1 = "### PPC_NAME PA=XXX.X PRIORITY=????"
+            repl1 = "### PPC_NAME PA=XXX.X PRIORITY=????\n### OBSTIME: YYYY/MM/DD HH:MM:SS ###"
             repl2 = f"### {val[0]} PA={val[6]} PRIORITY={val[10]} ###\n### OBSTIME: {val[7]} ###"
             tmpl = tmpl.replace(repl1, repl2)
             tmpl_longexp = tmpl_longexp.replace(repl1, repl2)
@@ -254,7 +254,8 @@ class OpeFile(object):
                     self.contents2_updated += tmpl_longexp + "\n\n"
                     nframe -= nframe_long
 
-            self.contents3 = self.contents3.replace("### SCIENCE:END  ###", "")
+            self.contents2_updated = self.contents2_updated.replace("### SCIENCE:START ###", "")
+            self.contents3 = self.contents3.replace("### SCIENCE:END ###", "")
 
     def write(self):
         with open(self.outfile, "w") as file:
