@@ -55,6 +55,22 @@ _HAWAII_TZ = ZoneInfo("US/Hawaii")
 _UTC_TZ = ZoneInfo("UTC")
 
 
+def _ppp_iteration_verbose_enabled():
+    """Return whether optimizer diagnostic output is explicitly enabled."""
+    return os.environ.get("PFS_OBSPROC_PLANNING_VERBOSE", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _emit_iteration_status(message):
+    """Emit optimizer status only when debugging is explicitly enabled."""
+    if _ppp_iteration_verbose_enabled():
+        print(message)
+
+
 # -----------------------------------------------------------------------------
 # Shared target-scoring helpers
 # -----------------------------------------------------------------------------
@@ -406,7 +422,7 @@ def objective_ppc_assignment(trial_ppc, _tb_tgt, ppc_pa=0.0):
         _tb_tgt, single_ppc_mode=True, ppc_candidate=(ppc_ra, ppc_dec, ppc_pa)
     )
     score, term_values = _score_single_ppc_assignment(_tb_tgt, assigned_target_ids)
-    print(
+    status = (
         "{:.6f}, {:.6f}, {:.1f}, Nassigned = {:.0f}/{:.0f}, NP0 = {:.0f}, "
         "NP1 = {:.0f}, Ncomplete = {:.0f}, Npartial = {:.0f}, FH = {:.3f}, "
         "Finish = {:.3f}, Continue = {:.3f}, Prio = {:.3f}, Fill = {:.3f}, "
@@ -430,6 +446,7 @@ def objective_ppc_assignment(trial_ppc, _tb_tgt, ppc_pa=0.0):
             score,
         )
     )
+    _emit_iteration_status(status)
     return -score
 
 
@@ -861,7 +878,7 @@ def objective_single_program_ppc_assignment(trial_ppc, tb_tgt, ppc_pa=0.0):
         f"N{priority} = {assigned_counts[priority]}/{total_counts[priority]}"
         for priority in tracked_priorities
     )
-    print(
+    status = (
         "{:.6f}, {:.6f}, {:.1f}, Nassigned = {:.0f}/{:.0f}, NP0 = {:.0f}, "
         "NP1 = {:.0f}, Ncomplete = {:.0f}, Npartial = {:.0f}, {}, FH = {:.3f}, "
         "Finish = {:.3f}, Continue = {:.3f}, Prio = {:.3f}, Fill = {:.3f}, "
@@ -886,6 +903,7 @@ def objective_single_program_ppc_assignment(trial_ppc, tb_tgt, ppc_pa=0.0):
             score,
         )
     )
+    _emit_iteration_status(status)
     return -score
 
 
