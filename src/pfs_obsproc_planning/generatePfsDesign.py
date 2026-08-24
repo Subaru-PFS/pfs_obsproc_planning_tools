@@ -741,6 +741,11 @@ class GeneratePfsDesign(object):
             ppc_ra = data_ppp[i]["ppc_ra"]
             ppc_dec = data_ppp[i]["ppc_dec"]
             ppc_pa = data_ppp[i]["ppc_pa"]
+            ppc_priority = (
+                data_ppp[i]["ppc_priority"]
+                if "ppc_priority" in data_ppp.colnames
+                else 1
+            )
             ob_unique_id = data_ppp[i]["ppc_allocated_targets"]
             if ppc_code in self.resQPlan.keys():
                 res = self.resQPlan[ppc_code]
@@ -752,11 +757,12 @@ class GeneratePfsDesign(object):
                         + obList[oid]
                         + [obstime.strftime("%Y-%m-%d %X")]
                         + [obsdate_in_hst.strftime("%Y-%m-%d")]
+                        + [ppc_priority]
                     )
 
         ## write to csv ##
         filename = "ppp+qplan_output.csv"
-        header = "pointing,ra_center,dec_center,pa_center,ob_unique_code,proposal_id,ob_code,obj_id,cat_id,ra_target,dec_target,pmra_target,pmdec_target,parallax_target,equinox_target,qa_reference_arm,target_class,ob_single_exptime,filter_g,filter_r,filter_i,filter_z,filter_y,psf_flux_g,psf_flux_r,psf_flux_i,psf_flux_z,psf_flux_y,psf_flux_error_g,psf_flux_error_r,psf_flux_error_i,psf_flux_error_z,psf_flux_error_y,total_flux_g,total_flux_r,total_flux_i,total_flux_z,total_flux_y,total_flux_error_g,total_flux_error_r,total_flux_error_i,total_flux_error_z,total_flux_error_y,obstime,obsdate_in_hst"
+        header = "pointing,ra_center,dec_center,pa_center,ob_unique_code,proposal_id,ob_code,obj_id,cat_id,ra_target,dec_target,pmra_target,pmdec_target,parallax_target,equinox_target,qa_reference_arm,target_class,ob_single_exptime,filter_g,filter_r,filter_i,filter_z,filter_y,psf_flux_g,psf_flux_r,psf_flux_i,psf_flux_z,psf_flux_y,psf_flux_error_g,psf_flux_error_r,psf_flux_error_i,psf_flux_error_z,psf_flux_error_y,total_flux_g,total_flux_r,total_flux_i,total_flux_z,total_flux_y,total_flux_error_g,total_flux_error_r,total_flux_error_i,total_flux_error_z,total_flux_error_y,obstime,obsdate_in_hst,ppc_priority"
         np.savetxt(
             os.path.join(self.outputDirPPP, filename),
             data,
@@ -842,6 +848,7 @@ class GeneratePfsDesign(object):
                             k,
                             dictPointings[pointing.lower()]["single_exptime"],
                             self.conf["ope"]["n_split_frame"],
+                            dictPointings[pointing.lower()].get("ppc_priority", 1),
                         ]
                     )
             info = pd.DataFrame(
@@ -857,6 +864,7 @@ class GeneratePfsDesign(object):
                     "obstime_in_hst",
                     "single_exptime",
                     "n_split_frame",
+                    "ppc_priority",
                 ],
             )
             info["obstime_in_hst"] = pd.to_datetime(info["obstime_in_hst"], utc=True)
