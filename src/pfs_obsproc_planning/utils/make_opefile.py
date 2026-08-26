@@ -225,6 +225,11 @@ class OpeFile(object):
             tmpl = tmpl.replace(repl1, repl2)
             tmpl_longexp = tmpl_longexp.replace(repl1, repl2)
 
+            repl1 = 'SEQ_NAME="objectname"'
+            repl2 = f'SEQ_NAME="{val[0]}"'
+            tmpl = tmpl.replace(repl1, repl2)
+            tmpl_longexp = tmpl_longexp.replace(repl1, repl2)
+
             # add exptime
             repl1 = 'EXPTIME="exptime"'
             # if split_frame is true, separate each frame into n sub-frames with an exptime of exptime/n
