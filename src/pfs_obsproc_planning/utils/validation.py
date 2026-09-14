@@ -136,10 +136,11 @@ def save_visibility_plot(summary_csv_path, output_path, selected_date=None):
     sample_times = pd.date_range(sample_start, sample_stop, freq="5min", tz="UTC")
     sample_times_hst = sample_times.tz_convert("Pacific/Honolulu")
     astropy_times = Time(sample_times.to_pydatetime())
-    moon_coords = get_body("moon", astropy_times)
-    moon_altitude = moon_coords.transform_to(
-        AltAz(obstime=astropy_times, location=SUBARU_LOCATION)
-    ).alt.deg
+    altaz_frame = AltAz(obstime=astropy_times, location=SUBARU_LOCATION)
+    moon_altaz = get_body(
+        "moon", astropy_times, location=SUBARU_LOCATION
+    ).transform_to(altaz_frame)
+    moon_altitude = moon_altaz.alt.deg
 
     fig, ax_el = plt.subplots(figsize=(12, 7))
     ax_aux = ax_el.twinx()
@@ -160,7 +161,8 @@ def save_visibility_plot(summary_csv_path, output_path, selected_date=None):
         inrs = np.asarray(inrs, dtype=float)
 
         target = SkyCoord(row["ra_center"] * u.deg, row["dec_center"] * u.deg)
-        moon_separation = target.separation(moon_coords).deg
+        target_altaz = target.transform_to(altaz_frame)
+        moon_separation = target_altaz.separation(moon_altaz).deg
 
         label = str(row["pointing"])
         ax_el.plot(sample_times_hst, elevations, color=color, linewidth=1.0, alpha=0.5)
