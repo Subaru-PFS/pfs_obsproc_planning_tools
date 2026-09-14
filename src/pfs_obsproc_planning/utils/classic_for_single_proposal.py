@@ -14,12 +14,45 @@ _DEFAULT_SINGLE_PROGRAM_PRIORITY_POLICY = {
 def get_single_proposal_requirements(proposal_id):
     proposalId = str(proposal_id) if proposal_id is not None else None
 
+    if proposalId == "S26B-TE242-K":
+        return {
+            #"fixed_ppc_pa": 0.0,
+            "import_user_ppc_from_db": False,
+            "optimize_costs": True,
+            "single_exptime_override": 900.0,
+            "single_program_mode": "LR",
+        }
+    if proposalId == "S26B-OT03":
+        return {
+            #"fixed_ppc_pa": 0.0,
+            "import_user_ppc_from_db": False,
+            "optimize_costs": True,
+            "single_exptime_override": 900.0,
+            "single_program_mode": "LR",
+        }
+    if proposalId == "S26B-015":
+        return {
+            #"fixed_ppc_pa": 0.0,
+            "import_user_ppc_from_db": False,
+            "optimize_costs": True,
+            "single_exptime_override": 3600.0,
+            "single_program_mode": "LR",
+        }
+    if proposalId == "S26B-TE465-K":
+        return {
+            #"fixed_ppc_pa": 0.0,
+            "import_user_ppc_from_db": False,
+            "optimize_costs": True,
+            "single_exptime_override": 21600.0,
+            "single_program_mode": "MR",
+        }
     if proposalId == "S26B-UH028-A1":
         return {
             #"fixed_ppc_pa": 0.0,
             "import_user_ppc_from_db": False,
             "optimize_costs": True,
             "single_exptime_override": 3000.0,
+            "priority_exptime_overrides": {0: 6000.0},
             "single_program_mode": "LR",
         }
     if proposalId == "S26A-104":

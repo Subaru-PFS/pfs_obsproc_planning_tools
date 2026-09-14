@@ -121,15 +121,18 @@ def query_user_ppc_from_db(tgt_db, proposal_ids):
                up.ppc_resolution, up.ppc_priority, up.input_catalog_id
         FROM user_pointing up
         JOIN input_catalog ic ON up.input_catalog_id = ic.input_catalog_id
+        JOIN target ON up.input_catalog_id = target.input_catalog_id
         WHERE ic.active = TRUE
           AND ic.is_classical = TRUE
           AND ic.is_user_pointing = TRUE
-          AND t.proposal_id IN :proposal_ids
+          AND target.proposal_id IN :proposal_ids
         """
     ).bindparams(sa.bindparam("proposal_ids", expanding=True))
 
     with tgt_db.connect() as conn:
-        rows = pd.DataFrame(conn.execute(sql).fetchall())
+        rows = pd.DataFrame(
+            conn.execute(sql, {"proposal_ids": proposal_ids}).fetchall()
+        )
 
     if rows.empty:
         return Table()
