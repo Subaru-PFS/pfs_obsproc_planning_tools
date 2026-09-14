@@ -111,6 +111,10 @@ def save_visibility_plot(summary_csv_path, output_path, selected_date=None):
         return None
 
     df_vis["observation_time"] = pd.to_datetime(df_vis["observation_time"], utc=True)
+    df_vis["observation_date_in_hst"] = (
+        pd.to_datetime(df_vis["observation_date_in_hst"])
+        .dt.tz_localize("Pacific/Honolulu")
+    )
     df_vis["observation_time_stop"] = df_vis["observation_time"] + pd.to_timedelta(
         1200, unit="s"
     )
@@ -119,8 +123,7 @@ def save_visibility_plot(summary_csv_path, output_path, selected_date=None):
     # selected_date is determined from data by default (HST date of first observation)
     if selected_date is None:
         selected_date = (
-            df_vis["observation_time"]
-            .dt.tz_convert("Pacific/Honolulu")
+            df_vis["observation_date_in_hst"]
             .dt.date.iloc[0]
         )
 
@@ -621,6 +624,13 @@ def _load_ppp_targets_qa_reference_n(parentPath: str) -> pd.DataFrame:
     return df_n
 
 
+def _format_float_1dp_max(value):
+    """Format numeric values with at most one digit after the decimal point."""
+    if pd.isna(value):
+        return value
+    return f"{float(value):.1f}".rstrip("0").rstrip(".")
+
+
 def validation(parentPath, figpath, save, show, ssp, conf):
     """Run validation for all PfsDesigns found in the summary at `parentPath`.
 
@@ -842,6 +852,29 @@ def validation(parentPath, figpath, save, show, ssp, conf):
 
     df_ch = df_ch[existing + remaining]
 
+    one_decimal_columns = [
+        "ag1",
+        "ag2",
+        "ag3",
+        "ag4",
+        "ag5",
+        "ag6",
+        "ag_sum",
+        "sky_mean",
+        "sky_std",
+        "sky_min",
+        "sky_max",
+        "sky_sum",
+        "std_mean",
+        "std_std",
+        "std_min",
+        "std_max",
+        "std_sum",
+    ]
+    formatted_one_decimal_columns = [
+        column for column in one_decimal_columns if column in df_ch.columns
+    ]
+
     # """
     styled_html = (
         df_ch.style.map(pldes.colour_background_warning_sky_min, subset=["sky_min"])
@@ -856,7 +889,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
         .map(pldes.colour_background_warning_inr, subset=["inr1", "inr2"])
         .map(pldes.colour_background_warning_el, subset=["el1", "el2"])
         .map(pldes.colour_background_warning_unfib, subset=["unfib_bright"])
-        .format(precision=1)
+        .format(_format_float_1dp_max, subset=formatted_one_decimal_columns)
     )
     # """
 
