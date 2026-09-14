@@ -18,7 +18,7 @@ import numpy as np
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.table import Table
-from loguru import logger
+from loguru import logger 
 from scipy.optimize import minimize
 from sklearn.cluster import DBSCAN
 from sklearn.neighbors import KernelDensity
@@ -38,37 +38,21 @@ np.random.seed(0)
 
 _DEFAULT_PPP_WEIGHT_PARAMS = (2, 0, 0)
 _PPP_OBJECTIVE_LAMBDAS = {
-    "fh": 5.00,
-    "finish": 2.5,
-    "cont": 0.1,
-    "prio": 1.5,
-    "fill": 0.50,
-    "new": 0.10,
+    "fh": 0.50,
+    "finish": 0.5,
+    "cont": 4.0,
+    "prio": 5.5,
+    "fill": 2.5,
+    "new": 0.50,
     "over": 0.05,
 }
-_PPP_PRIORITY_VALUES = {0: 10.0, 1: 5, 2: 1, 3: 1, 4: 0.5, 5: 0.5, 6: 0.4, 9: 0.1}
+_PPP_PRIORITY_VALUES = {0: 100.0, 1: 50, 2: 2, 3: 0.1, 4: 0.5, 5: 0.5, 6: 0.4, 9: 0.1}
 _PPP_TOTAL_FIBERS = 2394.0
 _PA_GRID_STEP_DEG = 10.0
 _PA_INR_NIGHT_STEP_MINUTES = 20
 _PA_INR_WRAP_EDGE_DEG = 170.0
 _HAWAII_TZ = ZoneInfo("US/Hawaii")
 _UTC_TZ = ZoneInfo("UTC")
-
-
-def _ppp_iteration_verbose_enabled():
-    """Return whether optimizer diagnostic output is explicitly enabled."""
-    return os.environ.get("PFS_OBSPROC_PLANNING_VERBOSE", "0").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-
-
-def _emit_iteration_status(message):
-    """Emit optimizer status only when debugging is explicitly enabled."""
-    if _ppp_iteration_verbose_enabled():
-        print(message)
 
 
 # -----------------------------------------------------------------------------
@@ -422,7 +406,7 @@ def objective_ppc_assignment(trial_ppc, _tb_tgt, ppc_pa=0.0):
         _tb_tgt, single_ppc_mode=True, ppc_candidate=(ppc_ra, ppc_dec, ppc_pa)
     )
     score, term_values = _score_single_ppc_assignment(_tb_tgt, assigned_target_ids)
-    status = (
+    print(
         "{:.6f}, {:.6f}, {:.1f}, Nassigned = {:.0f}/{:.0f}, NP0 = {:.0f}, "
         "NP1 = {:.0f}, Ncomplete = {:.0f}, Npartial = {:.0f}, FH = {:.3f}, "
         "Finish = {:.3f}, Continue = {:.3f}, Prio = {:.3f}, Fill = {:.3f}, "
@@ -446,7 +430,6 @@ def objective_ppc_assignment(trial_ppc, _tb_tgt, ppc_pa=0.0):
             score,
         )
     )
-    _emit_iteration_status(status)
     return -score
 
 
@@ -509,7 +492,7 @@ def _select_ppc_seed(tb_tgt_remaining, rng, use_multiprocessing):
 
 def _calculate_tb_tgt_credit_seconds(tb_tgt_assigned):
     """Cap credited exposure at the requested exposure time for each target."""
-    requested_exptime = np.asarray(tb_tgt_assigned["exptime"], dtype=float)
+    requested_exptime = np.asarray(tb_tgt_assigned["exptime_usr"], dtype=float)
     exptime_done = np.asarray(tb_tgt_assigned["exptime_done"], dtype=float)
     credited_exptime = exptime_done.copy()
     overdone_mask = exptime_done > requested_exptime
@@ -661,7 +644,7 @@ def PPP_centers(
     backup=False,
     fixed_ppc_pa=None,
     config=None,
-    max_pointings_per_proposal=50,
+    max_pointings_per_proposal=10,
 ):
     """Determine PPC centers for queue-mode planning across multiple proposals."""
     start_time = time.time()
@@ -702,18 +685,20 @@ def PPP_centers(
             tb_tgt_remaining, rng, use_multiprocessing
         )
         seed_ppc_pa = fixed_ppc_pa if _is_provided_ppc_pa_value(fixed_ppc_pa) else -90.0
+        #'''
         optimization_result = minimize(
             objective_ppc_assignment,
             [initial_ra, initial_dec],
             args=(tb_tgt_group_primary, seed_ppc_pa),
             method="Powell",
             bounds=[
-                (initial_ra - 2.0, initial_ra + 2.0),
-                (initial_dec - 2.0, initial_dec + 2.0),
+                (initial_ra - 0.50, initial_ra + 0.50),
+                (initial_dec - 0.50, initial_dec + 0.50),
             ],
-            options={"xatol": 0.01, "fatol": 0.01, "maxiter": 30, "maxfev": 30},
+            options={"xatol": 0.01, "fatol": 0.01, "maxiter": 40, "maxfev": 40},
         )
         print(f"The optimal PPC center: {optimization_result.x}")
+        #'''
         best_ppc_ra, best_ppc_dec = optimization_result.x[0], optimization_result.x[1]
         best_ppc_pa = seed_ppc_pa
         assigned_target_ids = []
@@ -878,7 +863,7 @@ def objective_single_program_ppc_assignment(trial_ppc, tb_tgt, ppc_pa=0.0):
         f"N{priority} = {assigned_counts[priority]}/{total_counts[priority]}"
         for priority in tracked_priorities
     )
-    status = (
+    print(
         "{:.6f}, {:.6f}, {:.1f}, Nassigned = {:.0f}/{:.0f}, NP0 = {:.0f}, "
         "NP1 = {:.0f}, Ncomplete = {:.0f}, Npartial = {:.0f}, {}, FH = {:.3f}, "
         "Finish = {:.3f}, Continue = {:.3f}, Prio = {:.3f}, Fill = {:.3f}, "
@@ -903,7 +888,6 @@ def objective_single_program_ppc_assignment(trial_ppc, tb_tgt, ppc_pa=0.0):
             score,
         )
     )
-    _emit_iteration_status(status)
     return -score
 
 
@@ -982,13 +966,19 @@ def _optimize_fixed_pa_single_program_pointing(
     print(
         f"\nOptimizing pointing position for {label} around RA={central_ra}, Dec={central_dec}"
     )
+    #"""
     result = minimize(
         optimize_pointing_objective,
         [central_ra, central_dec],
-        method="L-BFGS-B",
-        bounds=bounds,
-        options={"ftol": 1.0, "eps": 0.01},
+        method="Powell",
+        bounds=[
+            (central_ra - 0.50, central_ra + 0.50),
+            (central_dec - 0.50, central_dec + 0.50),
+        ],
+        options={"xatol": 0.01, "fatol": 0.01, "maxiter": 40, "maxfev": 40},
+        
     )
+    #"""
     optimized_ra, optimized_dec = result.x
     print(f"\nOptimal position found: RA={optimized_ra:.6f}, Dec={optimized_dec:.6f}")
     print(f"Optimization result: {result.message}")
@@ -998,6 +988,7 @@ def _optimize_fixed_pa_single_program_pointing(
 def _optimize_single_program_from_initial_guess(tb_tgt, initial_guess):
     """Optimize a single-program pointing starting from a proposal-defined seed."""
     special_ppc_pa = initial_guess[2]
+    #'''
     result = minimize(
         partial(
             objective_single_program_ppc_assignment,
@@ -1005,9 +996,15 @@ def _optimize_single_program_from_initial_guess(tb_tgt, initial_guess):
             ppc_pa=special_ppc_pa,
         ),
         initial_guess[:2],
-        method="Nelder-Mead",
+        method="Powell",
+        bounds=[
+            (initial_guess[0] - 0.50, initial_guess[0] + 0.50),
+            (initial_guess[1] - 0.50, initial_guess[1] + 0.50),
+        ],
+        options={"xatol": 0.01, "fatol": 0.01, "maxiter": 40, "maxfev": 40},
     )
     print(result.x)
+    #'''
     return result.x[0], result.x[1], special_ppc_pa
 
 
@@ -1062,6 +1059,7 @@ def _determine_default_single_program_pointing(tb_tgt, fixed_ppc_pa):
     df_tgt_primary = df_tgt_primary.sample(n_tgt, ignore_index=True, random_state=1)
     tb_tgt_sample = Table.from_pandas(df_tgt_primary)
     _, _, _, peak_x, peak_y = KDE(tb_tgt_sample, False)
+    #'''
     result = minimize(
         partial(
             objective_single_program_ppc_assignment,
@@ -1069,10 +1067,15 @@ def _determine_default_single_program_pointing(tb_tgt, fixed_ppc_pa):
             ppc_pa=seed_ppc_pa,
         ),
         [peak_x, peak_y],
-        method="Nelder-Mead",
-        options={"xatol": 0.01, "fatol": 0.001},
+        method="Powell",
+        bounds=[
+            (peak_x - 0.50, peak_x + 0.50),
+            (peak_y - 0.50, peak_y + 0.50),
+        ],
+        options={"xatol": 0.01, "fatol": 0.01, "maxiter": 40, "maxfev": 40},
     )
     print(result.x)
+    #'''
     return result.x[0], result.x[1], fixed_ppc_pa
 
 
@@ -1362,6 +1365,7 @@ def _score_fixed_pointings_with_pa_constraints(
     ppc_list,
     shared_pa,
     observation_time=None,
+    config=None,
 ):
     """Evaluate a single shared PA across a fixed pointing list."""
     ppc_list_shared_pa = _apply_shared_pa_to_ppc_list(ppc_list, shared_pa)
@@ -1384,6 +1388,34 @@ def _score_fixed_pointings_with_pa_constraints(
                 "wrap_crossings_by_pointing"
             ],
         }
+
+    if isinstance(config, dict) and observation_time is not None:
+        for ppc_row in ppc_list_shared_pa:
+            guidestar_metrics = _evaluate_bright_guidestar_constraints(
+                float(ppc_row[1]),
+                float(ppc_row[2]),
+                float(ppc_row[3]),
+                observation_time=observation_time,
+                config=config,
+            )
+            if not guidestar_metrics["ok"]:
+                return {
+                    "ppc_list": ppc_list_shared_pa,
+                    "tb_ppc": Table(),
+                    "score": -np.inf,
+                    "priority_sum": -np.inf,
+                    "n_allocated": 0,
+                    "usage_sum": 0.0,
+                    "inr_ok": True,
+                    "guidestar_ok": False,
+                    "n_bright_guidestars": guidestar_metrics["n_bright_guidestars"],
+                    "bright_guidestars_per_camera": guidestar_metrics[
+                        "bright_guidestars_per_camera"
+                    ],
+                    "max_inr_jump": pa_constraint_metrics["max_inr_jump"],
+                    "failed_inr_indices": [],
+                    "wrap_crossings_by_pointing": {},
+                }
 
     tb_tgt_trial = tb_tgt.copy(copy_data=True)
     tb_tgt_trial.meta = dict(tb_tgt.meta)
@@ -1426,6 +1458,9 @@ def _score_fixed_pointings_with_pa_constraints(
         "n_allocated": len(allocated_target_ids),
         "usage_sum": usage_sum,
         "inr_ok": True,
+        "guidestar_ok": True,
+        "n_bright_guidestars": 0,
+        "bright_guidestars_per_camera": {},
         "max_inr_jump": pa_constraint_metrics["max_inr_jump"],
         "failed_inr_indices": [],
         "wrap_crossings_by_pointing": {},
@@ -1499,7 +1534,7 @@ def _score_single_pointing_pa(
     tb_tgt,
     ppc_ra,
     ppc_dec,
-    ppc_pa,
+    ppc_pa=0,
     observation_time=None,
     config=None,
 ):
@@ -1750,6 +1785,7 @@ def optimize_shared_pa_for_fixed_pointings(
             ppc_array,
             shared_pa,
             observation_time=observation_time,
+            config=config,
         )
         if not trial_result["inr_ok"]:
             logger.info(
@@ -1800,6 +1836,7 @@ def optimize_shared_pa_for_fixed_pointings(
                 ppc_array,
                 0.0,
                 observation_time=observation_time,
+                config=config,
             )
             logger.warning(
                 "[S2][ALERT] {}: no INR-safe shared PA found; forcing PA=0.0 deg for all pointings.".format(
@@ -1837,6 +1874,81 @@ def optimize_shared_pa_for_fixed_pointings(
     }
 
 
+def optimize_missing_pa_for_fixed_pointings(
+    tb_tgt,
+    ppc_list,
+    config=None,
+    label=None,
+):
+    """Fill missing PPC-list PAs by optimizing each pointing independently."""
+    ppc_array = _coerce_ppc_list_array(ppc_list)
+    if ppc_array.size == 0:
+        return ppc_array, {
+            "best_pa": np.nan,
+            "message": "No PPCs supplied",
+        }
+
+    label_text = label or "fixed pointings"
+    observation_time = _resolve_pa_constraint_observation_time(
+        ppc_array,
+        config=config,
+    )
+    optimized_indices = []
+    for pointing_index, ppc_row in enumerate(ppc_array):
+        if _is_provided_ppc_pa_value(ppc_row[3]):
+            ppc_array[pointing_index, 3] = _normalize_ppc_pa(ppc_row[3])
+            if isinstance(config, dict) and observation_time is not None:
+                from .validation import _warn_too_bright_guidestars
+
+                df_guidestars_toobright = _warn_too_bright_guidestars(
+                    float(ppc_row[1]),
+                    float(ppc_row[2]),
+                    float(ppc_array[pointing_index, 3]),
+                    _coerce_utc_datetime(observation_time),
+                    config,
+                )
+                per_camera_counts = {}
+                if len(df_guidestars_toobright) > 0 and "agId" in df_guidestars_toobright.columns:
+                    camera_ids, camera_counts = np.unique(
+                        np.asarray(df_guidestars_toobright["agId"], dtype=int),
+                        return_counts=True,
+                    )
+                    per_camera_counts = {
+                        int(camera_id): int(camera_count)
+                        for camera_id, camera_count in zip(camera_ids, camera_counts)
+                    }
+                print(
+                    "[S2] {} bright guide stars in AG cameras for {} pointing {} at RA={:.6f}, Dec={:.6f}, PA={:.1f} (per_cam={})".format(
+                        len(df_guidestars_toobright),
+                        label_text,
+                        pointing_index + 1,
+                        float(ppc_row[1]),
+                        float(ppc_row[2]),
+                        float(ppc_array[pointing_index, 3]),
+                        per_camera_counts,
+                    )
+                )
+            continue
+
+        pa_result = _optimize_single_pointing_pa(
+            tb_tgt,
+            float(ppc_row[1]),
+            float(ppc_row[2]),
+            initial_pa=-90.0,
+            config=config,
+            label=f"{label_text} pointing {pointing_index + 1}",
+        )
+        ppc_array[pointing_index, 3] = pa_result["pa"]
+        optimized_indices.append(pointing_index + 1)
+
+    return ppc_array, {
+        "best_pa": np.nan,
+        "observation_time": observation_time,
+        "optimized_indices": optimized_indices,
+        "message": "Optimized missing PPC-list PAs individually",
+    }
+
+
 # -----------------------------------------------------------------------------
 # Classic single-program PPC optimization
 # -----------------------------------------------------------------------------
@@ -1847,7 +1959,7 @@ def PPP_centers_for_single_program(
     n_ppc,
     weight_para=_DEFAULT_PPP_WEIGHT_PARAMS,
     fixed_ppc_pa=None,
-    write_ppc_list=False,
+    write_ppc_list=True,
     output_dir=None,
     config=None,
 ):
