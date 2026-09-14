@@ -2,6 +2,7 @@
 # generatePfsDesign.py : PPP+qPlan+SFR
 
 import argparse
+import logging
 import os
 import sys
 import time
@@ -332,6 +333,13 @@ class GeneratePfsDesign(object):
     #"""
 
     def runPPP(self, n_pccs_l, n_pccs_m, backup=False):
+        logging.disable(logging.CRITICAL)
+        try:
+            return self._runPPP(n_pccs_l, n_pccs_m, backup=backup)
+        finally:
+            logging.disable(logging.NOTSET)
+
+    def _runPPP(self, n_pccs_l, n_pccs_m, backup=False):
         if self.conf["ppp"]["mode"] == "queue":
             from .utils import run_for_queue as PPP
         else:
