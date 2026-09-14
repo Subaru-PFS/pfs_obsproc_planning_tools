@@ -135,7 +135,7 @@ def run(
         dec = c.dec.to_string(sep=":", precision=2, pad=True)
         line = "  "
         line += f"{t['ppc_code']}\t"
-        line += f"{t['ppc_priority']}\t"
+        line += f"{t['ppc_priority_usr']}\t"
         line += f"{t['ppc_exptime'] + float(conf['qplan']['overhead'])*60.0 + overhead_add}\t"
         line += f"{t['ppc_pa']}\t"
         line += f"{t['ppc_resolution']}\t"
@@ -283,7 +283,7 @@ def run(
         observer.set_date(date_t)
         default_start_time = observer.evening_twilight_18() - timedelta(minutes=5)
         default_stop_time = observer.morning_twilight_18() + timedelta(
-            minutes=30
+            minutes=0
         )  # extend TW18 by 30 min for real operation, just in case
         
         # Ensure timezone-aware comparisons
