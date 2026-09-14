@@ -388,7 +388,7 @@ def classic_build_classdict(cost_values=None):
         {
             f"sci_P{priority}": {
                 "nonObservationCost": float(non_observation_cost),
-                "partialObservationCost": partial_observation_cost,
+                "partialObservationCost": partial_observation_cost * 10,
                 "calib": False,
             }
             for priority, non_observation_cost in zip(science_priorities, cost_values)
@@ -454,55 +454,55 @@ def run_netflow(
     brokenCobrasMargin=None,
     avoidFiducials=True,
 ):
-    if brokenCobrasMargin is None:
-        brokenCobrasMargin = globals()["brokenCobrasMargin"] or 0.0
-    if avoidFiducials is None:
-        avoidFiducials = globals()["avoidFiducials"] or True
-    telescope_ra = ppc_list[:, 1]
-    telescope_dec = ppc_list[:, 2]
-    telescope_pa = ppc_list[:, 3]
-
-    netflow_targets, proposal_fh_limits = build_netflow_targets(
-        tb_tgt, for_single_ppc=for_single_ppc
-    )
-    class_dict = (
-        classdict_override if classdict_override is not None else build_classdict()
-    )
-    observation_time = _resolve_observation_time(observation_time, ppc_list)
-
-    telescopes = [
-        nf.Telescope(telescope_ra[index], telescope_dec[index], telescope_pa[index], observation_time)
-        for index in range(len(telescope_ra))
-    ]
-    focal_plane_positions = [
-        telescope.get_fp_positions(netflow_targets) for telescope in telescopes
-    ]
-
-    n_visit = len(telescope_ra)
-    single_exptime = tb_tgt.meta["single_exptime"]
-    visit_costs = [0] * n_visit
-
-    gurobi_options = dict(
-        seed=0,
-        presolve=1,
-        method=4,
-        degenmoves=0,
-        heuristics=0.8,
-        mipfocus=0,
-        mipgap=5.0e-2,
-        LogToConsole=0,
-    )
-
-    forbidden_pairs = [[] for _ in range(n_visit)]
-    already_observed = {}
-    if tb_tgt.meta.get("cobra_feature_flag", True):
-        logger.debug("Now n2 flag has been applied")
-        cobra_feature_flags = _get_cobra_feature_flags()
-    else:
-        logger.debug("No n2 flag has been applied")
-        cobra_feature_flags = None
-
     with open(os.devnull, "w") as _devnull, contextlib.redirect_stdout(_devnull):
+        if brokenCobrasMargin is None:
+            brokenCobrasMargin = globals()["brokenCobrasMargin"] or 0.0
+        if avoidFiducials is None:
+            avoidFiducials = globals()["avoidFiducials"] or True
+        telescope_ra = ppc_list[:, 1]
+        telescope_dec = ppc_list[:, 2]
+        telescope_pa = ppc_list[:, 3]
+
+        netflow_targets, proposal_fh_limits = build_netflow_targets(
+            tb_tgt, for_single_ppc=for_single_ppc
+        )
+        class_dict = (
+            classdict_override if classdict_override is not None else build_classdict()
+        )
+        observation_time = _resolve_observation_time(observation_time, ppc_list)
+
+        telescopes = [
+            nf.Telescope(telescope_ra[index], telescope_dec[index], telescope_pa[index], observation_time)
+            for index in range(len(telescope_ra))
+        ]
+        focal_plane_positions = [
+            telescope.get_fp_positions(netflow_targets) for telescope in telescopes
+        ]
+
+        n_visit = len(telescope_ra)
+        single_exptime = tb_tgt.meta["single_exptime"]
+        visit_costs = [0] * n_visit
+
+        gurobi_options = dict(
+            seed=0,
+            presolve=1,
+            method=4,
+            degenmoves=0,
+            heuristics=0.8,
+            mipfocus=0,
+            mipgap=5.0e-2,
+            LogToConsole=0,
+        )
+
+        forbidden_pairs = [[] for _ in range(n_visit)]
+        already_observed = {}
+        if tb_tgt.meta.get("cobra_feature_flag", True):
+            print("Now n2 flag has been applied")
+            cobra_feature_flags = _get_cobra_feature_flags()
+        else:
+            print("No n2 flag has been applied")
+            cobra_feature_flags = None
+
         problem = nf.buildProblem(
             bench,
             netflow_targets,
