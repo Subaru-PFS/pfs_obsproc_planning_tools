@@ -71,7 +71,7 @@ def run(conf, workDir="."):
     # Save proposal-level summary first, then re-use it downstream.
     proposal_stat_path = save_proposal_stat_csv(conf, tb_tgt, tb_queue, workDir)
 
-    pdf = PdfPages(os.path.join(workDir, "check-S26A-queue.pdf"))
+    pdf = PdfPages(os.path.join(workDir, "check-queue.pdf"))
 
     plot_ppc(conf, tb_tgt, tb_ppc, pdf)
     plot_assign(conf, workDir, pdf)
