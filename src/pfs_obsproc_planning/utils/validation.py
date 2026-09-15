@@ -690,11 +690,11 @@ def validation(parentPath, figpath, save, show, ssp, conf):
         conf["sfa"]["dot_margin"],
     )
 
-    """ Skip now as new n2 detector has been installed
     fibId = FiberIds(
         path=os.path.join(conf["packages"]["pfs_utils_dir"], "data", "fiberids")
     )
 
+    """ Skip now as new n2 detector has been installed
     cobra_idx_n2 = fibId.cobrasForSpectrograph(spectrographId=2)
     cobra_idx_n2 = cobra_idx_n2[cobra_idx_n2 <= 2394]
     cobra_id_n2 = cobra_idx_n2 + 1
