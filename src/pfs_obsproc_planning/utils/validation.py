@@ -831,7 +831,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
     df_ch["observation_time_hst"] = (
         pd.to_datetime(df_design["observation_time"], utc=True)
         .dt.tz_convert("Pacific/Honolulu")
-        .dt.strftime("%Y-%m-%d %H:%M HST")
+        .dt.strftime("%Y-%m-%d %H:%M:%S")
         .to_numpy()
     )
 
