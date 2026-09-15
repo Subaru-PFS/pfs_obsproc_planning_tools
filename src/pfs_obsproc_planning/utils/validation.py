@@ -658,12 +658,14 @@ def validation(parentPath, figpath, save, show, ssp, conf):
     else:
         logger.warning(f"Visibility summary CSV not found: {summary_csv_path}")
 
+    """ Skip now as new n2 detector has been installed
     # open-use only: read target table first and keep only qa_reference_arm == 'n'
     if not ssp:
         df_tgt_n = _load_ppp_targets_qa_reference_n(parentPath)
         ob_codes_qa_n = set(df_tgt_n["ob_code"].astype(str).str.strip())
     else:
         ob_codes_qa_n = set()
+    #"""
 
     # Compute InR/El at start and stop times
     df_design = _add_inr_columns(df_design)
@@ -688,6 +690,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
         conf["sfa"]["dot_margin"],
     )
 
+    """ Skip now as new n2 detector has been installed
     fibId = FiberIds(
         path=os.path.join(conf["packages"]["pfs_utils_dir"], "data", "fiberids")
     )
@@ -696,6 +699,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
     cobra_idx_n2 = cobra_idx_n2[cobra_idx_n2 <= 2394]
     cobra_id_n2 = cobra_idx_n2 + 1
     fiber_id_n2 = fibId.cobraIdToFiberId(cobra_id_n2)
+    #"""
 
     # Accumulate bright sources near unassigned fibers across all designs
     df_all_unassigned_toobright = pd.DataFrame()
@@ -753,6 +757,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
         # Build per-fiber DataFrame and check magnitudes
         df_fib = _build_df_fib(pfsDesign0)
 
+        """ Skip now as new n2 detector has been installed 
         # search for targets requesting n but allocated with n2 cobra
         if len(ob_codes_qa_n) > 0:
             fiber_id_n2_for_plot = (
@@ -767,6 +772,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
             )
         else:
             fiber_id_n2_for_plot = []
+        """
 
         df_too_bright = df_fib[(df_fib["psfMag"] < 13) | (df_fib["totalMag"] < 13)]
         if not df_too_bright.empty:
@@ -805,7 +811,8 @@ def validation(parentPath, figpath, save, show, ssp, conf):
             pa=pfsDesign0.posAng,
             conf=conf,
             unfib_bright=unfib_bright,
-            fiber_id_n2=fiber_id_n2_for_plot,
+            fiber_id_n2=[],
+            #fiber_id_n2=fiber_id_n2_for_plot,
         )
 
     # After processing all designs, optionally save a single CSV containing
@@ -821,10 +828,17 @@ def validation(parentPath, figpath, save, show, ssp, conf):
     df_ch["inr2"] = df_design["inr2"]
     df_ch["el1"] = df_design["el1"]
     df_ch["el2"] = df_design["el2"]
+    df_ch["observation_time_hst"] = (
+        pd.to_datetime(df_design["observation_time"], utc=True)
+        .dt.tz_convert("Pacific/Honolulu")
+        .dt.strftime("%Y-%m-%d %H:%M HST")
+        .to_numpy()
+    )
 
     desired_order = [
         "designId",
         "ppc_code",
+        "observation_time_hst",
         "inr1",
         "inr2",
         "el1",
