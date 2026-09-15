@@ -79,10 +79,78 @@ def observation_program_url(semester_code):
     )
 
 
+def observation_schedule_csv_path(semester_code):
+    return Path(CSV_PATH).parent / f"observation_schedule_{semester_code}.csv"
+
+
 @lru_cache(maxsize=4)
-def load_observation_program_html(semester_code):
+def load_observation_schedule(semester_code):
+    schedule_path = observation_schedule_csv_path(semester_code)
+    if schedule_path.exists():
+        schedule = pd.read_csv(schedule_path)
+        schedule["date"] = pd.to_datetime(schedule["date"]).dt.date
+        return schedule
+
     with urlopen(observation_program_url(semester_code)) as response:
-        return response.read()
+        soup = BeautifulSoup(response.read(), "html.parser")
+
+    semester_year = 2000 + int(semester_code[1:3])
+    program_id = f"{semester_code}-999QN"
+    records = []
+
+    for row in soup.find_all("tr"):
+        cells = [" ".join(cell.stripped_strings) for cell in row.find_all(["td", "th"])]
+        date_text = next(
+            (cell for cell in cells if re.match(r"^\d{1,2}/\d{1,2}$", cell)),
+            None,
+        )
+        if date_text is None:
+            continue
+
+        month, day = map(int, date_text.split("/"))
+        row_year = (
+            semester_year + 1
+            if semester_code.endswith("B") and month == 1
+            else semester_year
+        )
+        row_date = datetime(row_year, month, day).date()
+        row_text = " ".join(cells)
+
+        for time_range, fraction_text, segment_text in re.findall(
+            r"(\d{1,2}:\d{2}-\d{1,2}:\d{2})\s*\{([0-9.]+)\}\s*(.*?)(?=\d{1,2}:\d{2}-\d{1,2}:\d{2}\s*\{|$)",
+            row_text,
+        ):
+            if (
+                "[Observation Canceled]" in segment_text
+                or f"(Arai; {program_id})" not in segment_text
+            ):
+                continue
+
+            start_text, end_text = time_range.split("-")
+            start_hour, start_minute = map(int, start_text.split(":"))
+            end_hour, end_minute = map(int, end_text.split(":"))
+            start_total_minutes = start_hour * 60 + start_minute
+            end_total_minutes = end_hour * 60 + end_minute
+            if end_total_minutes < start_total_minutes:
+                end_total_minutes += 24 * 60
+
+            records.append(
+                {
+                    "date": row_date,
+                    "time_range": time_range,
+                    "fraction": float(fraction_text),
+                    "duration_hours": (
+                        end_total_minutes - start_total_minutes
+                    ) / 60.0,
+                }
+            )
+
+    schedule = pd.DataFrame(
+        records,
+        columns=["date", "time_range", "fraction", "duration_hours"],
+    )
+    schedule.to_csv(schedule_path, index=False)
+    return schedule
 
 
 def load_status() -> pd.DataFrame:
@@ -210,8 +278,8 @@ def refresh(event) -> None:
     This callback is bound to `refresh_btn.on_click` and mutates
     `df_holder["df"]` so the reactive view reads the new data.
     """
-    # reload local data and fetch fresh observatory schedule data on next use
-    load_observation_program_html.cache_clear()
+    # Reload local data, including the persisted observatory schedule CSV.
+    load_observation_schedule.cache_clear()
     df_holder["df"] = load_status()
     df = df_holder["df"]
 
@@ -473,27 +541,29 @@ def observation_progress_view(selected_date, _):
 
     semester_code = semester_code_for_date(start_date)
 
-    program_id = f"{semester_code}-999QN"
     url = observation_program_url(semester_code)
 
     try:
-        html = load_observation_program_html(semester_code)
-    except URLError as exc:
+        schedule = load_observation_schedule(semester_code)
+    except (OSError, URLError, pd.errors.ParserError) as exc:
         return pn.pane.HTML(
             (
                 "<div style='font-size:18px;'>"
                 "Observation Progress<br>"
-                f"<span style='color:#b00020;'>Failed to load {url}: {exc}</span>"
+                f"<span style='color:#b00020;'>Failed to load schedule from {url}: {exc}</span>"
                 "</div>"
             ),
             sizing_mode="stretch_width",
         )
 
-    soup = BeautifulSoup(html, "html.parser")
-    semester_year = 2000 + int(semester_code[1:3])
-    remaining_nights = 0.0
-    remaining_hours = 0.0
-    remaining_segments = []
+    remaining_schedule = schedule[schedule["date"] >= start_date]
+    remaining_nights = float(remaining_schedule["fraction"].sum())
+    remaining_hours = float(remaining_schedule["duration_hours"].sum())
+    remaining_segments = list(
+        remaining_schedule[["date", "time_range", "fraction"]].itertuples(
+            index=False, name=None
+        )
+    )
     gB_nppc_req = {}
     gB_nppc = {}
     gB_nppc_tonight = {}
@@ -585,49 +655,6 @@ def observation_progress_view(selected_date, _):
                 f"Could not read proposal stat file: {proposal_stat_path}",
                 duration=5000,
             )
-
-    for row in soup.find_all("tr"):
-        cells = [" ".join(cell.stripped_strings) for cell in row.find_all(["td", "th"])]
-        if not cells:
-            continue
-
-        date_text = next(
-            (cell for cell in cells if re.match(r"^\d{1,2}/\d{1,2}$", cell)),
-            None,
-        )
-        if date_text is None:
-            continue
-
-        month, day = map(int, date_text.split("/"))
-        row_year = semester_year + 1 if semester_code.endswith("B") and month == 1 else semester_year
-        row_date = datetime(row_year, month, day).date()
-        if row_date < start_date:
-            continue
-
-        row_text = " ".join(cells)
-
-        for time_range, fraction_text, segment_text in re.findall(
-            r"(\d{1,2}:\d{2}-\d{1,2}:\d{2})\s*\{([0-9.]+)\}\s*(.*?)(?=\d{1,2}:\d{2}-\d{1,2}:\d{2}\s*\{|$)",
-            row_text,
-        ):
-            if "[Observation Canceled]" in segment_text:
-                continue
-
-            fraction = float(fraction_text)
-            start_text, end_text = time_range.split("-")
-            start_hour, start_minute = map(int, start_text.split(":"))
-            end_hour, end_minute = map(int, end_text.split(":"))
-            start_total_minutes = start_hour * 60 + start_minute
-            end_total_minutes = end_hour * 60 + end_minute
-            if end_total_minutes < start_total_minutes:
-                end_total_minutes += 24 * 60
-
-            duration_hours = (end_total_minutes - start_total_minutes) / 60.0
-
-            if f"(Arai; {program_id})" in segment_text:
-                remaining_hours += duration_hours
-                remaining_nights += fraction
-                remaining_segments.append((row_date, time_range, fraction))
 
     remaining_pointings = round(remaining_hours * 3)
     description = "&#10;".join(
