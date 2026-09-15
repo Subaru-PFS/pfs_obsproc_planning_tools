@@ -47,6 +47,52 @@
   background-color: #AFAFAF !important;
 }
 
+.validation-row-tooltip {
+    position: fixed;
+    z-index: 10000;
+    max-width: min(680px, calc(100vw - 28px));
+    padding: 8px 10px;
+    color: #222222;
+    background: #ffffff;
+    border: 1px solid #b8b8b8;
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgb(0 0 0 / 18%);
+    font-size: 12px;
+    line-height: 1.7;
+    pointer-events: none;
+}
+
+.validation-tooltip-trigger {
+    color: #4f3f87;
+    border-bottom: 1px dotted currentColor;
+    cursor: help;
+    white-space: nowrap;
+}
+
+.validation-tooltip-metric {
+    white-space: nowrap;
+}
+
+.validation-tooltip-separator {
+    color: #999999;
+}
+
+.validation-tooltip-warning {
+    padding: 1px 3px;
+    border-radius: 2px;
+    font-weight: 700;
+}
+
+.validation-tooltip-warning-sky {
+    color: #6b4600;
+    background: #ffe09a;
+}
+
+.validation-tooltip-warning-std {
+    color: #8a1631;
+    background: #f8c4d0;
+}
+
 /* Custom refresh button matching the theme color #6A5AA3 */
 .bk-btn {
     /* Base color from the template header purple (#6A5AA3) */

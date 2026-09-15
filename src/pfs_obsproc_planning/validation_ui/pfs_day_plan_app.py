@@ -3,6 +3,7 @@ import ast
 import glob
 import re
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
@@ -10,6 +11,7 @@ from urllib.request import urlopen
 from bs4 import BeautifulSoup
 import pandas as pd
 import panel as pn
+from panel.io.model import JSCode
 
 # Compact/scale the calendar popup so it doesn't take excessive screen
 # space. The CSS is kept in a separate file `styles.css` in this
@@ -17,6 +19,8 @@ import panel as pn
 # CSS at startup.
 css_path = Path(__file__).parent / "styles.css"
 css_text = css_path.read_text(encoding="utf-8") if css_path.exists() else ""
+formatter_path = Path(__file__).parent / "tabulator_formatters.js"
+total_formatter = JSCode(formatter_path.read_text(encoding="utf-8"))
 
 pn.extension(
     "tabulator",
@@ -25,8 +29,12 @@ pn.extension(
 )
 
 # Path to CSV produced by the daily processing pipeline. Adjust as needed.
-CSV_PATH = "/work/wanqqq/daily_process_status.csv"
-PROPOSAL_SUM_CSV_PATH = "/home/wanqqq/workDir_pfs/S26A/proposal_sum_S26A.csv"
+#CSV_PATH = "/work/wanqqq/daily_process_status.csv"
+#PROPOSAL_SUM_CSV_PATH = "/home/wanqqq/workDir_pfs/S26B/proposal_sum_S26B.csv"
+
+CSV_PATH = "/home/wanqiu/data/HE/PFS_frame/git/work/wanqqq/daily_process_status.csv"
+PROPOSAL_SUM_CSV_PATH = "/home/wanqiu/data/HE/PFS_frame/git/work/wanqqq/run_2605/S26A-queue/proposal_sum_S26A.csv"
+
 HIGHLIGHT_STYLE = (
     "background-color: #FCE59F;"
     "font-weight: bold;"
@@ -52,14 +60,29 @@ def semester_code_for_date(selected_date):
     return f"S{selected_date.year % 100:02d}B"
 
 
-def proposal_stat_csv_path(selected_date):
+def pfsa_output_dir(selected_date):
     semester_code = semester_code_for_date(selected_date)
     yymm = selected_date.strftime("%y%m")
     ymd = selected_date.strftime("%Y%m%d")
+    # return f"/work/wanqqq/run_{yymm}/{semester_code}-queue/output_{ymd}"
+    return f"/home/wanqiu/data/HE/PFS_frame/git/work/wanqqq/run_{yymm}/{semester_code}-queue/output_{ymd}"
+
+
+def proposal_stat_csv_path(selected_date):
+    return f"{pfsa_output_dir(selected_date)}/proposal_stat_{selected_date.strftime('%y%m%d')}.csv"
+
+
+def observation_program_url(semester_code):
     return (
-        "/work/wanqqq/"
-        f"run_{yymm}/{semester_code}-queue/output_{ymd}/proposal_stat_{yymm}{selected_date.strftime('%d')}.csv"
+        f"https://www1.subaru.nao.ac.jp/operation/opecenter/"
+        f"ObsProgram{semester_code}.html"
     )
+
+
+@lru_cache(maxsize=4)
+def load_observation_program_html(semester_code):
+    with urlopen(observation_program_url(semester_code)) as response:
+        return response.read()
 
 
 def load_status() -> pd.DataFrame:
@@ -98,7 +121,7 @@ def validation_html_path(selected_date):
     yymm = selected_date.strftime("%y%m")
     ymd = selected_date.strftime("%Y%m%d")
 
-    base_dir = f"/work/wanqqq/run_{yymm}"
+    base_dir = "/home/wanqiu/data/HE/PFS_frame/git/work/wanqqq/run_2605"  # f"/work/wanqqq/run_{yymm}"
 
     pattern = (
         f"{base_dir}/*queue/"
@@ -187,7 +210,8 @@ def refresh(event) -> None:
     This callback is bound to `refresh_btn.on_click` and mutates
     `df_holder["df"]` so the reactive view reads the new data.
     """
-    # reload data
+    # reload local data and fetch fresh observatory schedule data on next use
+    load_observation_program_html.cache_clear()
     df_holder["df"] = load_status()
     df = df_holder["df"]
 
@@ -281,7 +305,7 @@ def status_view(selected_date, _):
     parts = [
         f"<b>qaDB: <span style='color:{color_status(row['status_qaDB'])}'>{row['status_qaDB']}</b>{show_time(row['time_qaDB'])}</span>",
         f"<b>queueDB: <span style='color:{color_status(row['status_queueDB'])}'>{row['status_queueDB']}</b>{show_time(row['time_queueDB'])}</span>",
-        f"<b>designGenerator: <span style='color:{color_status(row['status_daily_processing'])}'>{row['status_daily_processing']}</b>{show_time(row['time_daily_processing'])}</span>",
+        f"<b>design: <span style='color:{color_status(row['status_daily_processing'])}'>{row['status_daily_processing']}</b>{show_time(row['time_daily_processing'])}</span>",
         f"<b>Validation (SA): <span style='color:{color_status(validation_status)}'>{validation_status}</b>{show_time(row['time_validation_complete'])}</span>",
     ]
 
@@ -289,6 +313,23 @@ def status_view(selected_date, _):
 
     return pn.pane.HTML(
         f"<div style='font-size:20px; font-weight:normal;'>{text}</div>"
+    )
+
+
+@pn.depends(date_picker, refresh_btn)  # type: ignore[call-arg]
+def output_dir_view(selected_date, _):
+    row = df_holder["df"][df_holder["df"]["date_obj"] == selected_date].iloc[0]
+    if row["status_daily_processing"] != "done":
+        return pn.Spacer(height=0)
+
+    output_dir = pfsa_output_dir(selected_date)
+    return pn.pane.HTML(
+        f"<div style='font-size:13px; line-height:1.4; margin-top:12px;'>"
+        f"<b>The design files have been generated:</b><br>"
+        f"<code title='Click to copy' style='cursor:pointer; overflow-wrap:anywhere;' "
+        f"onclick='navigator.clipboard.writeText(this.textContent)'>{output_dir}</code>"
+        f"</div>",
+        sizing_mode="stretch_width",
     )
 
 @pn.depends(date_picker, refresh_btn)  # type: ignore[call-arg]
@@ -320,18 +361,78 @@ def validation_view(selected_date, _):
             pdf_pane.object = None
 
     cell_highlight = find_highlighted_cells(html_path) # find highlighted cells
+    highlighted_columns = {
+        row: {
+            df.columns[col]
+            for highlighted_row, col in cell_highlight
+            if highlighted_row == row and col < len(df.columns)
+        }
+        for row in range(len(df))
+    }
+    sky_std_columns = [
+        column
+        for column in df.columns
+        if column.startswith(("sky_", "std_"))
+    ]
+    detail_columns = [
+        column
+        for column in sky_std_columns
+        if column not in ("sky_sum", "std_sum")
+    ]
+    table_df = df.drop(columns=detail_columns).copy()
+
+    def metric(row, column, label):
+        if column not in df.columns:
+            return None
+        value = row[column]
+        warning_class = (
+            f" validation-tooltip-warning validation-tooltip-warning-{column.split('_', 1)[0]}"
+            if column in highlighted_columns.get(row.name, set())
+            else ""
+        )
+        return f"<span class='validation-tooltip-metric{warning_class}'>{label} {value}</span>"
+
+    def sky_std_details(row, prefix, label):
+        metrics = [
+            metric(row, f"{prefix}_mean", "mean"),
+            metric(row, f"{prefix}_std", "sigma"),
+            metric(row, f"{prefix}_min", "min"),
+            metric(row, f"{prefix}_max", "max"),
+        ]
+        values = " <span class='validation-tooltip-separator'>|</span> ".join(
+            value for value in metrics if value is not None
+        )
+        return f"<div><b>{label}:</b> {values}</div>"
+
+    table_df["_sky_details"] = df.apply(
+        sky_std_details, axis=1, args=("sky", "Sky")
+    )
+    table_df["_std_details"] = df.apply(
+        sky_std_details, axis=1, args=("std", "Standards")
+    )
+    table_df["_sky_total_warning"] = [
+        "sky_sum" in highlighted_columns.get(row, set())
+        for row in range(len(df))
+    ]
+    table_df["_std_total_warning"] = [
+        "std_sum" in highlighted_columns.get(row, set())
+        for row in range(len(df))
+    ]
 
 
-    def styler_from_cell_highlight(df, cell_highlight):
-        styles = pd.DataFrame("", index=df.index, columns=df.columns)
+    def styler_from_cell_highlight(table_df, cell_highlight):
+        styles = pd.DataFrame("", index=table_df.index, columns=table_df.columns)
 
         for (row, col) in cell_highlight:
-            if row < len(df.index) and col < len(df.columns):
-                styles.iat[row, col] = HIGHLIGHT_STYLE
+            if row >= len(df.index) or col >= len(df.columns):
+                continue
+            column = df.columns[col]
+            if column in table_df.columns:
+                styles.loc[table_df.index[row], column] = HIGHLIGHT_STYLE
 
-        return df.style.apply(lambda _: styles, axis=None)
+        return table_df.style.apply(lambda _: styles, axis=None)
     
-    styler = styler_from_cell_highlight(df, cell_highlight)
+    styler = styler_from_cell_highlight(table_df, cell_highlight)
 
 
     # Create Tabulator without passing `columns` (some Panel builds
@@ -348,6 +449,16 @@ def validation_view(selected_date, _):
         header_filters=True,
         show_index=False,
         disabled=True,
+        hidden_columns=[
+            "_sky_details",
+            "_std_details",
+            "_sky_total_warning",
+            "_std_total_warning",
+        ],
+        formatters={
+            "sky_sum": total_formatter,
+            "std_sum": total_formatter,
+        },
         #selection=list(rows_flagged),
         #selectable="checkbox",
     )
@@ -363,14 +474,10 @@ def observation_progress_view(selected_date, _):
     semester_code = semester_code_for_date(start_date)
 
     program_id = f"{semester_code}-999QN"
-    url = (
-        f"https://www1.subaru.nao.ac.jp/operation/opecenter/"
-        f"ObsProgram{semester_code}.html"
-    )
+    url = observation_program_url(semester_code)
 
     try:
-        with urlopen(url) as response:
-            html = response.read()
+        html = load_observation_program_html(semester_code)
     except URLError as exc:
         return pn.pane.HTML(
             (
@@ -706,6 +813,7 @@ template = pn.template.BootstrapTemplate(
         refresh_btn,
         confirm_btn,
         date_picker,
+        output_dir_view,
     ],
     sidebar_width=290,
     theme="default",
