@@ -1271,7 +1271,7 @@ def _evaluate_ppc_inr_continuity(ppc_ra, ppc_dec, ppc_pa, sample_times_utc):
 
     inr_values = []
     for obstime in sample_times_utc:
-        inr_value, _ = calc_inr(
+        _, inr_value, _ = calc_inr(
             {"ppc_ra": ppc_ra, "ppc_dec": ppc_dec, "ppc_pa": ppc_pa},
             obstime,
         )

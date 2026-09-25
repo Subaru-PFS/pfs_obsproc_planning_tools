@@ -29,11 +29,8 @@ pn.extension(
 )
 
 # Path to CSV produced by the daily processing pipeline. Adjust as needed.
-#CSV_PATH = "/work/wanqqq/daily_process_status.csv"
-#PROPOSAL_SUM_CSV_PATH = "/home/wanqqq/workDir_pfs/S26B/proposal_sum_S26B.csv"
-
-CSV_PATH = "/home/wanqiu/data/HE/PFS_frame/git/work/wanqqq/daily_process_status.csv"
-PROPOSAL_SUM_CSV_PATH = "/home/wanqiu/data/HE/PFS_frame/git/work/wanqqq/run_2605/S26A-queue/proposal_sum_S26A.csv"
+CSV_PATH = "/work/wanqqq/daily_process_status.csv"
+PROPOSAL_SUM_CSV_PATH = "/home/wanqqq/workDir_pfs/S26B/proposal_sum_S26B.csv"
 
 HIGHLIGHT_STYLE = (
     "background-color: #FCE59F;"
@@ -64,8 +61,7 @@ def pfsa_output_dir(selected_date):
     semester_code = semester_code_for_date(selected_date)
     yymm = selected_date.strftime("%y%m")
     ymd = selected_date.strftime("%Y%m%d")
-    # return f"/work/wanqqq/run_{yymm}/{semester_code}-queue/output_{ymd}"
-    return f"/home/wanqiu/data/HE/PFS_frame/git/work/wanqqq/run_{yymm}/{semester_code}-queue/output_{ymd}"
+    return f"/work/wanqqq/run_{yymm}/{semester_code}-queue/output_{ymd}"
 
 
 def proposal_stat_csv_path(selected_date):
@@ -189,7 +185,7 @@ def validation_html_path(selected_date):
     yymm = selected_date.strftime("%y%m")
     ymd = selected_date.strftime("%Y%m%d")
 
-    base_dir = "/home/wanqiu/data/HE/PFS_frame/git/work/wanqqq/run_2605"  # f"/work/wanqqq/run_{yymm}"
+    base_dir = f"/work/wanqqq/run_{yymm}"
 
     pattern = (
         f"{base_dir}/*queue/"
@@ -267,6 +263,29 @@ confirm_btn = pn.widgets.Button(
     button_type="success",
     button_style="outline",
 )
+
+previous_design_btn = pn.widgets.ButtonIcon(
+    icon="chevron-left",
+    disabled=True,
+    size="2em",
+)
+next_design_btn = pn.widgets.ButtonIcon(
+    icon="chevron-right",
+    disabled=True,
+    size="2em",
+)
+design_position = pn.pane.HTML(
+    "<div class='design-position-content'>Select a design from the validation table.</div>",
+    width=320,
+    height=40,
+    margin=0,
+)
+design_navigation = {
+    "table": None,
+    "rows": None,
+    "validation_dir": None,
+    "current": None,
+}
 
 
 # ------------------------
@@ -349,6 +368,47 @@ def confirm_validation_complete(event) -> None:
 confirm_btn.on_click(confirm_validation_complete)
 
 
+def show_design(row_index, switch_tab=True):
+    table = design_navigation["table"]
+    rows = design_navigation["rows"]
+    validation_dir = design_navigation["validation_dir"]
+    if table is None or rows is None or validation_dir is None:
+        return
+    if not 0 <= row_index < len(rows):
+        return
+
+    row = rows.iloc[row_index]
+    design_id = row["designId"]
+    pdf_path = validation_dir / f"check_{design_id}.pdf"
+    design_pdf_pane.object = str(pdf_path) if pdf_path.exists() else None
+
+    design_navigation["current"] = row_index
+    previous_design_btn.disabled = row_index == 0
+    next_design_btn.disabled = row_index == len(rows) - 1
+    design_position.object = (
+        f"<div class='design-position-content'>"
+        f"<b>{row_index + 1} / {len(rows)}</b>&nbsp;&nbsp;{row['ppc_code']}"
+        f"</div>"
+    )
+
+    if table.selection != [row_index]:
+        table.selection = [row_index]
+    if table.pagination and table.page_size:
+        table.page = row_index // table.page_size + 1
+    if switch_tab:
+        tabs.active = 1
+
+
+def navigate_design(offset):
+    current = design_navigation["current"]
+    if current is not None:
+        show_design(current + offset)
+
+
+previous_design_btn.on_click(lambda event: navigate_design(-1))
+next_design_btn.on_click(lambda event: navigate_design(1))
+
+
 # ------------------------
 # Reactive view
 # ------------------------
@@ -395,7 +455,14 @@ def output_dir_view(selected_date, _):
         f"<div style='font-size:13px; line-height:1.4; margin-top:12px;'>"
         f"<b>The design files have been generated:</b><br>"
         f"<code title='Click to copy' style='cursor:pointer; overflow-wrap:anywhere;' "
-        f"onclick='navigator.clipboard.writeText(this.textContent)'>{output_dir}</code>"
+        f"onclick=\"const text=this.textContent;"
+        f"const fallback=()=>{{const area=document.createElement('textarea');"
+        f"area.value=text;area.style.position='fixed';area.style.opacity='0';"
+        f"document.body.appendChild(area);area.select();document.execCommand('copy');"
+        f"area.remove();}};"
+        f"if(navigator.clipboard&amp;&amp;window.isSecureContext){{"
+        f"navigator.clipboard.writeText(text).catch(fallback);"
+        f"}}else{{fallback();}}\">{output_dir}</code>"
         f"</div>",
         sizing_mode="stretch_width",
     )
@@ -412,22 +479,6 @@ def validation_view(selected_date, _):
         lambda x: "{:.2f}".format(x) if isinstance(x, float) else x
     ) # re-format floats to 2 decimal places
 
-    validation_dir = Path(html_path).parent
-
-    def on_row_select(event):
-        if not event.new:
-            return
-
-        row = event.new[0]
-        design_id = df.iloc[row]["designId"]
-        pdf_path = validation_dir / f"check_{design_id}.pdf"
-
-        if pdf_path.exists():
-            pdf_pane.object = str(pdf_path)
-            tabs.active = 1   # switch to "Validation Figure" tab
-        else:
-            pdf_pane.object = None
-
     cell_highlight = find_highlighted_cells(html_path) # find highlighted cells
     highlighted_columns = {
         row: {
@@ -437,6 +488,21 @@ def validation_view(selected_date, _):
         }
         for row in range(len(df))
     }
+    df["_source_row"] = range(len(df))
+    if "observation_time_hst" in df.columns:
+        df = df.sort_values(
+            "observation_time_hst", kind="stable"
+        ).reset_index(drop=True)
+    df.insert(0, "Order", range(1, len(df) + 1))
+
+    validation_dir = Path(html_path).parent
+
+    def on_row_select(event):
+        if not event.new:
+            return
+        if design_navigation["table"] is tab:
+            show_design(event.new[0])
+
     sky_std_columns = [
         column
         for column in df.columns
@@ -455,7 +521,7 @@ def validation_view(selected_date, _):
         value = row[column]
         warning_class = (
             f" validation-tooltip-warning validation-tooltip-warning-{column.split('_', 1)[0]}"
-            if column in highlighted_columns.get(row.name, set())
+            if column in highlighted_columns.get(row["_source_row"], set())
             else ""
         )
         return f"<span class='validation-tooltip-metric{warning_class}'>{label} {value}</span>"
@@ -479,28 +545,26 @@ def validation_view(selected_date, _):
         sky_std_details, axis=1, args=("std", "Standards")
     )
     table_df["_sky_total_warning"] = [
-        "sky_sum" in highlighted_columns.get(row, set())
-        for row in range(len(df))
+        "sky_sum" in highlighted_columns.get(source_row, set())
+        for source_row in df["_source_row"]
     ]
     table_df["_std_total_warning"] = [
-        "std_sum" in highlighted_columns.get(row, set())
-        for row in range(len(df))
+        "std_sum" in highlighted_columns.get(source_row, set())
+        for source_row in df["_source_row"]
     ]
 
 
-    def styler_from_cell_highlight(table_df, cell_highlight):
+    def styler_from_cell_highlight(table_df):
         styles = pd.DataFrame("", index=table_df.index, columns=table_df.columns)
 
-        for (row, col) in cell_highlight:
-            if row >= len(df.index) or col >= len(df.columns):
-                continue
-            column = df.columns[col]
-            if column in table_df.columns:
-                styles.loc[table_df.index[row], column] = HIGHLIGHT_STYLE
+        for row, source_row in enumerate(table_df["_source_row"]):
+            for column in highlighted_columns.get(source_row, set()):
+                if column in table_df.columns:
+                    styles.loc[table_df.index[row], column] = HIGHLIGHT_STYLE
 
         return table_df.style.apply(lambda _: styles, axis=None)
     
-    styler = styler_from_cell_highlight(table_df, cell_highlight)
+    styler = styler_from_cell_highlight(table_df)
 
 
     # Create Tabulator without passing `columns` (some Panel builds
@@ -518,6 +582,7 @@ def validation_view(selected_date, _):
         show_index=False,
         disabled=True,
         hidden_columns=[
+            "_source_row",
             "_sky_details",
             "_std_details",
             "_sky_total_warning",
@@ -531,6 +596,22 @@ def validation_view(selected_date, _):
         #selectable="checkbox",
     )
     tab.param.watch(on_row_select, "selection")
+    design_navigation.update(
+        {
+            "table": tab,
+            "rows": table_df,
+            "validation_dir": validation_dir,
+            "current": None,
+        }
+    )
+    previous_design_btn.disabled = True
+    next_design_btn.disabled = True
+    design_position.object = (
+        "<div class='design-position-content'>"
+        "Select a design from the validation table."
+        "</div>"
+    )
+    design_pdf_pane.object = None
 
     return tab
 
@@ -822,17 +903,31 @@ def visibility_view(selected_date, _):
 # ------------------------
 # Layout
 # ------------------------
-pdf_pane = pn.pane.PDF(
+design_pdf_pane = pn.pane.PDF(
     None,
     sizing_mode="stretch_width",
     height=800,
 )
+design_figure_view = pn.Column(
+    pn.Row(
+        previous_design_btn,
+        design_position,
+        next_design_btn,
+        align="center",
+        height=40,
+        css_classes=["design-navigation-row"],
+    ),
+    design_pdf_pane,
+    sizing_mode="stretch_width",
+)
 tabs = pn.Tabs(
     ("Validation Table", validation_view),
-    ("Design Figure", pdf_pane),
+    ("Design Figure", design_figure_view),
     ("Observation Progress", observation_progress_view),
     ("Visibility", visibility_view),
+    active=0,
 )
+date_picker.param.watch(lambda event: setattr(tabs, "active", 0), "value")
 
 template = pn.template.BootstrapTemplate(
     title="Validation of PFS Queue Planning",

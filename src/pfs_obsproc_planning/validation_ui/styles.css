@@ -93,6 +93,19 @@
     background: #f8c4d0;
 }
 
+.design-navigation-row {
+    align-items: center !important;
+}
+
+.design-position-content {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 40px;
+    text-align: center;
+}
+
 /* Custom refresh button matching the theme color #6A5AA3 */
 .bk-btn {
     /* Base color from the template header purple (#6A5AA3) */
