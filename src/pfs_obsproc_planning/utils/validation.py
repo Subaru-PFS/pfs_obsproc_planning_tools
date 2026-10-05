@@ -67,10 +67,10 @@ def njy_mag(j):
 
 
 def calc_inr(df, obstime):
-    """Compute instrument rotator angle (InR) and elevation at `obstime`.
+    """Compute azimuth, instrument rotator angle, and elevation at `obstime`.
 
     Tries to use 'ppc_ra/dec/pa' columns first (when present), otherwise
-    falls back to 'ra_center/dec_center/pa_center'. Returns (inr, el).
+    falls back to 'ra_center/dec_center/pa_center'. Returns (az, inr, el).
     """
     try:
         az, el, inr = radec_to_subaru(
@@ -96,31 +96,36 @@ def calc_inr(df, obstime):
         )
     except ValueError as e:
         logger.warning(f"Error in calculating InR: {e}")
+        az = np.nan
         inr = np.nan
-    return inr, el
+        el = np.nan
+    return az, inr, el
 
 
 def save_visibility_plot(summary_csv_path, output_path, selected_date=None):
     """Save a visibility plot PNG for the selected date and return the path.
 
-    The plot shows elevation (solid), InR (dashed), moon elevation, and
-    per-pointing moon-separation labels. The figure is saved to `output_path`.
+    The figure combines elevation/InR visibility with a polar azimuth/elevation
+    slew chart. Moon-separation labels remain on the visibility panel.
     """
     df_vis = pd.read_csv(summary_csv_path)
     if df_vis.empty:
         return None
 
     df_vis["observation_time"] = pd.to_datetime(df_vis["observation_time"], utc=True)
+    df_vis["observation_date_in_hst"] = (
+        pd.to_datetime(df_vis["observation_date_in_hst"])
+        .dt.tz_localize("Pacific/Honolulu")
+    )
     df_vis["observation_time_stop"] = df_vis["observation_time"] + pd.to_timedelta(
-        1200, unit="s"
+        1260, unit="s"
     )
     df_vis = df_vis.sort_values("observation_time").reset_index(drop=True)
 
     # selected_date is determined from data by default (HST date of first observation)
     if selected_date is None:
         selected_date = (
-            df_vis["observation_time"]
-            .dt.tz_convert("Pacific/Honolulu")
+            df_vis["observation_date_in_hst"]
             .dt.date.iloc[0]
         )
 
@@ -133,31 +138,40 @@ def save_visibility_plot(summary_csv_path, output_path, selected_date=None):
     sample_times = pd.date_range(sample_start, sample_stop, freq="5min", tz="UTC")
     sample_times_hst = sample_times.tz_convert("Pacific/Honolulu")
     astropy_times = Time(sample_times.to_pydatetime())
-    moon_coords = get_body("moon", astropy_times)
-    moon_altitude = moon_coords.transform_to(
-        AltAz(obstime=astropy_times, location=SUBARU_LOCATION)
-    ).alt.deg
+    altaz_frame = AltAz(obstime=astropy_times, location=SUBARU_LOCATION)
+    moon_altaz = get_body(
+        "moon", astropy_times, location=SUBARU_LOCATION
+    ).transform_to(altaz_frame)
+    moon_altitude = moon_altaz.alt.deg
 
-    fig, ax_el = plt.subplots(figsize=(12, 7))
+    fig = plt.figure(figsize=(13, 6))
+    grid = fig.add_gridspec(1, 2, width_ratios=[1.05, 1], wspace=0.25)
+    ax_el = fig.add_subplot(grid[0, 0])
+    ax_slew = fig.add_subplot(grid[0, 1], projection="polar")
     ax_aux = ax_el.twinx()
     colors = plt.cm.tab20(np.linspace(0, 1, max(len(df_vis), 2)))
     ax_el.axhspan(32, 75, color="gold", alpha=0.12, zorder=0)
 
     for idx, row in df_vis.iterrows():
+        observation_order = idx + 1
         color = colors[idx % len(colors)]
+        azimuths = []
         elevations = []
         inrs = []
 
         for obstime in sample_times:
-            inr, el = calc_inr(row, obstime.to_pydatetime())
+            az, inr, el = calc_inr(row, obstime.to_pydatetime())
+            azimuths.append(az)
             elevations.append(el)
             inrs.append(inr)
 
+        azimuths = np.asarray(azimuths, dtype=float)
         elevations = np.asarray(elevations, dtype=float)
         inrs = np.asarray(inrs, dtype=float)
 
         target = SkyCoord(row["ra_center"] * u.deg, row["dec_center"] * u.deg)
-        moon_separation = target.separation(moon_coords).deg
+        target_altaz = target.transform_to(altaz_frame)
+        moon_separation = target_altaz.separation(moon_altaz).deg
 
         label = str(row["pointing"])
         ax_el.plot(sample_times_hst, elevations, color=color, linewidth=1.0, alpha=0.5)
@@ -179,21 +193,53 @@ def save_visibility_plot(summary_csv_path, output_path, selected_date=None):
             elevations[scheduled_mask],
             color=color,
             linewidth=3.0,
-            label=label,
         )
 
         if np.any(scheduled_mask):
             scheduled_indices = np.flatnonzero(scheduled_mask)
             mid_idx = scheduled_indices[len(scheduled_indices) // 2]
-            ax_el.text(
-                sample_times_hst[mid_idx],
-                min(88, elevations[mid_idx] + 1.2),
+            ax_el.annotate(
                 f"{np.min(moon_separation[scheduled_mask]):.0f}°",
+                (sample_times_hst[mid_idx], elevations[mid_idx]),
+                xytext=(0, 3),
+                textcoords="offset points",
                 color=color,
                 fontsize=8,
                 ha="center",
                 va="bottom",
-                bbox=dict(facecolor="white", edgecolor="none", alpha=0.6, pad=1.5),
+            )
+            ax_el.annotate(
+                str(observation_order),
+                (sample_times_hst[mid_idx], elevations[mid_idx]),
+                xytext=(0, -3),
+                textcoords="offset points",
+                color=color,
+                fontsize=9,
+                fontweight="bold",
+                ha="center",
+                va="top",
+            )
+            slew_theta = np.deg2rad(azimuths[scheduled_mask])
+            slew_radius = elevations[scheduled_mask]
+            ax_slew.plot(
+                slew_theta,
+                slew_radius,
+                color=color,
+                linestyle="none",
+                marker="o",
+                markersize=3,
+                label=f"{observation_order} {label}",
+            )
+            ax_slew.annotate(
+                str(observation_order),
+                (np.deg2rad(azimuths[mid_idx]), elevations[mid_idx]),
+                xytext=(0, 8),
+                textcoords="offset points",
+                color=color,
+                fontsize=10,
+                fontweight="bold",
+                ha="center",
+                va="bottom",
             )
 
     ax_el.plot(
@@ -213,13 +259,23 @@ def save_visibility_plot(summary_csv_path, output_path, selected_date=None):
     ax_el.set_xlim(hst_start.to_pydatetime(), hst_stop.to_pydatetime())
     ax_el.grid(True, alpha=0.3)
 
-    handles_el, labels_el = ax_el.get_legend_handles_labels()
-    handles_aux, labels_aux = ax_aux.get_legend_handles_labels()
-    ax_el.legend(
-        handles_el + handles_aux,
-        labels_el + labels_aux,
+    ax_el.legend(loc="upper left", fontsize=8)
+
+    ax_slew.set_theta_zero_location("S")
+    ax_slew.set_theta_direction(1)
+    ax_slew.set_thetagrids(
+        np.arange(0, 360, 45),
+        labels=["S\n0°", "45°", "W\n90°", "135°", "N\n180°", "225°", "E\n270°", "315°"],
+    )
+    elevation_ticks = np.array([15, 30, 50, 70])
+    ax_slew.set_rticks(elevation_ticks)
+    ax_slew.set_yticklabels([f"{elevation}°" for elevation in elevation_ticks])
+    ax_slew.set_rlim(90, 0)
+    ax_slew.set_rlabel_position(180)
+    ax_slew.grid(True, alpha=0.35)
+    ax_slew.legend(
         loc="upper left",
-        bbox_to_anchor=(1.02, 1.0),
+        bbox_to_anchor=(1.05, 1.0),
         fontsize=8,
     )
     fig.autofmt_xdate()
@@ -262,14 +318,14 @@ def _load_design_summary(parentPath: str, ssp: bool):
 
 
 def _add_inr_columns(df_design: pd.DataFrame) -> pd.DataFrame:
-    """Compute inr1/el1 and inr2/el2 for all entries and add as columns.
+    """Compute azimuth, InR, and elevation at start/stop for all entries.
 
     Returns the modified DataFrame (in-place-and-return for convenience).
     """
-    df_design[["inr1", "el1"]] = df_design.apply(
+    df_design[["az1", "inr1", "el1"]] = df_design.apply(
         lambda row: pd.Series(calc_inr(row, obstime=row["observation_time"])), axis=1
     )
-    df_design[["inr2", "el2"]] = df_design.apply(
+    df_design[["az2", "inr2", "el2"]] = df_design.apply(
         lambda row: pd.Series(calc_inr(row, obstime=row["observation_time_stop"])),
         axis=1,
     )
@@ -621,6 +677,13 @@ def _load_ppp_targets_qa_reference_n(parentPath: str) -> pd.DataFrame:
     return df_n
 
 
+def _format_float_1dp_max(value):
+    """Format numeric values with at most one digit after the decimal point."""
+    if pd.isna(value):
+        return value
+    return f"{float(value):.1f}".rstrip("0").rstrip(".")
+
+
 def validation(parentPath, figpath, save, show, ssp, conf):
     """Run validation for all PfsDesigns found in the summary at `parentPath`.
 
@@ -646,12 +709,14 @@ def validation(parentPath, figpath, save, show, ssp, conf):
     else:
         logger.warning(f"Visibility summary CSV not found: {summary_csv_path}")
 
+    """ Skip now as new n2 detector has been installed
     # open-use only: read target table first and keep only qa_reference_arm == 'n'
     if not ssp:
         df_tgt_n = _load_ppp_targets_qa_reference_n(parentPath)
         ob_codes_qa_n = set(df_tgt_n["ob_code"].astype(str).str.strip())
     else:
         ob_codes_qa_n = set()
+    #"""
 
     # Compute InR/El at start and stop times
     df_design = _add_inr_columns(df_design)
@@ -680,10 +745,12 @@ def validation(parentPath, figpath, save, show, ssp, conf):
         path=os.path.join(conf["packages"]["pfs_utils_dir"], "data", "fiberids")
     )
 
+    """ Skip now as new n2 detector has been installed
     cobra_idx_n2 = fibId.cobrasForSpectrograph(spectrographId=2)
     cobra_idx_n2 = cobra_idx_n2[cobra_idx_n2 <= 2394]
     cobra_id_n2 = cobra_idx_n2 + 1
     fiber_id_n2 = fibId.cobraIdToFiberId(cobra_id_n2)
+    #"""
 
     # Accumulate bright sources near unassigned fibers across all designs
     df_all_unassigned_toobright = pd.DataFrame()
@@ -741,6 +808,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
         # Build per-fiber DataFrame and check magnitudes
         df_fib = _build_df_fib(pfsDesign0)
 
+        """ Skip now as new n2 detector has been installed 
         # search for targets requesting n but allocated with n2 cobra
         if len(ob_codes_qa_n) > 0:
             fiber_id_n2_for_plot = (
@@ -755,6 +823,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
             )
         else:
             fiber_id_n2_for_plot = []
+        """
 
         df_too_bright = df_fib[(df_fib["psfMag"] < 13) | (df_fib["totalMag"] < 13)]
         if not df_too_bright.empty:
@@ -793,7 +862,8 @@ def validation(parentPath, figpath, save, show, ssp, conf):
             pa=pfsDesign0.posAng,
             conf=conf,
             unfib_bright=unfib_bright,
-            fiber_id_n2=fiber_id_n2_for_plot,
+            fiber_id_n2=[],
+            #fiber_id_n2=fiber_id_n2_for_plot,
         )
 
     # After processing all designs, optionally save a single CSV containing
@@ -805,14 +875,39 @@ def validation(parentPath, figpath, save, show, ssp, conf):
         out_path = os.path.join(figpath, "df_unassign_bright_nearby.csv")
         df_all_unassigned_toobright.to_csv(out_path, index=False)
 
-    df_ch["inr1"] = df_design["inr1"]
-    df_ch["inr2"] = df_design["inr2"]
-    df_ch["el1"] = df_design["el1"]
-    df_ch["el2"] = df_design["el2"]
+    for column in ("az1", "az2", "inr1", "inr2", "el1", "el2"):
+        df_ch[column] = df_design[column]
+    coordinate_columns = (
+        ("ppc_ra", "ppc_dec", "ppc_pa")
+        if {"ppc_ra", "ppc_dec", "ppc_pa"}.issubset(df_design.columns)
+        else ("ra_center", "dec_center", "pa_center")
+    )
+    for output_column, source_column in zip(
+        ("ppc_ra", "ppc_dec", "ppc_pa"), coordinate_columns
+    ):
+        df_ch[output_column] = df_design[source_column].to_numpy()
+    df_ch["ppc_priority"] = (
+        df_design["ppc_priority"].to_numpy()
+        if "ppc_priority" in df_design.columns
+        else np.nan
+    )
+    df_ch["observation_time_hst"] = (
+        pd.to_datetime(df_design["observation_time"], utc=True)
+        .dt.tz_convert("Pacific/Honolulu")
+        .dt.strftime("%Y-%m-%d %H:%M:%S")
+        .to_numpy()
+    )
 
     desired_order = [
         "designId",
         "ppc_code",
+        "ppc_ra",
+        "ppc_dec",
+        "ppc_pa",
+        "ppc_priority",
+        "observation_time_hst",
+        "az1",
+        "az2",
         "inr1",
         "inr2",
         "el1",
@@ -842,6 +937,40 @@ def validation(parentPath, figpath, save, show, ssp, conf):
 
     df_ch = df_ch[existing + remaining]
 
+    one_decimal_columns = [
+        "ppc_ra",
+        "ppc_dec",
+        "ppc_pa",
+        "ppc_priority",
+        "az1",
+        "az2",
+        "inr1",
+        "inr2",
+        "el1",
+        "el2",
+        "unfib_bright",
+        "ag1",
+        "ag2",
+        "ag3",
+        "ag4",
+        "ag5",
+        "ag6",
+        "ag_sum",
+        "sky_mean",
+        "sky_std",
+        "sky_min",
+        "sky_max",
+        "sky_sum",
+        "std_mean",
+        "std_std",
+        "std_min",
+        "std_max",
+        "std_sum",
+    ]
+    formatted_one_decimal_columns = [
+        column for column in one_decimal_columns if column in df_ch.columns
+    ]
+
     # """
     styled_html = (
         df_ch.style.map(pldes.colour_background_warning_sky_min, subset=["sky_min"])
@@ -856,7 +985,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
         .map(pldes.colour_background_warning_inr, subset=["inr1", "inr2"])
         .map(pldes.colour_background_warning_el, subset=["el1", "el2"])
         .map(pldes.colour_background_warning_unfib, subset=["unfib_bright"])
-        .format(precision=1)
+        .format(_format_float_1dp_max, subset=formatted_one_decimal_columns)
     )
     # """
 

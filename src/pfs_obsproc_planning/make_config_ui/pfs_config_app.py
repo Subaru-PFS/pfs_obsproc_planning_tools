@@ -398,7 +398,7 @@ def parse_observation_text(value):
 def extract_pfs_schedule_entries(schedule_text):
     entry_pattern = re.compile(
         r"(?P<start>\d{1,2}:\d{2})-(?P<end>\d{1,2}:\d{2})\s*\{[^}]*\}\s*"
-        r"PFS\b[^()]*\([^;()]*;\s*(?P<proposal>S26A-[A-Za-z0-9-]+)\)",
+        r"PFS\b[^()]*\([^;()]*;\s*(?P<proposal>S\d{2}[AB]-[A-Za-z0-9-]+)\)",
         re.IGNORECASE,
     )
     return entry_pattern.finditer(schedule_text)
@@ -588,18 +588,18 @@ class PFSConfigApp:
             if not self.classic_ids:
                 raise ValueError("No matching PFS proposal IDs found on the schedule page.")
             self.id_source_label = (
-                f"Loaded {len(self.classic_ids)} classic proposal IDs from the S26A Subaru schedule."
+                f"Loaded {len(self.classic_ids)} classic proposal IDs from the S26B Subaru schedule."
             )
             if notify:
-                self._notify("Fetched proposal IDs from the S26A schedule page.", "success")
+                self._notify("Fetched proposal IDs from the S26B schedule page.", "success")
         except Exception:
             self.classic_ids = []
             self.schedule_by_proposal = {}
             self.id_source_label = (
-                "Could not fetch proposal IDs from the S26A schedule page."
+                "Could not fetch proposal IDs from the S26B schedule page."
             )
             if notify:
-                self._notify("Could not fetch proposal IDs from the S26A schedule page.", "warning")
+                self._notify("Could not fetch proposal IDs from the S26B schedule page.", "warning")
 
         self._apply_mode_to_widgets(self._current_mode(), rerender=False)
         self._update_observation_text()

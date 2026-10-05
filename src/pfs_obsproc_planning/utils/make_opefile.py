@@ -71,7 +71,7 @@ class OpeFile(object):
             for line in file:
                 if line == "### SCIENCE:START ###\n":
                     science_part += 1
-                if line == "### SCIENCE:END  ###\n":
+                if line == "### SCIENCE:END ###\n":
                     science_part += 1
                 if science_part == 0:
                     self.contents1 += line
@@ -81,15 +81,16 @@ class OpeFile(object):
                     self.contents3 += line
                 if line.startswith(
                     (
+                        "### PPC_NAME",
+                        "### OBSTIME:",
                         "# SETUPFIELD WITH",
                         "SETUPFIELD",
-                        "# Check Auto Guiding",
                         "## Get spectrum",
                         "GETOBJECT",
                     )
                 ):
                     self.contents2_main += line
-                    if line.startswith(("SETUPFIELD", "# Check Auto Guiding")):
+                    if line.startswith(("SETUPFIELD",)):
                         self.contents2_main += "\n"
 
     def update_obsdate(self, obsdate, utc=False):
@@ -192,7 +193,7 @@ class OpeFile(object):
             "#!!! MODIFICATION NEEDED !!!#", ""
         )
         self.contents1_updated = self.contents1_updated.replace(
-            "#!!! WHOLE LIST NEED TO BE MODIFIED !!!#", ""
+            "#!!! WHOLE LIST NEEDS TO BE MODIFIED !!!#", ""
         )
 
         # update "Science Exposure" part
@@ -207,8 +208,8 @@ class OpeFile(object):
             nframe_long = max(2, int(np.ceil(1800.0 / single_exptime)))
 
             # add PPC code
-            repl1 = "### SCIENCE:START ###"
-            repl2 = f"### {val[0]} PA={val[6]} ###\n### OBSTIME: {val[7]} ###"
+            repl1 = "### PPC_NAME PA=XXX.X PRIORITY=????\n### OBSTIME: YYYY/MM/DD HH:MM:SS ###"
+            repl2 = f"### {val[0]} PA={val[6]} PRIORITY={val[10]} ###\n### OBSTIME: {val[7]} ###"
             tmpl = tmpl.replace(repl1, repl2)
             tmpl_longexp = tmpl_longexp.replace(repl1, repl2)
 
@@ -219,45 +220,47 @@ class OpeFile(object):
             tmpl_longexp = tmpl_longexp.replace(repl1, repl2)
 
             # add objectname
-            repl1 = '"objectname"'
-            repl2 = f'"{val[0]}"'
+            repl1 = 'OBJECT="objectname"'
+            repl2 = f'OBJECT="{val[0]}"'
+            tmpl = tmpl.replace(repl1, repl2)
+            tmpl_longexp = tmpl_longexp.replace(repl1, repl2)
+
+            repl1 = 'SEQ_NAME="objectname"'
+            repl2 = f'SEQ_NAME="{val[0]}"'
             tmpl = tmpl.replace(repl1, repl2)
             tmpl_longexp = tmpl_longexp.replace(repl1, repl2)
 
             # add exptime
-            repl1 = '"exptime"'
+            repl1 = 'EXPTIME="exptime"'
             # if split_frame is true, separate each frame into n sub-frames with an exptime of exptime/n
             if nframe <= nframe_long:
-                repl2 = f"{single_exptime} NFRAME={nframe}"
+                repl2 = f"EXPTIME={single_exptime} NFRAME={nframe}"
             else:
-                repl2 = f"{single_exptime} NFRAME={nframe_long}"
+                repl2 = f"EXPTIME={single_exptime} NFRAME={nframe_long}"
             tmpl = tmpl.replace(repl1, repl2)
 
             # remove unnecessary words
-            repl1 = "# SETUPFIELD WITH cobra convergence                     #!!! MODIFICATION NEEDED: designId, objectname !!!#"
-            repl2 = "# SETUPFIELD WITH cobra convergence"
-            tmpl = tmpl.replace(repl1, repl2)
-            tmpl_longexp = tmpl_longexp.replace(repl1, repl2)
+            tmpl = tmpl.replace("#!!! MODIFICATION NEEDED: designId, objectname !!!#", "")
+            tmpl_longexp = tmpl_longexp.replace("#!!! MODIFICATION NEEDED: designId, objectname !!!#", "")
 
-            repl1 = "## Get spectrum                                         #!!! MODIFICATION NEEDED: objectname !!!#"
-            repl2 = "## Get spectrum"
-            tmpl = tmpl.replace(repl1, repl2)
-            tmpl_longexp = tmpl_longexp.replace(repl1, repl2)
+            tmpl = tmpl.replace("#!!! MODIFICATION NEEDED: exptime, objectname !!!#", "")
+            tmpl_longexp = tmpl_longexp.replace("#!!! MODIFICATION NEEDED: exptime, objectname !!!#", "")
 
             self.contents2_updated += tmpl
 
             if nframe > nframe_long:
-                repl1 = '"exptime"'
+                repl1 = 'EXPTIME="exptime"'
                 nframe -= nframe_long
                 while nframe > 0:
-                    repl2 = f"{single_exptime} NFRAME={nframe_long}"
+                    repl2 = f"EXPTIME={single_exptime} NFRAME={nframe_long}"
                     if nframe <= nframe_long:
-                        repl2 = f"{single_exptime} NFRAME={nframe}"
+                        repl2 = f"EXPTIME={single_exptime} NFRAME={nframe}"
                     tmpl_longexp = tmpl_longexp.replace(repl1, repl2)
                     self.contents2_updated += tmpl_longexp + "\n\n"
                     nframe -= nframe_long
 
-            self.contents3 = self.contents3.replace("### SCIENCE:END  ###", "")
+            self.contents2_updated = self.contents2_updated.replace("### SCIENCE:START ###", "")
+            self.contents3 = self.contents3.replace("### SCIENCE:END ###", "")
 
     def write(self):
         with open(self.outfile, "w") as file:

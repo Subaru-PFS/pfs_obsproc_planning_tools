@@ -14,7 +14,7 @@ from .run_PPP import (
     _ppc_list_has_provided_pa,
     _prepare_tb_tgt_for_ppc,
     _resolve_pa_constraint_observation_time,
-    optimize_shared_pa_for_fixed_pointings,
+    optimize_missing_pa_for_fixed_pointings,
 )
 from .build_target import read_target_classic
 from .classic_for_single_proposal import (
@@ -107,10 +107,9 @@ def _run_classic_for_resolution(
             ppc_list = _coerce_ppc_list_array(user_ppc_list)
             pa_metrics = {"best_pa": np.nan, "message": "Used provided PPC-list PAs"}
         else:
-            ppc_list, pa_metrics = optimize_shared_pa_for_fixed_pointings(
+            ppc_list, pa_metrics = optimize_missing_pa_for_fixed_pointings(
                 tb_tgt_resolution,
                 user_ppc_list,
-                fixed_ppc_pa=fixed_ppc_pa,
                 label=resolution_label or proposal_id,
                 config=config,
             )

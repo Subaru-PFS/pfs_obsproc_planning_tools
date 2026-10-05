@@ -14,7 +14,7 @@ from dateutil import parser, tz
 from ginga.misc.log import get_logger
 from loguru import logger
 from qplan import entity
-from qplan.util.eph_cache import EphemerisCache
+from spot.util.eph_cache import EphemerisCache
 from qplan.util.site import site_subaru as observer
 
 from .classic_for_single_proposal import (
@@ -331,6 +331,7 @@ def apply_db_ppc_metadata(tb_tgt, tb_tgt_l, tb_tgt_m, para_db):
     tgt_db = sa.create_engine(db_address)
     try:
         proposal_ids = sorted(set(tb_tgt["proposal_id"].astype(str)))
+        print(proposal_ids)
         tb_ppc_tem = query_user_ppc_from_db(tgt_db, proposal_ids)
     finally:
         tgt_db.dispose()
@@ -452,6 +453,7 @@ def read_target_queue(mode, para, tb_queuedb):
     tb_tgt["ra"] = tb_tgt["ra"].astype(float)
     tb_tgt["dec"] = tb_tgt["dec"].astype(float)
     tb_tgt["ob_code"] = tb_tgt["ob_code"].astype(str)
+    
     if "proposal_id" in tb_tgt.columns:
         tb_tgt["identify_code"] = np.char.add(
             np.char.add(tb_tgt["proposal_id"].astype(str), "_"),
@@ -522,7 +524,7 @@ def read_target_queue(mode, para, tb_queuedb):
 
     tb_tgt["allocated_time"] = tb_tgt["allocated_time_tac"] #- tb_tgt["allocated_time_done"]
     tb_tgt["allocated_time"][tb_tgt["allocated_time"] < 0] = 0
-    tb_tgt = tb_tgt[tb_tgt["allocated_time"] > tb_tgt["allocated_time_tac"]]
+    tb_tgt = tb_tgt[tb_tgt["allocated_time"] > tb_tgt["allocated_time_done"]]
 
     n_tgt1 = len(tb_tgt)
     tb_tgt = tb_tgt[tb_tgt["exptime"] > 0]
@@ -551,20 +553,11 @@ def read_target_queue(mode, para, tb_queuedb):
         keep_mask = np.ones(len(tb_tgt), dtype=bool)
 
         # S26A-UH010-AQ: keep only exptime_done > 0
-        mask_uh010 = proposal_ids == "S26A-UH010-AQ"
-        keep_mask[mask_uh010] = exptime_done[mask_uh010] > 0
+        mask_118 = proposal_ids == "S26B-118QN"
+        keep_mask[mask_118] = exptime_done[mask_118] > 0
 
-        # S26A-092QN: keep only exptime_done > 0, priority == 6, exptime < 2000
-        mask_092qn = proposal_ids == "S26A-092QN"
-        keep_mask[mask_092qn] = (
-            (exptime_done[mask_092qn] > 0)
-            & (priority_values[mask_092qn] == 6)
-            & (exptime_now[mask_092qn] < 2000)
-        )
-
-        # *100QN: keep only exptime_done > 0
-        mask_100qn = np.char.endswith(proposal_ids, "100QN")
-        keep_mask[mask_100qn] = exptime_done[mask_100qn] > 0
+        mask_077 = proposal_ids == "S26B-077QN"
+        keep_mask[mask_077] = exptime_done[mask_077] > 0
 
         tb_tgt = tb_tgt[keep_mask]
 

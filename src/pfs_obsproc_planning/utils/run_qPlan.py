@@ -28,7 +28,6 @@ from qplan.entity import (
     StaticTarget,
     TelescopeConfiguration,
 )
-from qplan.plots import airmass
 from qplan.Scheduler import Scheduler
 from qplan.util.site import site_subaru as observer
 
@@ -136,7 +135,7 @@ def run(
         dec = c.dec.to_string(sep=":", precision=2, pad=True)
         line = "  "
         line += f"{t['ppc_code']}\t"
-        line += f"{t['ppc_priority']}\t"
+        line += f"{t['ppc_priority_usr']}\t"
         line += f"{t['ppc_exptime'] + float(conf['qplan']['overhead'])*60.0 + overhead_add}\t"
         line += f"{t['ppc_pa']}\t"
         line += f"{t['ppc_resolution']}\t"
@@ -284,7 +283,7 @@ def run(
         observer.set_date(date_t)
         default_start_time = observer.evening_twilight_18() - timedelta(minutes=5)
         default_stop_time = observer.morning_twilight_18() + timedelta(
-            minutes=30
+            minutes=0
         )  # extend TW18 by 30 min for real operation, just in case
         
         # Ensure timezone-aware comparisons
@@ -549,35 +548,6 @@ def run(
 
     print(df)
 
-    # plot visibility plots for each night
-    if plotVisibility:
-        figs = []
-        for obs_date in conf["qplan"]["obs_dates"]:
-            t = observer.get_date(obs_date)
-            observer.set_date(t)
-            sunset = observer.sunset()
-            sunrise = observer.sunrise() + timedelta(days=1)
-            print(sunset, sunrise)
-
-            target_data = []
-            for t, v in targets:
-                if t > sunset and t < sunrise:
-                    info_list = observer.get_target_info(v)
-                    target_data.append(Bunch(history=info_list, target=v))
-            if len(target_data) > 0:
-                amp = airmass.AirMassPlot(800, 600, logger=logger)  # type: ignore[attr-defined]
-                from matplotlib.backends.backend_agg import (
-                    FigureCanvasAgg as FigureCanvas,
-                )
-
-                canvas = FigureCanvas(amp.fig)
-                amp.plot_altitude(observer, target_data, observer.timezone)
-                buf2 = BytesIO()
-                canvas.print_figure(buf2, format="png")
-                Image(data=bytes(buf2.getvalue()), format="png", embed=True)  # noqa: F821  # type: ignore[name-defined]
-                figs.append(amp)
-                display(amp.fig)  # noqa: F821  # type: ignore[name-defined]
-    else:
-        figs = None
+    figs = None
 
     return df, sdlr, figs, start_time_list_daily, stop_time_list_daily
