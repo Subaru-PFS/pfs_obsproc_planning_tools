@@ -1068,6 +1068,7 @@ class GeneratePfsDesign_ssp(object):
                 design_name=ppc_code,
                 pfs_instdata_dir=self.conf["packages"]["pfs_instdata_dir"],
                 obs_time=tb_ppc_t["ppc_obstime_utc"],
+                conf=self.conf,
             )
 
             # add guiders
