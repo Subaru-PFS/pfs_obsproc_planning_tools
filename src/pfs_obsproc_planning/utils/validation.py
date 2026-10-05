@@ -443,6 +443,47 @@ def _warn_too_bright_guidestars(ppc_ra, ppc_dec, ppc_pa, ppc_obstime_utc, conf):
     return df_guidestars_toobright
 
 
+_NAKED_EYE_PLANETS = ["mercury", "venus", "mars", "jupiter", "saturn"]
+_PLANET_MINSEP_DEG_DEFAULT = 3.0
+
+
+def _warn_nearby_bright_planets(ppc_ra, ppc_dec, ppc_obstime_utc, minsep_deg=None):
+    """Check naked-eye planet positions against the pointing center.
+
+    Returns a DataFrame (possibly empty) of planets within `minsep_deg`.
+    """
+    if minsep_deg is None:
+        minsep_deg = _PLANET_MINSEP_DEG_DEFAULT
+
+    obstime = Time(ppc_obstime_utc)
+    pointing = SkyCoord(ra=ppc_ra * u.deg, dec=ppc_dec * u.deg)
+
+    rows = []
+    for planet in _NAKED_EYE_PLANETS:
+        body = get_body(planet, obstime, location=SUBARU_LOCATION)
+        separation_deg = pointing.separation(body).deg
+        if separation_deg < minsep_deg:
+            rows.append(
+                {
+                    "planet": planet,
+                    "ra": body.ra.deg,
+                    "dec": body.dec.deg,
+                    "separation_deg": separation_deg,
+                }
+            )
+
+    df_planets_nearby = pd.DataFrame(
+        rows, columns=["planet", "ra", "dec", "separation_deg"]
+    )
+    if not df_planets_nearby.empty:
+        logger.warning(
+            "[Validation of output] Bright planet(s) within "
+            f"{minsep_deg} deg of the pointing center:\n"
+            f"{df_planets_nearby.to_string(index=False)}"
+        )
+    return df_planets_nearby
+
+
 def _find_unassigned_bright_nearby(
     pfsDesign0, bench, fibId, ppc_ra, ppc_dec, ppc_pa, conf
 ):
@@ -754,6 +795,9 @@ def validation(parentPath, figpath, save, show, ssp, conf):
 
     # Accumulate bright sources near unassigned fibers across all designs
     df_all_unassigned_toobright = pd.DataFrame()
+    planet_minsep_deg = conf["validation"].get(
+        "planet_minsep_deg", _PLANET_MINSEP_DEG_DEFAULT
+    )
 
     count = 0
     for designId in pfsDesignIds:
@@ -786,6 +830,15 @@ def validation(parentPath, figpath, save, show, ssp, conf):
             df_guidestars_toobright = _warn_too_bright_guidestars(
                 ppc_ra, ppc_dec, ppc_pa, ppc_obstime_utc, conf
             )
+
+        # check naked-eye planets too close to the pointing center
+        df_planets_nearby = _warn_nearby_bright_planets(
+            ppc_ra, ppc_dec, ppc_obstime_utc, minsep_deg=planet_minsep_deg
+        )
+        planet_nearby_str = ", ".join(
+            f"{row.planet} ({row.separation_deg:.1f}°)"
+            for row in df_planets_nearby.itertuples()
+        )
 
         # check bright stars nearby unassigned fibers including disabled fibers
         # Use pre-initialized bench and fiber-id mapping created outside the loop.
@@ -848,6 +901,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
             df_guidestars_toobright,
             n_unfib_bright=len(unfib_bright),
         )
+        df["planet_nearby"] = planet_nearby_str
         df_ch = pd.concat([df_ch, df], ignore_index=True)
         title = f"designId=0x{designId:016x} ({pfsDesign0.raBoresight:.2f},{pfsDesign0.decBoresight:.2f},PA={pfsDesign0.posAng:.1f})\n{ppc_code_}"
         fname = f"{figpath}/check_0x{designId:016x}"
@@ -913,6 +967,7 @@ def validation(parentPath, figpath, save, show, ssp, conf):
         "el1",
         "el2",
         "unfib_bright",
+        "planet_nearby",
         "ag1",
         "ag2",
         "ag3",
