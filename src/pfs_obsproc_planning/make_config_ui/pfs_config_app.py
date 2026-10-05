@@ -185,6 +185,7 @@ CONFIG_DESCRIPTIONS = {
         "savefig": "Whether validation plots should be saved.",
         "showfig": "Whether validation plots should be displayed interactively.",
         "save_unassign_toobright": "Whether to save diagnostics for unassigned targets that are too bright.",
+        "planet_minsep_deg": "Minimum separation (deg) from naked-eye planets before a pointing is flagged (default 3.0).",
     },
     "ssp": {
         "ssp": "Whether the run is for SSP mode.",
