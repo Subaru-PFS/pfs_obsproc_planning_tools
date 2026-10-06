@@ -104,11 +104,19 @@ class OpeFile(object):
         # name of OPE file
         if self.conf["ssp"]["ssp"]:
             if obsdate in self.conf["ope"]["backup_dates"]:
-                self.outfile = os.path.join(self.outfilePath, f"{obsdate}_backup.ope")
+                ope_filename = f"{obsdate}_ssp_backup.ope"
             else:
-                self.outfile = os.path.join(self.outfilePath, f"{obsdate}.ope")
+                ope_filename = f"{obsdate}_ssp.ope"
+        elif self.conf["ppp"]["mode"] == "queue":
+            ope_filename = f"{obsdate}_queue.ope"
         else:
-            self.outfile = os.path.join(self.outfilePath, f"{obsdate}.ope")
+            proposal_ids = self.conf["ppp"]["proposalIds"]
+            if len(proposal_ids) != 1:
+                raise ValueError(
+                    "Classic OPE generation requires exactly one proposalId"
+                )
+            ope_filename = f"{obsdate}_{proposal_ids[0]}.ope"
+        self.outfile = os.path.join(self.outfilePath, ope_filename)
 
         # add time_stamp when ope file is created
         hst = pytz.timezone("Pacific/Honolulu")
@@ -127,7 +135,7 @@ class OpeFile(object):
         # update HEADER
         # OBSERVATION_FILE_NAME
         repl1 = "OBSERVATION_FILE_NAME=template_pfs.ope"
-        repl2 = f"OBSERVATION_FILE_NAME={obsdate}.ope"
+        repl2 = f"OBSERVATION_FILE_NAME={ope_filename}"
         self.contents1_updated = self.contents1_updated.replace(repl1, repl2)
 
         # OBSERVATION_START_DATE
