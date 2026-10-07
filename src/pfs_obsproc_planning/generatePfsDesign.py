@@ -36,6 +36,29 @@ _PFS_UTILS_DIR = utils.get_pfs_utils_path()
 _PFS_INSTDATA_DIR = utils.get_pfs_instdata_path()
 
 
+def _normalize_qplan_times_to_hst(config):
+    qplan = config.get("qplan")
+    if not isinstance(qplan, dict):
+        return config
+
+    def parse_hst(value):
+        parsed = ps.parse(str(value))
+        if parsed.tzinfo is None:
+            return hawaii_tz.localize(parsed)
+        return parsed.astimezone(hawaii_tz)
+
+    qplan["obs_dates"] = [
+        parse_hst(value).strftime("%Y-%m-%d")
+        for value in qplan.get("obs_dates", [])
+    ]
+    for key in ("start_time", "stop_time"):
+        qplan[key] = [
+            parse_hst(value).strftime("%Y-%m-%d %H:%M:%S")
+            for value in qplan.get(key, [])
+        ]
+    return config
+
+
 def merge_nested_dicts(base_config, override_config):
     merged = dict(base_config)
 
@@ -105,7 +128,7 @@ def read_conf(conf):
     secondary_config_path = packages_config.get("config_path")
 
     if not secondary_config_path:
-        return primary_config
+        return _normalize_qplan_times_to_hst(primary_config)
 
     secondary_path = Path(secondary_config_path).expanduser()
     if not secondary_path.is_absolute():
@@ -126,7 +149,7 @@ def read_conf(conf):
                 merged_ppp_config[proposal_key] = secondary_ppp_config[proposal_key]
 
     merged_config["ppp"] = merged_ppp_config
-    return merged_config
+    return _normalize_qplan_times_to_hst(merged_config)
 
 
 def clear_folder(folder):

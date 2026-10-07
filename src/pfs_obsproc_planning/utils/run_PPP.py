@@ -644,7 +644,7 @@ def PPP_centers(
     backup=False,
     fixed_ppc_pa=None,
     config=None,
-    max_pointings_per_proposal=10,
+    max_pointings_per_proposal=20,
 ):
     """Determine PPC centers for queue-mode planning across multiple proposals."""
     start_time = time.time()
