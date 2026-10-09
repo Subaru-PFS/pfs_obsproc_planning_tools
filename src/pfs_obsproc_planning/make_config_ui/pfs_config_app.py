@@ -747,7 +747,7 @@ class PFSConfigApp:
             return None
         request = Request(csv_url, headers={"User-Agent": "Mozilla/5.0"})
         with urlopen(request, timeout=20) as response:
-            return pd.read_csv(BytesIO(response.read()))
+            return pd.read_csv(BytesIO(response.read()), keep_default_na=False)
 
     def _load_initial_program_status(self):
         self._refresh_program_status_table(notify=True)
