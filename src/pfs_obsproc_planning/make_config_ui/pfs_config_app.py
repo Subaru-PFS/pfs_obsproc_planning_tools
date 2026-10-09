@@ -7,6 +7,7 @@ import shlex
 import tomllib
 from datetime import datetime, timedelta
 from html.parser import HTMLParser
+from io import BytesIO
 from pathlib import Path
 from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
@@ -690,7 +691,7 @@ class PFSConfigApp:
         self._refresh_ids(notify=False)
         self._load_config(self.config_path, notify=False)
         self._render_program_sheet()
-        self._refresh_program_status_table(notify=False)
+        pn.state.onload(self._load_initial_program_status)
 
     def _notify(self, message, level="info"):
         if pn.state.notifications:
@@ -740,10 +741,21 @@ class PFSConfigApp:
             f"tqx=out:csv&sheet={quote(sheet_name)}"
         )
 
+    def _read_google_sheet_csv(self, sheet_name):
+        csv_url = self._google_sheet_csv_url(sheet_name)
+        if csv_url is None:
+            return None
+        request = Request(csv_url, headers={"User-Agent": "Mozilla/5.0"})
+        with urlopen(request, timeout=20) as response:
+            return pd.read_csv(BytesIO(response.read()))
+
+    def _load_initial_program_status(self):
+        self._refresh_program_status_table(notify=True)
+
     def _refresh_program_status_table(self, notify=True):
         semester_key = self.semester_select.value.lower()
-        csv_url = self._google_sheet_csv_url(f"proposals_{semester_key}")
-        if csv_url is None:
+        sheet_name = f"proposals_{semester_key}"
+        if self._google_sheet_csv_url(sheet_name) is None:
             self.proposal_source_data = pd.DataFrame()
             self.program_status_table.value = pd.DataFrame(
                 columns=["proposal_id", "status", "inserted_at"]
@@ -751,7 +763,7 @@ class PFSConfigApp:
             return
 
         try:
-            proposals = pd.read_csv(csv_url)
+            proposals = self._read_google_sheet_csv(sheet_name)
             if "proposal_id" not in proposals.columns:
                 raise ValueError("The proposals worksheet has no proposal_id column.")
         except (OSError, ValueError) as error:
@@ -789,11 +801,10 @@ class PFSConfigApp:
             return
 
         semester_key = self.semester_select.value.lower()
-        input_catalogs_url = self._google_sheet_csv_url(
-            f"input_catalogs_{semester_key}"
-        )
         try:
-            input_catalogs = pd.read_csv(input_catalogs_url)
+            input_catalogs = self._read_google_sheet_csv(
+                f"input_catalogs_{semester_key}"
+            )
             if "proposal_id" not in input_catalogs.columns:
                 raise ValueError(
                     "The input_catalogs worksheet has no proposal_id column."
