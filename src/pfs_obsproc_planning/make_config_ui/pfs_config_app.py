@@ -34,12 +34,12 @@ DEFAULT_CONFIG_PATH = (
 )
 PROGRAM_SHEET_LINKS_PATH = (
     Path.home()
-    / ".config"
+    / "config"
     / "pfs_obsproc_planning"
     / "program_sheet_links.json"
 )
 TARGET_INSERT_DIR = (
-    Path.home() / ".config" / "pfs_obsproc_planning" / "targetdb_insert"
+    Path.home() / "config" / "pfs_obsproc_planning" / "targetdb_insert"
 )
 TARGET_INSERT_STATUS_PATH = TARGET_INSERT_DIR / "status.json"
 TARGETDB_DEV_CONFIG = Path(
