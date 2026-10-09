@@ -754,7 +754,7 @@ class PFSConfigApp:
 
     def _refresh_program_status_table(self, notify=True):
         semester_key = self.semester_select.value.lower()
-        sheet_name = f"proposals_{semester_key}"
+        sheet_name = "proposals"
         if self._google_sheet_csv_url(sheet_name) is None:
             self.proposal_source_data = pd.DataFrame()
             self.program_status_table.value = pd.DataFrame(
@@ -802,9 +802,7 @@ class PFSConfigApp:
 
         semester_key = self.semester_select.value.lower()
         try:
-            input_catalogs = self._read_google_sheet_csv(
-                f"input_catalogs_{semester_key}"
-            )
+            input_catalogs = self._read_google_sheet_csv("Input catalogs")
             if "proposal_id" not in input_catalogs.columns:
                 raise ValueError(
                     "The input_catalogs worksheet has no proposal_id column."
