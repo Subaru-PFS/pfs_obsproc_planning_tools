@@ -908,13 +908,27 @@ class PFSConfigApp:
                 succeeded = False
                 break
 
+            command_output = []
             async for output in process.stdout:
-                log_lines.append(output.decode(errors="replace").rstrip())
+                output_line = output.decode(errors="replace").rstrip()
+                command_output.append(output_line)
+                log_lines.append(output_line)
                 self.insert_log.object = "\n".join(log_lines)
             return_code = await process.wait()
             log_lines.append(f"[exit code {return_code}]")
             self.insert_log.object = "\n".join(log_lines)
             if return_code != 0:
+                output_text = "\n".join(command_output)
+                if (
+                    "UniqueViolation" in output_text
+                    and "duplicate key value violates unique constraint" in output_text
+                    and '"proposal_pkey"' in output_text
+                ):
+                    log_lines.append(
+                        "Skipped duplicate proposal insertion; continuing to next step."
+                    )
+                    self.insert_log.object = "\n".join(log_lines)
+                    continue
                 succeeded = False
                 break
 
