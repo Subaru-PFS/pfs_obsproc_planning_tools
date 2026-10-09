@@ -1,10 +1,14 @@
+import asyncio
 import copy
 import html
+import json
 import re
+import shlex
 import tomllib
 from datetime import datetime, timedelta
 from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
 import pandas as pd
@@ -21,17 +25,38 @@ pn.extension(
     ],
 )
 
-SEMESTER_URL = "https://www1.subaru.nao.ac.jp/operation/opecenter/ObsProgramS26B.html"
-QUEUE_ONLY_ID = "S26B-999QN"
+SEMESTER_OPTIONS = ["S26A", "S26B"]
+DEFAULT_SEMESTER = "S26B"
 EXCLUDED_PROPOSAL_IDS = {"S26B-OT02", "S26B-EN16"}
 DEFAULT_CONFIG_PATH = (
     Path(__file__).resolve().parents[3] / "examples" / "config_example.toml"
 )
+PROGRAM_SHEET_LINKS_PATH = (
+    Path.home()
+    / ".config"
+    / "pfs_obsproc_planning"
+    / "program_sheet_links.json"
+)
+TARGET_INSERT_DIR = (
+    Path.home() / ".config" / "pfs_obsproc_planning" / "targetdb_insert"
+)
+TARGET_INSERT_STATUS_PATH = TARGET_INSERT_DIR / "status.json"
+TARGETDB_DEV_CONFIG = Path(
+    "/work/monodera/Subaru-PFS/database_configs/config_targetdb_dev.toml"
+)
+TARGETDB_PRODUCTION_CONFIG = Path(
+    "/work/monodera/Subaru-PFS/database_configs/config_targetdb_production.toml"
+)
 
-SECTION_TITLE_STYLE = "font-size: 18px; font-weight: 700; margin: 0 0 8px 0;"
+SECTION_TITLE_STYLE = (
+    "font-size: 15px; font-weight: 700; margin: 0 0 8px 0;"
+)
+SEMESTER_TITLE_STYLE = (
+    "font-size: 18px; font-weight: 700; color: #124a78; "
+    "background: #e8f3fc; border-left: 5px solid #1976d2; "
+    "padding: 10px 12px; margin: 0 0 10px 0;"
+)
 SUBTITLE_STYLE = "font-size: 16px; font-weight: 700; margin: 0;"
-SEMESTER_YEAR = 2026
-
 CONFIG_DESCRIPTIONS = {
     "ppp": {
         "mode": "Execution or planning mode for PPP. In this UI it switches queue vs classic behavior.",
@@ -337,11 +362,14 @@ def parse_html_tables(html_text):
     return parser.tables
 
 
-def parse_schedule_datetime(date_text, time_text):
+def parse_schedule_datetime(date_text, time_text, semester_code=DEFAULT_SEMESTER):
     month_text, day_text = str(date_text).split("/")
     hour_text, minute_text = time_text.split(":")
+    year = 2000 + int(semester_code[1:3])
+    if semester_code.endswith("B") and int(month_text) == 1:
+        year += 1
     return datetime(
-        SEMESTER_YEAR,
+        year,
         int(month_text),
         int(day_text),
         int(hour_text),
@@ -349,9 +377,11 @@ def parse_schedule_datetime(date_text, time_text):
     )
 
 
-def build_schedule_datetimes(date_text, start_time_text, end_time_text):
-    start_datetime = parse_schedule_datetime(date_text, start_time_text)
-    end_datetime = parse_schedule_datetime(date_text, end_time_text)
+def build_schedule_datetimes(
+    date_text, start_time_text, end_time_text, semester_code=DEFAULT_SEMESTER
+):
+    start_datetime = parse_schedule_datetime(date_text, start_time_text, semester_code)
+    end_datetime = parse_schedule_datetime(date_text, end_time_text, semester_code)
     return start_datetime, end_datetime
 
 
@@ -405,8 +435,13 @@ def extract_pfs_schedule_entries(schedule_text):
     return entry_pattern.finditer(schedule_text)
 
 
-def fetch_pfs_schedule_data():
-    request = Request(SEMESTER_URL, headers={"User-Agent": "Mozilla/5.0"})
+def fetch_pfs_schedule_data(semester_code=DEFAULT_SEMESTER):
+    semester_url = (
+        "https://www1.subaru.nao.ac.jp/operation/opecenter/"
+        f"ObsProgram{semester_code}.html"
+    )
+    queue_only_id = f"{semester_code}-999QN"
+    request = Request(semester_url, headers={"User-Agent": "Mozilla/5.0"})
     with urlopen(request, timeout=20) as response:
         html_text = response.read().decode("utf-8", errors="ignore")
 
@@ -448,6 +483,7 @@ def fetch_pfs_schedule_data():
                 date_text,
                 match.group("start"),
                 match.group("end"),
+                semester_code,
             )
 
             schedule_by_proposal.setdefault(proposal_id, []).append(
@@ -462,7 +498,7 @@ def fetch_pfs_schedule_data():
     classic_ids = sorted(
         proposal_id
         for proposal_id in schedule_by_proposal
-        if proposal_id != QUEUE_ONLY_ID and proposal_id not in EXCLUDED_PROPOSAL_IDS
+        if proposal_id != queue_only_id and proposal_id not in EXCLUDED_PROPOSAL_IDS
     )
     return classic_ids, schedule_by_proposal
 
@@ -477,6 +513,10 @@ class PFSConfigApp:
         self.id_source_label = ""
         self._mode_guard = False
         self._proposal_guard = False
+        self._program_sheet_url_guard = False
+        self.program_sheet_links = self._load_program_sheet_links()
+        self.target_insert_status = self._load_target_insert_status()
+        self.proposal_source_data = pd.DataFrame()
 
         self.path_input = pn.widgets.TextInput(
             name="config file",
@@ -493,8 +533,70 @@ class PFSConfigApp:
             button_type="default",
             sizing_mode="stretch_width",
         )
-        self.mode_selector = pn.widgets.CheckButtonGroup(
+        self.semester_select = pn.widgets.Select(
             name="",
+            options=SEMESTER_OPTIONS,
+            value=DEFAULT_SEMESTER,
+            sizing_mode="stretch_width",
+        )
+        self.program_status_table = pn.widgets.Tabulator(
+            pd.DataFrame(columns=["proposal_id", "status", "inserted_at"]),
+            show_index=False,
+            disabled=True,
+            selectable="checkbox",
+            pagination=None,
+            layout="fit_data_stretch",
+            sizing_mode="stretch_width",
+            height=220,
+        )
+        self.program_status_table.style.apply(
+            self._style_program_status_row,
+            axis=1,
+        )
+        self.insert_programs_button = pn.widgets.Button(
+            name="Insert checked programs",
+            button_type="primary",
+            sizing_mode="stretch_width",
+        )
+        self.insert_summary = pn.pane.Markdown(sizing_mode="stretch_width")
+        self.production_confirmation = pn.widgets.Checkbox(
+            name="I confirm insertion into the production database",
+            value=False,
+        )
+        self.run_insert_button = pn.widgets.Button(
+            name="Run insertion",
+            button_type="primary",
+            disabled=True,
+            width=140,
+        )
+        self.insert_log = pn.pane.Str(
+            "",
+            styles={
+                "background": "#111827",
+                "color": "#f3f4f6",
+                "font-family": "monospace",
+                "white-space": "pre-wrap",
+                "padding": "12px",
+                "overflow-y": "auto",
+            },
+            height=480,
+            sizing_mode="stretch_width",
+        )
+        self.insert_modal = pn.Column(
+            pn.pane.HTML(f"<div style=\"{SECTION_TITLE_STYLE}\">Insert targets</div>"),
+            self.insert_summary,
+            self.production_confirmation,
+            self.run_insert_button,
+            self.insert_log,
+            sizing_mode="stretch_width",
+        )
+        self._pending_proposals_path = None
+        self._pending_input_catalogs_path = None
+        self._pending_uploads_path = None
+        self._pending_proposal_ids = []
+        self._pending_has_user_pointings = False
+        self.mode_selector = pn.widgets.CheckButtonGroup(
+            name="Select mode",
             options=["queue", "classic"],
             value=["queue"],
             button_type="success",
@@ -503,8 +605,8 @@ class PFSConfigApp:
         )
         self.proposal_select = pn.widgets.Select(
             name="proposal ID",
-            options=[QUEUE_ONLY_ID],
-            value=QUEUE_ONLY_ID,
+            options=[self._queue_only_id()],
+            value=self._queue_only_id(),
             disabled=True,
             sizing_mode="stretch_width",
         )
@@ -548,6 +650,21 @@ class PFSConfigApp:
             visible=False,
             sizing_mode="stretch_width",
         )
+        self.program_sheet_url_input = pn.widgets.TextInput(
+            name="Google Spreadsheet link",
+            value=self.program_sheet_links.get(DEFAULT_SEMESTER, ""),
+            placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0",
+            sizing_mode="stretch_width",
+        )
+        self.program_sheet_view = pn.pane.HTML(
+            sizing_mode="stretch_both",
+            min_height=760,
+        )
+        self.program_details_panel = pn.Column(
+            self.program_sheet_url_input,
+            self.program_sheet_view,
+            sizing_mode="stretch_both",
+        )
         self.left_status = pn.pane.Markdown(sizing_mode="stretch_width")
         self.right_panel = pn.Column(sizing_mode="stretch_both", scroll=True)
 
@@ -557,21 +674,315 @@ class PFSConfigApp:
         self.save_config_button.on_click(self._open_save_dialog)
         self.confirm_save_button.on_click(self._save_config)
         self.cancel_save_button.on_click(self._close_save_dialog)
+        self.insert_programs_button.on_click(self._prepare_target_insertion)
+        self.production_confirmation.param.watch(
+            self._on_production_confirmation, "value"
+        )
+        self.run_insert_button.on_click(self._run_target_insertion)
+        self.program_sheet_url_input.param.watch(
+            self._on_program_sheet_url_change, "value"
+        )
         self.mode_selector.param.watch(self._on_mode_change, "value")
+        self.semester_select.param.watch(self._on_semester_change, "value")
         self.proposal_select.param.watch(self._on_proposal_change, "value")
         self.observation_text.param.watch(self._on_observation_text_change, "value")
 
         self._refresh_ids(notify=False)
         self._load_config(self.config_path, notify=False)
+        self._render_program_sheet()
+        self._refresh_program_status_table(notify=False)
 
     def _notify(self, message, level="info"):
         if pn.state.notifications:
             getattr(pn.state.notifications, level)(message)
 
+    def _load_program_sheet_links(self):
+        try:
+            return json.loads(PROGRAM_SHEET_LINKS_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def _save_program_sheet_links(self):
+        PROGRAM_SHEET_LINKS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        PROGRAM_SHEET_LINKS_PATH.write_text(
+            json.dumps(self.program_sheet_links, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+    def _load_target_insert_status(self):
+        try:
+            return json.loads(TARGET_INSERT_STATUS_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    @staticmethod
+    def _style_program_status_row(row):
+        if row["status"] == "✗":
+            return ["background-color: tomato; color: white"] * len(row)
+        return [""] * len(row)
+
+    def _save_target_insert_status(self):
+        TARGET_INSERT_STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        TARGET_INSERT_STATUS_PATH.write_text(
+            json.dumps(self.target_insert_status, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+    def _google_sheet_csv_url(self, sheet_name):
+        sheet_url = self._google_sheet_web_url()
+        if sheet_url is None:
+            return None
+        spreadsheet_id = re.fullmatch(
+            r"/spreadsheets/d/([^/]+)(?:/.*)?", urlparse(sheet_url).path
+        ).group(1)
+        return (
+            f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/gviz/tq?"
+            f"tqx=out:csv&sheet={quote(sheet_name)}"
+        )
+
+    def _refresh_program_status_table(self, notify=True):
+        semester_key = self.semester_select.value.lower()
+        csv_url = self._google_sheet_csv_url(f"proposals_{semester_key}")
+        if csv_url is None:
+            self.proposal_source_data = pd.DataFrame()
+            self.program_status_table.value = pd.DataFrame(
+                columns=["proposal_id", "status", "inserted_at"]
+            )
+            return
+
+        try:
+            proposals = pd.read_csv(csv_url)
+            if "proposal_id" not in proposals.columns:
+                raise ValueError("The proposals worksheet has no proposal_id column.")
+        except (OSError, ValueError) as error:
+            if notify:
+                self._notify(f"Could not load proposal table: {error}", "error")
+            return
+
+        self.proposal_source_data = proposals
+        semester_status = self.target_insert_status.get(semester_key, {})
+        status_rows = []
+        for proposal_id in proposals["proposal_id"].astype(str):
+            inserted_at = semester_status.get(proposal_id, "")
+            status_rows.append(
+                {
+                    "proposal_id": proposal_id,
+                    "status": "✓" if inserted_at else "✗",
+                    "inserted_at": inserted_at,
+                }
+            )
+        status_rows.sort(key=lambda row: row["status"] == "✓")
+        self.program_status_table.value = pd.DataFrame(status_rows)
+        self.program_status_table.selection = []
+
+    def _selected_program_ids(self):
+        selection = list(self.program_status_table.selection)
+        if not selection:
+            return []
+        selected_rows = self.program_status_table.value.iloc[selection]
+        return selected_rows["proposal_id"].astype(str).tolist()
+
+    def _prepare_target_insertion(self, event=None):
+        proposal_ids = self._selected_program_ids()
+        if not proposal_ids:
+            self._notify("Check at least one program to insert.", "warning")
+            return
+
+        semester_key = self.semester_select.value.lower()
+        input_catalogs_url = self._google_sheet_csv_url(
+            f"input_catalogs_{semester_key}"
+        )
+        try:
+            input_catalogs = pd.read_csv(input_catalogs_url)
+            if "proposal_id" not in input_catalogs.columns:
+                raise ValueError(
+                    "The input_catalogs worksheet has no proposal_id column."
+                )
+        except (OSError, ValueError) as error:
+            self._notify(f"Could not load input catalogs: {error}", "error")
+            return
+
+        proposal_mask = self.proposal_source_data["proposal_id"].astype(str).isin(
+            proposal_ids
+        )
+        input_catalog_mask = input_catalogs["proposal_id"].astype(str).isin(
+            proposal_ids
+        )
+        selected_proposals = self.proposal_source_data.loc[proposal_mask]
+        selected_input_catalogs = input_catalogs.loc[input_catalog_mask]
+        if selected_input_catalogs.empty:
+            self._notify("No matching input catalogs were found.", "error")
+            return
+
+        semester_dir = TARGET_INSERT_DIR / semester_key
+        uploads_dir = semester_dir / "uploads"
+        proposals_path = semester_dir / f"proposals_{semester_key}.csv"
+        input_catalogs_path = semester_dir / f"input_catalogs_{semester_key}.csv"
+        try:
+            uploads_dir.mkdir(parents=True, exist_ok=True)
+            selected_proposals.to_csv(proposals_path, index=False)
+            selected_input_catalogs.to_csv(input_catalogs_path, index=False)
+        except OSError as error:
+            self._notify(f"Could not save insertion CSV files: {error}", "error")
+            return
+
+        pointings = selected_input_catalogs.get("is_user_pointing")
+        if pointings is None:
+            has_user_pointings = False
+        else:
+            has_user_pointings = pointings.astype(str).str.lower().isin(
+                {"true", "1", "yes", "y"}
+            ).any()
+
+        self._pending_proposals_path = proposals_path
+        self._pending_input_catalogs_path = input_catalogs_path
+        self._pending_uploads_path = uploads_dir
+        self._pending_proposal_ids = proposal_ids
+        self._pending_has_user_pointings = has_user_pointings
+        self.insert_summary.object = (
+            f"**Semester:** {self.semester_select.value}  \n"
+            f"**Programs:** {', '.join(proposal_ids)}  \n"
+            f"**Input catalogs:** {len(selected_input_catalogs)}  \n"
+            f"**User pointings:** {'yes' if has_user_pointings else 'no'}"
+        )
+        self.production_confirmation.value = False
+        self.run_insert_button.disabled = True
+        self.insert_log.object = ""
+        self.template.open_modal()
+
+    def _on_production_confirmation(self, event):
+        self.run_insert_button.disabled = not event.new
+
+    def _target_insert_commands(self):
+        proposals_path = str(self._pending_proposals_path)
+        input_catalogs_path = str(self._pending_input_catalogs_path)
+        uploads_path = str(self._pending_uploads_path)
+        dev_config = str(TARGETDB_DEV_CONFIG)
+        production_config = str(TARGETDB_PRODUCTION_CONFIG)
+        commands = [
+            ["pfs-targetdb-cli", "insert", proposals_path, "-c", dev_config, "--table", "proposal", "--commit"],
+            ["pfs-targetdb-cli", "insert", proposals_path, "-c", production_config, "--table", "proposal", "--commit"],
+            ["pfs-targetdb-cli", "insert", input_catalogs_path, "-c", dev_config, "--table", "input_catalog", "--commit", "--verbose"],
+            ["pfs-targetdb-cli", "insert", input_catalogs_path, "-c", production_config, "--table", "input_catalog", "--commit", "--verbose"],
+            ["pfs-targetdb-cli", "transfer-targets-api", input_catalogs_path, "-c", production_config, "--local-dir", uploads_path],
+            ["pfs-targetdb-cli", "insert-targets", input_catalogs_path, "-c", dev_config, "--data-dir", uploads_path, "--commit"],
+            ["pfs-targetdb-cli", "insert-targets", input_catalogs_path, "-c", production_config, "--data-dir", uploads_path, "--commit"],
+        ]
+        if self._pending_has_user_pointings:
+            commands.extend(
+                [
+                    ["pfs-targetdb-cli", "insert-pointings", input_catalogs_path, "-c", dev_config, "--data-dir", uploads_path, "--verbose", "--commit"],
+                    ["pfs-targetdb-cli", "insert-pointings", input_catalogs_path, "-c", production_config, "--data-dir", uploads_path, "--verbose", "--commit"],
+                ]
+            )
+        return commands
+
+    async def _run_target_insertion(self, event=None):
+        if not self.production_confirmation.value:
+            return
+
+        self.run_insert_button.disabled = True
+        self.production_confirmation.disabled = True
+        log_lines = []
+        succeeded = True
+        for command in self._target_insert_commands():
+            log_lines.append(f"$ {shlex.join(command)}")
+            self.insert_log.object = "\n".join(log_lines)
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    *command,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+            except OSError as error:
+                log_lines.append(str(error))
+                succeeded = False
+                break
+
+            async for output in process.stdout:
+                log_lines.append(output.decode(errors="replace").rstrip())
+                self.insert_log.object = "\n".join(log_lines)
+            return_code = await process.wait()
+            log_lines.append(f"[exit code {return_code}]")
+            self.insert_log.object = "\n".join(log_lines)
+            if return_code != 0:
+                succeeded = False
+                break
+
+        if succeeded:
+            inserted_at = datetime.now().astimezone().isoformat(timespec="seconds")
+            semester_key = self.semester_select.value.lower()
+            semester_status = self.target_insert_status.setdefault(semester_key, {})
+            for proposal_id in self._pending_proposal_ids:
+                semester_status[proposal_id] = inserted_at
+            try:
+                self._save_target_insert_status()
+            except OSError as error:
+                log_lines.append(f"Could not save local status: {error}")
+            self._refresh_program_status_table(notify=False)
+            log_lines.append(f"Completed successfully at {inserted_at}")
+        else:
+            log_lines.append("Stopped after command failure; status was not updated.")
+
+        self.insert_log.object = "\n".join(log_lines)
+        self.production_confirmation.disabled = False
+
+    def _set_program_sheet_url_for_semester(self):
+        self._program_sheet_url_guard = True
+        self.program_sheet_url_input.value = self.program_sheet_links.get(
+            self.semester_select.value, ""
+        )
+        self._program_sheet_url_guard = False
+        self._render_program_sheet()
+
+    def _google_sheet_web_url(self):
+        sheet_url = self.program_sheet_url_input.value.strip()
+        parsed_url = urlparse(sheet_url)
+        match = re.fullmatch(r"/spreadsheets/d/([^/]+)(?:/.*)?", parsed_url.path)
+        if parsed_url.netloc != "docs.google.com" or match is None:
+            return None
+
+        return sheet_url
+
+    def _render_program_sheet(self):
+        sheet_url = self._google_sheet_web_url()
+        if sheet_url is None:
+            self.program_sheet_view.object = ""
+            return
+
+        escaped_url = html.escape(sheet_url, quote=True)
+        self.program_sheet_view.object = (
+            f'<iframe src="{escaped_url}" '
+            'style="width: 100%; height: 78vh; min-height: 760px; border: 0;" '
+            'loading="lazy"></iframe>'
+        )
+
+    def _on_program_sheet_url_change(self, event):
+        if self._program_sheet_url_guard:
+            return
+
+        if not event.new.strip():
+            self.program_sheet_links.pop(self.semester_select.value, None)
+            self.program_sheet_view.object = ""
+        else:
+            self.program_sheet_links[self.semester_select.value] = event.new.strip()
+            self._render_program_sheet()
+
+        try:
+            self._save_program_sheet_links()
+        except OSError as error:
+            self._notify(f"Could not save spreadsheet link: {error}", "error")
+            return
+
+        self._refresh_program_status_table()
+
     def _current_mode(self):
         if len(self.mode_selector.value) == 1:
             return self.mode_selector.value[0]
         return "queue"
+
+    def _queue_only_id(self):
+        return f"{self.semester_select.value}-999QN"
 
     def _set_mode(self, mode):
         self._mode_guard = True
@@ -584,23 +995,33 @@ class PFSConfigApp:
         self._proposal_guard = False
 
     def _refresh_ids(self, event=None, notify=True):
+        semester_code = self.semester_select.value
         try:
-            self.classic_ids, self.schedule_by_proposal = fetch_pfs_schedule_data()
+            self.classic_ids, self.schedule_by_proposal = fetch_pfs_schedule_data(
+                semester_code
+            )
             if not self.classic_ids:
                 raise ValueError("No matching PFS proposal IDs found on the schedule page.")
             self.id_source_label = (
-                f"Loaded {len(self.classic_ids)} classic proposal IDs from the S26B Subaru schedule."
+                f"Loaded {len(self.classic_ids)} classic proposal IDs from the "
+                f"{semester_code} Subaru schedule."
             )
             if notify:
-                self._notify("Fetched proposal IDs from the S26B schedule page.", "success")
+                self._notify(
+                    f"Fetched proposal IDs from the {semester_code} schedule page.",
+                    "success",
+                )
         except Exception:
             self.classic_ids = []
             self.schedule_by_proposal = {}
             self.id_source_label = (
-                "Could not fetch proposal IDs from the S26B schedule page."
+                f"Could not fetch proposal IDs from the {semester_code} schedule page."
             )
             if notify:
-                self._notify("Could not fetch proposal IDs from the S26B schedule page.", "warning")
+                self._notify(
+                    f"Could not fetch proposal IDs from the {semester_code} schedule page.",
+                    "warning",
+                )
 
         self._apply_mode_to_widgets(self._current_mode(), rerender=False)
         self._update_observation_text()
@@ -611,11 +1032,15 @@ class PFSConfigApp:
             with Path(config_path).expanduser().open("rb") as stream:
                 self.config_data = tomllib.load(stream)
         except FileNotFoundError:
-            self.config_data = {"ppp": {"mode": "queue", "proposalIds": [QUEUE_ONLY_ID]}}
+            self.config_data = {
+                "ppp": {"mode": "queue", "proposalIds": [self._queue_only_id()]}
+            }
             if notify:
                 self._notify(f"Config file not found: {config_path}", "error")
         except tomllib.TOMLDecodeError as error:
-            self.config_data = {"ppp": {"mode": "queue", "proposalIds": [QUEUE_ONLY_ID]}}
+            self.config_data = {
+                "ppp": {"mode": "queue", "proposalIds": [self._queue_only_id()]}
+            }
             if notify:
                 self._notify(f"Invalid TOML: {error}", "error")
         else:
@@ -631,6 +1056,7 @@ class PFSConfigApp:
         self._load_config(self.path_input.value, notify=True)
 
     def _open_save_dialog(self, event=None):
+        self._activate_config_tab()
         self.save_path_input.value = str(self.config_path)
         self.save_dialog.visible = True
 
@@ -660,7 +1086,7 @@ class PFSConfigApp:
         selected_proposal = None
         if mode == "classic":
             for proposal_id in proposal_ids:
-                if proposal_id != QUEUE_ONLY_ID:
+                if proposal_id != self._queue_only_id():
                     selected_proposal = proposal_id
                     break
 
@@ -680,10 +1106,11 @@ class PFSConfigApp:
             ppp_config["daily_plan"] = False
 
         if mode == "queue":
-            self.proposal_select.options = [QUEUE_ONLY_ID]
+            queue_only_id = self._queue_only_id()
+            self.proposal_select.options = [queue_only_id]
             self.proposal_select.disabled = True
-            self._set_proposal_value(QUEUE_ONLY_ID)
-            ppp_config["proposalIds"] = [QUEUE_ONLY_ID]
+            self._set_proposal_value(queue_only_id)
+            ppp_config["proposalIds"] = [queue_only_id]
         else:
             classic_options = self._classic_options()
             self.proposal_select.options = classic_options
@@ -758,6 +1185,7 @@ class PFSConfigApp:
         self._sync_qplan_from_observation_text()
 
     def _reset_observation_text(self, event=None):
+        self._activate_config_tab()
         self.observation_text.value = self.default_observation_text
         if self._sync_qplan_from_observation_text():
             self._render_config_panel()
@@ -766,6 +1194,8 @@ class PFSConfigApp:
     def _on_mode_change(self, event):
         if self._mode_guard:
             return
+
+        self._activate_config_tab()
 
         new_value = list(event.new)
         old_value = list(event.old) if event.old is not None else []
@@ -782,10 +1212,17 @@ class PFSConfigApp:
 
         self._apply_mode_to_widgets(new_value[0])
 
+    def _on_semester_change(self, event):
+        self._refresh_ids(notify=True)
+        self._set_program_sheet_url_for_semester()
+        self._refresh_program_status_table()
+        self._render_config_panel()
+
     def _on_proposal_change(self, event):
         if self._proposal_guard or self._current_mode() != "classic":
             return
 
+        self._activate_config_tab()
         proposal_id = event.new
         if proposal_id:
             self.config_data.setdefault("ppp", {})["proposalIds"] = [proposal_id]
@@ -794,8 +1231,13 @@ class PFSConfigApp:
             self._update_status()
 
     def _on_observation_text_change(self, event):
+        self._activate_config_tab()
         if self._sync_qplan_from_observation_text():
             self._render_config_panel()
+
+    def _activate_config_tab(self):
+        if hasattr(self, "main_tabs"):
+            self.main_tabs.active = 1
 
     def _render_config_panel(self):
         display_config = copy.deepcopy(self.config_data)
@@ -838,7 +1280,16 @@ class PFSConfigApp:
 
     def view(self):
         sidebar = pn.Column(
-            pn.pane.HTML(f"<div style=\"{SECTION_TITLE_STYLE}\">Select mode</div>"),
+            pn.pane.HTML(
+                f"<div style=\"{SEMESTER_TITLE_STYLE}\">Select semester</div>"
+            ),
+            self.semester_select,
+            pn.Spacer(height=12),
+            pn.pane.HTML(f"<div style=\"{SECTION_TITLE_STYLE}\">Program status</div>"),
+            self.program_status_table,
+            self.insert_programs_button,
+            pn.Spacer(height=12),
+            pn.pane.HTML(f"<div style=\"{SECTION_TITLE_STYLE}\">Make config</div>"),
             self.mode_selector,
             pn.Spacer(height=12),
             self.proposal_select,
@@ -853,13 +1304,21 @@ class PFSConfigApp:
             sizing_mode="stretch_width",
         )
 
+        self.main_tabs = pn.Tabs(
+            ("Program details", self.program_details_panel),
+            ("Config parameters", self.right_panel),
+            sizing_mode="stretch_both",
+        )
+
         template = pn.template.FastListTemplate(
-            title="PFS Config UI",
+            title="PFS Observation Planning Tools",
             sidebar=[sidebar],
-            main=[self.right_panel],
+            main=[self.main_tabs],
+            modal=[self.insert_modal],
             sidebar_width=360,
             theme_toggle=False,
         )
+        self.template = template
         return template
 
 app = PFSConfigApp().view()
