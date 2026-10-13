@@ -97,7 +97,7 @@ def query_target_from_db(tgt_db, proposal_ids):
         pd.to_numeric, errors="coerce"
     )
 
-    df_tgt.loc[df_tgt["epoch"].isna(), "pmra"] = "J2000.0"
+    df_tgt.loc[df_tgt["equinox"].isna(), "equinox"] = "J2000.0"
     df_tgt.loc[df_tgt["pmra"].isna(), "pmra"] = 0.0
     df_tgt.loc[df_tgt["pmdec"].isna(), "pmdec"] = 0.0
     df_tgt.loc[df_tgt["parallax"].isna(), "parallax"] = 1.0e-7
