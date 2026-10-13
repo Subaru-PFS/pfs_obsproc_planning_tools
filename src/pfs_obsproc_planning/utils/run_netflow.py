@@ -117,7 +117,7 @@ def select_good_observation_time(
     ppc_dec,
     dates_local=None,
     local_times_hst=None,
-    min_elevation=30.0,
+    min_elevation=32.0,
     max_elevation=75.0,
 ):
     """Pick a coarse but reasonable UTC observation time for one or more PPCs.
