@@ -306,7 +306,7 @@ def _iter_classic_ppc_groups(tb_tgt, ppc_list):
 
     grouped_entries = []
     for group_number, group_indices in enumerate(ppc_index_groups, start=1):
-        ppc_group = np.asarray(ppc_list[group_indices], dtype=object)
+        ppc_group = np.asarray(ppc_list, dtype=object)[group_indices]
         tb_tgt_group = _select_classic_netflow_targets(tb_tgt, ppc_group)
         grouped_entries.append((group_number, group_indices, ppc_group, tb_tgt_group))
 
