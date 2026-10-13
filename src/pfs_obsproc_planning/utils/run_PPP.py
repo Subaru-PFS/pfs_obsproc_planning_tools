@@ -408,7 +408,7 @@ def objective_ppc_assignment(trial_ppc, _tb_tgt, ppc_pa=0.0):
     score, term_values = _score_single_ppc_assignment(_tb_tgt, assigned_target_ids)
     print(
         "{:.6f}, {:.6f}, {:.1f}, Nassigned = {:.0f}/{:.0f}, NP0 = {:.0f}, "
-        "NP1 = {:.0f}, Ncomplete = {:.0f}, Npartial = {:.0f}, FH = {:.3f}, "
+        "NP1 = {:.0f}, Ncomplete = {:.0f}, Npartial = {:.0f}, Ncontinue = {:.0f}, FH = {:.3f}, "
         "Finish = {:.3f}, Continue = {:.3f}, Prio = {:.3f}, Fill = {:.3f}, "
         "NewPartial = {:.3f}, Over = {:.3f}, Score = {:.3f}".format(
             ppc_ra,
@@ -420,6 +420,7 @@ def objective_ppc_assignment(trial_ppc, _tb_tgt, ppc_pa=0.0):
             term_values["n_p1"],
             term_values["n_finish"],
             term_values["n_partial"],
+            term_values["n_continue"],
             term_values["fh"],
             term_values["finish"],
             term_values["cont"],
@@ -816,6 +817,28 @@ def PPP_centers(
         print(
             f"PPC_{len(ppc_records):3d}: {len(_tb_tgt)-len(tb_tgt_remaining):5d}/{len(_tb_tgt):10d} targets are finished (score={ppc_score:.3f}, fh={ppc_term_values['fh']:.3f}). (partial = {n_partially_observed_before_filter}, {n_partially_observed_after_filter})"
         )
+        print(
+            "PPC_{:3d} selected assignment: Nassigned={:.0f}, NP0={:.0f}, "
+            "NP1={:.0f}, Ncomplete={:.0f}, Npartial={:.0f}, Ncontinue={:.0f}, "
+            "FH={:.3f}, Finish={:.3f}, Continue={:.3f}, Prio={:.3f}, "
+            "Fill={:.3f}, NewPartial={:.3f}, Over={:.3f}, Score={:.3f}".format(
+                len(ppc_records),
+                ppc_term_values["n_assigned"],
+                ppc_term_values["n_p0"],
+                ppc_term_values["n_p1"],
+                ppc_term_values["n_finish"],
+                ppc_term_values["n_partial"],
+                ppc_term_values["n_continue"],
+                ppc_term_values["fh"],
+                ppc_term_values["finish"],
+                ppc_term_values["cont"],
+                ppc_term_values["prio"],
+                ppc_term_values["fill"],
+                ppc_term_values["new_partial"],
+                ppc_term_values["overshoot"],
+                ppc_score,
+            )
+        )
         Table.pprint_all(tb_proposal_progress)
     if len(ppc_records) == 0:
         logger.warning("[S2] No valid PPC centers were determined")
@@ -865,7 +888,7 @@ def objective_single_program_ppc_assignment(trial_ppc, tb_tgt, ppc_pa=0.0):
     )
     print(
         "{:.6f}, {:.6f}, {:.1f}, Nassigned = {:.0f}/{:.0f}, NP0 = {:.0f}, "
-        "NP1 = {:.0f}, Ncomplete = {:.0f}, Npartial = {:.0f}, {}, FH = {:.3f}, "
+        "NP1 = {:.0f}, Ncomplete = {:.0f}, Npartial = {:.0f}, Ncontinue = {:.0f}, {}, FH = {:.3f}, "
         "Finish = {:.3f}, Continue = {:.3f}, Prio = {:.3f}, Fill = {:.3f}, "
         "NewPartial = {:.3f}, Over = {:.3f}, Score = {:.3f}".format(
             ppc_ra,
@@ -877,6 +900,7 @@ def objective_single_program_ppc_assignment(trial_ppc, tb_tgt, ppc_pa=0.0):
             term_values["n_p1"],
             term_values["n_finish"],
             term_values["n_partial"],
+            term_values["n_continue"],
             priority_summary,
             term_values["fh"],
             term_values["finish"],
@@ -938,7 +962,7 @@ def _optimize_fixed_pa_single_program_pointing(
         n_total = len(assigned_ids)
         print(
             "Testing RA={:.6f}, Dec={:.6f}: P<= {} = {}/{}, Nassigned={}, "
-            "NP0={}, NP1={}, Ncomplete={}, Npartial={}, FH={:.3f}, "
+            "NP0={}, NP1={}, Ncomplete={}, Npartial={}, Ncontinue={}, FH={:.3f}, "
             "Finish={:.3f}, Continue={:.3f}, Prio={:.3f}, Fill={:.3f}, "
             "New={:.3f}, Over={:.3f}, Score={:.3f}".format(
                 test_ra,
@@ -951,6 +975,7 @@ def _optimize_fixed_pa_single_program_pointing(
                 int(term_values["n_p1"]),
                 int(term_values["n_finish"]),
                 int(term_values["n_partial"]),
+                int(term_values["n_continue"]),
                 term_values["fh"],
                 term_values["finish"],
                 term_values["cont"],
@@ -2041,6 +2066,9 @@ def PPP_centers_for_single_program(
             lst_tgtID_assign = fiber_allocate(
                 tb_tgt_current, single_ppc_mode=True, ppc_candidate=(ra, dec, pa)
             )
+        ppc_score, ppc_term_values = _score_single_ppc_assignment(
+            tb_tgt_current, lst_tgtID_assign
+        )
         tb_tgt_near_ppc = _filter_targets_near_ppc(
             tb_tgt_current,
             [(ra, dec)],
@@ -2065,10 +2093,11 @@ def PPP_centers_for_single_program(
             )
         )
         index_assign = np.isin(tb_tgt_current["identify_code"], lst_tgtID_assign)
-        from collections import Counter
 
+        from collections import Counter
         print(dict(Counter(tb_tgt_current["exptime_PPP"][index_in])))
         print(dict(Counter(tb_tgt_current["exptime_PPP"][index_assign])))
+
         tb_tgt_current["exptime_PPP"][index_assign] -= single_exptime
         tb_tgt_current["exptime_done"][index_assign] += single_exptime
         #tb_tgt_current["priority"][tb_tgt_current["exptime_done"] > 0] = 999
@@ -2091,6 +2120,28 @@ def PPP_centers_for_single_program(
                 )
             ] += remaining_priority_increment_value
         tb_tgt_current = tb_tgt_current[tb_tgt_current["exptime_PPP"] > 0]
+        print(
+            "Classic PPC_{:3d} selected assignment: Nassigned={:.0f}, NP0={:.0f}, "
+            "NP1={:.0f}, Ncomplete={:.0f}, Npartial={:.0f}, Ncontinue={:.0f}, "
+            "FH={:.3f}, Finish={:.3f}, Continue={:.3f}, Prio={:.3f}, "
+            "Fill={:.3f}, NewPartial={:.3f}, Over={:.3f}, Score={:.3f}".format(
+                len(ppc_lst),
+                ppc_term_values["n_assigned"],
+                ppc_term_values["n_p0"],
+                ppc_term_values["n_p1"],
+                ppc_term_values["n_finish"],
+                ppc_term_values["n_partial"],
+                ppc_term_values["n_continue"],
+                ppc_term_values["fh"],
+                ppc_term_values["finish"],
+                ppc_term_values["cont"],
+                ppc_term_values["prio"],
+                ppc_term_values["fill"],
+                ppc_term_values["new_partial"],
+                ppc_term_values["overshoot"],
+                ppc_score,
+            )
+        )
         #print(sum(tb_tgt_current["priority"] == 999))
     ppc_lst_fin = np.array(ppc_lst)
     ppcList = _build_classic_ppc_list_table(ppc_lst_fin, tb_tgt, n_ppc)
