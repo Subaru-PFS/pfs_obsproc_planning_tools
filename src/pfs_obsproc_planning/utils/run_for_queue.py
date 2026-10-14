@@ -272,7 +272,6 @@ def run(
     proposal_ids = (
         config["ppp"]["proposalIds"]
         + config["ppp"]["proposalIds_backup"]
-        + config.get("sfa", {}).get("proposalIds_obsFiller", [])
     )
     filler_proposal_id = config.get("sfa", {}).get("fill_unassign_pslId")
     if filler_proposal_id:
