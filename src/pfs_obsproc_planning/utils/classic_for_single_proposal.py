@@ -14,6 +14,14 @@ _DEFAULT_SINGLE_PROGRAM_PRIORITY_POLICY = {
 def get_single_proposal_requirements(proposal_id):
     proposalId = str(proposal_id) if proposal_id is not None else None
 
+    if proposalId == "S26B-UH039-A":
+        return {
+            #"fixed_ppc_pa": 0.0,
+            "import_user_ppc_from_db": False,
+            "optimize_costs": False,
+            "single_exptime_override": 14400.0,
+            "single_program_mode": "LR",
+        }
     if proposalId == "S26B-OT04":
         return {
             #"fixed_ppc_pa": 0.0,
