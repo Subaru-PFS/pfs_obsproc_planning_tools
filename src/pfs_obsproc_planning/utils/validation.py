@@ -99,6 +99,9 @@ def calc_inr(df, obstime):
         az = np.nan
         inr = np.nan
         el = np.nan
+    
+    # change to PFS con
+    az = (az % 360.0) - 180.0
     return az, inr, el
 
 
