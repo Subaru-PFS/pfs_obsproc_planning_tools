@@ -273,9 +273,6 @@ def run(
         config["ppp"]["proposalIds"]
         + config["ppp"]["proposalIds_backup"]
     )
-    filler_proposal_id = config.get("sfa", {}).get("fill_unassign_pslId")
-    if filler_proposal_id:
-        proposal_ids.append(filler_proposal_id)
     proposal_ids = list(dict.fromkeys(proposal_ids))
     tb_queuedb = query_queueDB(
         proposal_ids,
