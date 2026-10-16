@@ -52,8 +52,63 @@ _PA_GRID_STEP_DEG = 100.0
 _PA_INR_NIGHT_STEP_MINUTES = 20
 _PA_INR_WRAP_EDGE_DEG = 170.0
 _PA_INR_LIMIT_DEG = 174.0
+_PPP_MAX_POINTINGS_PER_PROPOSAL = 30
+_PPP_OPTIMIZER_MAXITER = 30
+_PPP_OPTIMIZER_MAXFEV = 30
+_PPP_CENTER_SEARCH_RADIUS_DEG = 0.5
+_USE_CONFIG_POINTING_LIMIT = object()
 _HAWAII_TZ = ZoneInfo("US/Hawaii")
 _UTC_TZ = ZoneInfo("UTC")
+_PPP_PARAM_DEFAULTS = {
+    "weight_params": _DEFAULT_PPP_WEIGHT_PARAMS,
+    "objective_lambdas": _PPP_OBJECTIVE_LAMBDAS,
+    "priority_values": _PPP_PRIORITY_VALUES,
+    "total_fibers": _PPP_TOTAL_FIBERS,
+    "pa_grid_step_deg": _PA_GRID_STEP_DEG,
+    "pa_inr_night_step_minutes": _PA_INR_NIGHT_STEP_MINUTES,
+    "pa_inr_wrap_edge_deg": _PA_INR_WRAP_EDGE_DEG,
+    "pa_inr_limit_deg": _PA_INR_LIMIT_DEG,
+    "max_pointings_per_proposal": _PPP_MAX_POINTINGS_PER_PROPOSAL,
+    "optimizer_maxiter": _PPP_OPTIMIZER_MAXITER,
+    "optimizer_maxfev": _PPP_OPTIMIZER_MAXFEV,
+    "center_search_radius_deg": _PPP_CENTER_SEARCH_RADIUS_DEG,
+}
+
+
+def set_ppp_params(conf=None):
+    """Apply optional [ppp] settings from a parsed TOML config.
+
+    Call before planning. Missing settings use the built-in defaults;
+    objective_lambdas and priority_values may contain partial overrides.
+    max_pointings_per_proposal defaults to 30. Pointing optimization uses
+    optimizer_maxiter=30, optimizer_maxfev=30, center_search_radius_deg=0.5.
+    """
+    global _DEFAULT_PPP_WEIGHT_PARAMS, _PPP_OBJECTIVE_LAMBDAS, _PPP_PRIORITY_VALUES
+    global _PPP_TOTAL_FIBERS, _PA_GRID_STEP_DEG, _PA_INR_NIGHT_STEP_MINUTES
+    global _PA_INR_WRAP_EDGE_DEG, _PA_INR_LIMIT_DEG
+    global _PPP_MAX_POINTINGS_PER_PROPOSAL, _PPP_OPTIMIZER_MAXITER
+    global _PPP_OPTIMIZER_MAXFEV, _PPP_CENTER_SEARCH_RADIUS_DEG
+
+    config = (conf or {}).get("ppp", {})
+    params = {key: config.get(key, value) for key, value in _PPP_PARAM_DEFAULTS.items()}
+    _DEFAULT_PPP_WEIGHT_PARAMS = tuple(params["weight_params"])
+    _PPP_OBJECTIVE_LAMBDAS = {
+        **_PPP_PARAM_DEFAULTS["objective_lambdas"],
+        **params["objective_lambdas"],
+    }
+    _PPP_PRIORITY_VALUES = {
+        **_PPP_PARAM_DEFAULTS["priority_values"],
+        **{int(key): value for key, value in params["priority_values"].items()},
+    }
+    _PPP_TOTAL_FIBERS = params["total_fibers"]
+    _PA_GRID_STEP_DEG = params["pa_grid_step_deg"]
+    _PA_INR_NIGHT_STEP_MINUTES = params["pa_inr_night_step_minutes"]
+    _PA_INR_WRAP_EDGE_DEG = params["pa_inr_wrap_edge_deg"]
+    _PA_INR_LIMIT_DEG = params["pa_inr_limit_deg"]
+    _PPP_MAX_POINTINGS_PER_PROPOSAL = params["max_pointings_per_proposal"]
+    _PPP_OPTIMIZER_MAXITER = params["optimizer_maxiter"]
+    _PPP_OPTIMIZER_MAXFEV = params["optimizer_maxfev"]
+    _PPP_CENTER_SEARCH_RADIUS_DEG = params["center_search_radius_deg"]
 
 
 # -----------------------------------------------------------------------------
@@ -640,15 +695,19 @@ def _build_ppc_list_table(final_ppc_records, _tb_tgt, backup):
 def PPP_centers(
     _tb_tgt,
     n_ppc,
-    weight_params=[2, 0, 0],
+    weight_params=None,
     random_seed=0,
     use_multiprocessing=True,
     backup=False,
     fixed_ppc_pa=None,
     config=None,
-    max_pointings_per_proposal=30,
+    max_pointings_per_proposal=_USE_CONFIG_POINTING_LIMIT,
 ):
     """Determine PPC centers for queue-mode planning across multiple proposals."""
+    if max_pointings_per_proposal is _USE_CONFIG_POINTING_LIMIT:
+        max_pointings_per_proposal = _PPP_MAX_POINTINGS_PER_PROPOSAL
+    if weight_params is None:
+        weight_params = _DEFAULT_PPP_WEIGHT_PARAMS
     start_time = time.time()
     rng = np.random.default_rng(random_seed)
     logger.info("[S2] Determine pointing centers started")
@@ -694,10 +753,10 @@ def PPP_centers(
             args=(tb_tgt_group_primary, seed_ppc_pa),
             method="Powell",
             bounds=[
-                (initial_ra - 0.50, initial_ra + 0.50),
-                (initial_dec - 0.50, initial_dec + 0.50),
+                (initial_ra - _PPP_CENTER_SEARCH_RADIUS_DEG, initial_ra + _PPP_CENTER_SEARCH_RADIUS_DEG),
+                (initial_dec - _PPP_CENTER_SEARCH_RADIUS_DEG, initial_dec + _PPP_CENTER_SEARCH_RADIUS_DEG),
             ],
-            options={"xatol": 0.01, "fatol": 0.01, "maxiter": 30, "maxfev": 30},
+            options={"xatol": 0.01, "fatol": 0.01, "maxiter": _PPP_OPTIMIZER_MAXITER, "maxfev": _PPP_OPTIMIZER_MAXFEV},
         )
         print(f"The optimal PPC center: {optimization_result.x}")
         #'''
@@ -998,10 +1057,10 @@ def _optimize_fixed_pa_single_program_pointing(
         [central_ra, central_dec],
         method="Powell",
         bounds=[
-            (central_ra - 0.50, central_ra + 0.50),
-            (central_dec - 0.50, central_dec + 0.50),
+            (central_ra - _PPP_CENTER_SEARCH_RADIUS_DEG, central_ra + _PPP_CENTER_SEARCH_RADIUS_DEG),
+            (central_dec - _PPP_CENTER_SEARCH_RADIUS_DEG, central_dec + _PPP_CENTER_SEARCH_RADIUS_DEG),
         ],
-        options={"xatol": 0.01, "fatol": 0.01, "maxiter": 30, "maxfev": 30},
+        options={"xatol": 0.01, "fatol": 0.01, "maxiter": _PPP_OPTIMIZER_MAXITER, "maxfev": _PPP_OPTIMIZER_MAXFEV},
         
     )
     #"""
@@ -1024,10 +1083,10 @@ def _optimize_single_program_from_initial_guess(tb_tgt, initial_guess):
         initial_guess[:2],
         method="Powell",
         bounds=[
-            (initial_guess[0] - 0.50, initial_guess[0] + 0.50),
-            (initial_guess[1] - 0.50, initial_guess[1] + 0.50),
+            (initial_guess[0] - _PPP_CENTER_SEARCH_RADIUS_DEG, initial_guess[0] + _PPP_CENTER_SEARCH_RADIUS_DEG),
+            (initial_guess[1] - _PPP_CENTER_SEARCH_RADIUS_DEG, initial_guess[1] + _PPP_CENTER_SEARCH_RADIUS_DEG),
         ],
-        options={"xatol": 0.01, "fatol": 0.01, "maxiter": 30, "maxfev": 30},
+        options={"xatol": 0.01, "fatol": 0.01, "maxiter": _PPP_OPTIMIZER_MAXITER, "maxfev": _PPP_OPTIMIZER_MAXFEV},
     )
     print(result.x)
     #'''
@@ -1095,10 +1154,10 @@ def _determine_default_single_program_pointing(tb_tgt, fixed_ppc_pa):
         [peak_x, peak_y],
         method="Powell",
         bounds=[
-            (peak_x - 0.50, peak_x + 0.50),
-            (peak_y - 0.50, peak_y + 0.50),
+            (peak_x - _PPP_CENTER_SEARCH_RADIUS_DEG, peak_x + _PPP_CENTER_SEARCH_RADIUS_DEG),
+            (peak_y - _PPP_CENTER_SEARCH_RADIUS_DEG, peak_y + _PPP_CENTER_SEARCH_RADIUS_DEG),
         ],
-        options={"xatol": 0.01, "fatol": 0.01, "maxiter": 30, "maxfev": 30},
+        options={"xatol": 0.01, "fatol": 0.01, "maxiter": _PPP_OPTIMIZER_MAXITER, "maxfev": _PPP_OPTIMIZER_MAXFEV},
     )
     print(result.x)
     #'''
@@ -1564,8 +1623,10 @@ def _evaluate_bright_guidestar_constraints(
     }
 
 
-def _single_pointing_pa_candidates(initial_pa=None, pa_step_deg=_PA_GRID_STEP_DEG):
+def _single_pointing_pa_candidates(initial_pa=None, pa_step_deg=None):
     """Return the PA grid used for per-pointing optimization."""
+    if pa_step_deg is None:
+        pa_step_deg = _PA_GRID_STEP_DEG
     pa_candidates = np.arange(-90.0, 270.0, float(pa_step_deg), dtype=float)
     if _is_provided_ppc_pa_value(initial_pa):
         pa_candidates = np.concatenate((pa_candidates, [_normalize_ppc_pa(initial_pa)]))
@@ -1740,7 +1801,7 @@ def optimize_shared_pa_for_fixed_pointings(
     tb_tgt,
     ppc_list,
     fixed_ppc_pa=None,
-    pa_step_deg=_PA_GRID_STEP_DEG,
+    pa_step_deg=None,
     label=None,
     config=None,
 ):
@@ -1749,6 +1810,8 @@ def optimize_shared_pa_for_fixed_pointings(
     The PA constraint checks in this routine are shared infrastructure for
     both queue and classic PA optimization paths.
     """
+    if pa_step_deg is None:
+        pa_step_deg = _PA_GRID_STEP_DEG
     ppc_array = _coerce_ppc_list_array(ppc_list)
     if ppc_array.size == 0:
         return ppc_array, {
@@ -2007,13 +2070,15 @@ def optimize_missing_pa_for_fixed_pointings(
 def PPP_centers_for_single_program(
     _tb_tgt,
     n_ppc,
-    weight_para=_DEFAULT_PPP_WEIGHT_PARAMS,
+    weight_para=None,
     fixed_ppc_pa=None,
     write_ppc_list=True,
     output_dir=None,
     config=None,
 ):
     """Determine PPC centers for classic planning of a single proposal."""
+    if weight_para is None:
+        weight_para = _DEFAULT_PPP_WEIGHT_PARAMS
     time_start = time.time()
     logger.info("[S2] Determine pointing centers started")
     ppc_lst = []
