@@ -4,6 +4,7 @@ import html
 import json
 import re
 import shlex
+import sys
 import tomllib
 from datetime import datetime, timedelta
 from html.parser import HTMLParser
@@ -42,12 +43,27 @@ TARGET_INSERT_DIR = (
     Path.home() / "config" / "pfs_obsproc_planning" / "targetdb_insert"
 )
 TARGET_INSERT_STATUS_PATH = TARGET_INSERT_DIR / "status.json"
+DISTRIBUTION_DIR = Path.home() / "config" / "pfs_obsproc_planning" / "distributions"
+DISTRIBUTION_COLUMN = "plot"
+DISTRIBUTION_MARKER = "📊"
 TARGETDB_DEV_CONFIG = Path(
     "/work/monodera/Subaru-PFS/database_configs/config_targetdb_dev.toml"
 )
 TARGETDB_PRODUCTION_CONFIG = Path(
     "/work/monodera/Subaru-PFS/database_configs/config_targetdb_production.toml"
 )
+
+# Column of the "Input catalogs" worksheet that gates which rows are inserted.
+# Only rows with a truthy value are written to the insertion CSV; a blank cell
+# means "do not insert", so newly added rows must be ticked explicitly.
+FOR_INSERT_COLUMN = "for_insert"
+TRUE_VALUES = {"true", "1", "yes", "y", "t"}
+
+
+def is_truthy(series):
+    """Boolean mask for spreadsheet flag values such as TRUE/1/yes."""
+    return series.astype(str).str.strip().str.lower().isin(TRUE_VALUES)
+
 
 SECTION_TITLE_STYLE = (
     "font-size: 15px; font-weight: 700; margin: 0 0 8px 0;"
@@ -541,7 +557,9 @@ class PFSConfigApp:
             sizing_mode="stretch_width",
         )
         self.program_status_table = pn.widgets.Tabulator(
-            pd.DataFrame(columns=["proposal_id", "status", "inserted_at"]),
+            pd.DataFrame(
+                columns=["proposal_id", "status", "inserted_at", DISTRIBUTION_COLUMN]
+            ),
             show_index=False,
             disabled=True,
             selectable="checkbox",
@@ -550,6 +568,7 @@ class PFSConfigApp:
             sizing_mode="stretch_width",
             height=220,
         )
+        self.program_status_table.on_click(self._on_program_status_click)
         self.program_status_table.style.apply(
             self._style_program_status_row,
             axis=1,
@@ -666,6 +685,24 @@ class PFSConfigApp:
             self.program_sheet_view,
             sizing_mode="stretch_both",
         )
+        self.distribution_status = pn.pane.Markdown(
+            f"Click the {DISTRIBUTION_MARKER} cell of an inserted program to show "
+            "its target distribution.",
+            sizing_mode="stretch_width",
+        )
+        self.distribution_images = pn.Column(sizing_mode="stretch_both", scroll=True)
+        self.regenerate_distribution_button = pn.widgets.Button(
+            name="Regenerate figure",
+            button_type="default",
+            width=180,
+            disabled=True,
+        )
+        self.distribution_panel = pn.Column(
+            pn.Row(self.distribution_status, self.regenerate_distribution_button),
+            self.distribution_images,
+            sizing_mode="stretch_both",
+        )
+        self._distribution_proposal_id = None
         self.left_status = pn.pane.Markdown(sizing_mode="stretch_width")
         self.right_panel = pn.Column(sizing_mode="stretch_both", scroll=True)
 
@@ -680,6 +717,7 @@ class PFSConfigApp:
             self._on_production_confirmation, "value"
         )
         self.run_insert_button.on_click(self._run_target_insertion)
+        self.regenerate_distribution_button.on_click(self._regenerate_distribution)
         self.program_sheet_url_input.param.watch(
             self._on_program_sheet_url_change, "value"
         )
@@ -693,9 +731,10 @@ class PFSConfigApp:
         self._render_program_sheet()
         pn.state.onload(self._load_initial_program_status)
 
-    def _notify(self, message, level="info"):
+    def _notify(self, message, level="info", duration=None):
         if pn.state.notifications:
-            getattr(pn.state.notifications, level)(message)
+            options = {} if duration is None else {"duration": duration}
+            getattr(pn.state.notifications, level)(message, **options)
 
     def _load_program_sheet_links(self):
         try:
@@ -758,7 +797,7 @@ class PFSConfigApp:
         if self._google_sheet_csv_url(sheet_name) is None:
             self.proposal_source_data = pd.DataFrame()
             self.program_status_table.value = pd.DataFrame(
-                columns=["proposal_id", "status", "inserted_at"]
+                columns=["proposal_id", "status", "inserted_at", DISTRIBUTION_COLUMN]
             )
             return
 
@@ -781,6 +820,7 @@ class PFSConfigApp:
                     "proposal_id": proposal_id,
                     "status": "✓" if inserted_at else "✗",
                     "inserted_at": inserted_at,
+                    DISTRIBUTION_COLUMN: DISTRIBUTION_MARKER if inserted_at else "",
                 }
             )
         status_rows.sort(key=lambda row: row["status"] == "✓")
@@ -807,6 +847,11 @@ class PFSConfigApp:
                 raise ValueError(
                     "The input_catalogs worksheet has no proposal_id column."
                 )
+            if FOR_INSERT_COLUMN not in input_catalogs.columns:
+                raise ValueError(
+                    f"The input_catalogs worksheet has no {FOR_INSERT_COLUMN} column. "
+                    f"Add it and tick the rows to insert."
+                )
         except (OSError, ValueError) as error:
             self._notify(f"Could not load input catalogs: {error}", "error")
             return
@@ -818,9 +863,21 @@ class PFSConfigApp:
             proposal_ids
         )
         selected_proposals = self.proposal_source_data.loc[proposal_mask]
-        selected_input_catalogs = input_catalogs.loc[input_catalog_mask]
-        if selected_input_catalogs.empty:
+        matching_input_catalogs = input_catalogs.loc[input_catalog_mask]
+        if matching_input_catalogs.empty:
             self._notify("No matching input catalogs were found.", "error")
+            return
+
+        flagged_mask = is_truthy(matching_input_catalogs[FOR_INSERT_COLUMN])
+        selected_input_catalogs = matching_input_catalogs.loc[flagged_mask]
+        skipped_count = len(matching_input_catalogs) - len(selected_input_catalogs)
+        if selected_input_catalogs.empty:
+            self._notify(
+                f"All {len(matching_input_catalogs)} matching input catalog rows have "
+                f"{FOR_INSERT_COLUMN} unset. Tick the rows to insert and try again.",
+                "warning",
+                duration=0,
+            )
             return
 
         semester_dir = TARGET_INSERT_DIR / semester_key
@@ -839,9 +896,7 @@ class PFSConfigApp:
         if pointings is None:
             has_user_pointings = False
         else:
-            has_user_pointings = pointings.astype(str).str.lower().isin(
-                {"true", "1", "yes", "y"}
-            ).any()
+            has_user_pointings = is_truthy(pointings).any()
 
         self._pending_proposals_path = proposals_path
         self._pending_input_catalogs_path = input_catalogs_path
@@ -851,7 +906,9 @@ class PFSConfigApp:
         self.insert_summary.object = (
             f"**Semester:** {self.semester_select.value}  \n"
             f"**Programs:** {', '.join(proposal_ids)}  \n"
-            f"**Input catalogs:** {len(selected_input_catalogs)}  \n"
+            f"**Input catalogs:** {len(selected_input_catalogs)} "
+            f"of {len(matching_input_catalogs)} matching rows "
+            f"({skipped_count} skipped without {FOR_INSERT_COLUMN})  \n"
             f"**User pointings:** {'yes' if has_user_pointings else 'no'}"
         )
         self.production_confirmation.value = False
@@ -938,6 +995,9 @@ class PFSConfigApp:
             semester_status = self.target_insert_status.setdefault(semester_key, {})
             for proposal_id in self._pending_proposal_ids:
                 semester_status[proposal_id] = inserted_at
+            # Newly inserted rows change the target list, so cached figures are
+            # dropped and rebuilt on the next click.
+            self._clear_distribution_cache(self._pending_proposal_ids)
             try:
                 self._save_target_insert_status()
             except OSError as error:
@@ -950,7 +1010,154 @@ class PFSConfigApp:
         self.insert_log.object = "\n".join(log_lines)
         self.production_confirmation.disabled = False
 
-    def _set_program_sheet_url_for_semester(self):
+    def _distribution_dir(self):
+        return DISTRIBUTION_DIR / self.semester_select.value.lower()
+
+    def _distribution_paths(self, proposal_id):
+        directory = self._distribution_dir()
+        if not directory.exists():
+            return []
+        return sorted(
+            path
+            for path in directory.glob(f"{proposal_id}*.png")
+            if path.stem == proposal_id or path.stem.startswith(f"{proposal_id}_cluster")
+        )
+
+    def _clear_distribution_cache(self, proposal_ids):
+        for proposal_id in proposal_ids:
+            for path in self._distribution_paths(proposal_id):
+                try:
+                    path.unlink()
+                except OSError:
+                    continue
+
+    def _distribution_nights(self, proposal_id):
+        """Return the windows entered in Observation durations for this program."""
+        if proposal_id == self.proposal_select.value:
+            parsed_entries = parse_observation_text(self.observation_text.value)
+            if parsed_entries is None:
+                raise ValueError(
+                    "Observation durations contains an invalid date or time range."
+                )
+            return [
+                {
+                    "date": entry["date"],
+                    "start": datetime.fromisoformat(entry["start"]),
+                    "stop": datetime.fromisoformat(entry["stop"]),
+                }
+                for entry in parsed_entries
+            ]
+
+        # Observation durations belongs to the currently selected proposal.
+        # For another status-table row, retain the unedited schedule fallback.
+        nights = []
+        for entry in self.schedule_by_proposal.get(proposal_id, []):
+            start_datetime = entry["start"]
+            end_datetime = entry["end"]
+            if end_datetime <= start_datetime:
+                end_datetime += timedelta(days=1)
+            nights.append(
+                {
+                    "date": start_datetime.strftime("%Y-%m-%d"),
+                    "start": start_datetime,
+                    "stop": end_datetime,
+                }
+            )
+        return nights
+
+    def _show_distribution_images(self, proposal_id, paths):
+        self.distribution_images.objects = [
+            pn.pane.PNG(str(path), sizing_mode="stretch_width")
+            for path in paths
+        ]
+        self.distribution_status.object = (
+            f"**{proposal_id}** — {len(paths)} figure(s) from `{self._distribution_dir()}`"
+        )
+
+    async def _on_program_status_click(self, event):
+        if event.column != DISTRIBUTION_COLUMN:
+            return
+
+        table_data = self.program_status_table.value
+        if table_data is None or event.row not in table_data.index:
+            return
+
+        row = table_data.loc[event.row]
+        if not str(row.get(DISTRIBUTION_COLUMN, "")).strip():
+            self._notify(
+                "Target distributions are only available for inserted programs.",
+                "warning",
+            )
+            return
+
+        await self._open_distribution(str(row["proposal_id"]))
+
+    async def _regenerate_distribution(self, event=None):
+        if self._distribution_proposal_id is None:
+            return
+        self._clear_distribution_cache([self._distribution_proposal_id])
+        await self._open_distribution(self._distribution_proposal_id)
+
+    async def _open_distribution(self, proposal_id):
+        self._distribution_proposal_id = proposal_id
+        self.regenerate_distribution_button.disabled = False
+        if hasattr(self, "main_tabs"):
+            self.main_tabs.active = 2
+
+        cached = self._distribution_paths(proposal_id)
+        if cached:
+            self._show_distribution_images(proposal_id, cached)
+            return
+
+        self.distribution_images.objects = []
+        self.distribution_status.object = (
+            f"Generating the target distribution for **{proposal_id}**; "
+            "querying targetdb and plotting may take a while..."
+        )
+        self.regenerate_distribution_button.disabled = True
+
+        try:
+            nights = self._distribution_nights(proposal_id)
+            paths, messages = await asyncio.to_thread(
+                self._build_distribution, proposal_id, nights
+            )
+        except Exception as error:
+            self.distribution_status.object = (
+                f"Could not build the distribution for **{proposal_id}**: {error}"
+            )
+            self._notify(f"Distribution plot failed: {error}", "error", duration=0)
+            return
+        finally:
+            self.regenerate_distribution_button.disabled = False
+
+        self._show_distribution_images(proposal_id, paths)
+        for message in messages:
+            self._notify(message, "warning")
+
+    def _build_distribution(self, proposal_id, nights):
+        # The app is served as a standalone script, so the sibling module is
+        # imported from this file's directory rather than as a package member.
+        module_dir = str(Path(__file__).resolve().parent)
+        if module_dir not in sys.path:
+            sys.path.insert(0, module_dir)
+        import program_distribution
+
+        neighbour_ids = []
+        if not self.proposal_source_data.empty:
+            neighbour_ids = (
+                self.proposal_source_data["proposal_id"].astype(str).tolist()
+            )
+
+        return program_distribution.generate_program_figures(
+            proposal_id,
+            nights,
+            self.config_data,
+            self.config_path,
+            self._distribution_dir(),
+            neighbour_proposal_ids=neighbour_ids,
+        )
+
+    def _set_program_sheet_url_for_semester(self):        
         self._program_sheet_url_guard = True
         self.program_sheet_url_input.value = self.program_sheet_links.get(
             self.semester_select.value, ""
@@ -1256,6 +1463,9 @@ class PFSConfigApp:
     def _on_observation_text_change(self, event):
         self._activate_config_tab()
         if self._sync_qplan_from_observation_text():
+            proposal_id = self.proposal_select.value
+            if proposal_id:
+                self._clear_distribution_cache([proposal_id])
             self._render_config_panel()
 
     def _activate_config_tab(self):
@@ -1330,6 +1540,7 @@ class PFSConfigApp:
         self.main_tabs = pn.Tabs(
             ("Program details", self.program_details_panel),
             ("Config parameters", self.right_panel),
+            ("Target distribution", self.distribution_panel),
             sizing_mode="stretch_both",
         )
 
@@ -1346,4 +1557,3 @@ class PFSConfigApp:
 
 app = PFSConfigApp().view()
 app.servable()
-
