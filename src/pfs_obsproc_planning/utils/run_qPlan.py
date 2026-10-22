@@ -4,7 +4,7 @@
 import os
 import sys
 import warnings
-from datetime import datetime, timedelta, timezone, date
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from zoneinfo import ZoneInfo
 
@@ -32,6 +32,16 @@ from qplan.Scheduler import Scheduler
 from qplan.util.site import site_subaru as observer
 
 warnings.filterwarnings("ignore")
+
+_HST_TZ = ZoneInfo("US/Hawaii")
+
+
+def _parse_hst_datetime(value):
+    """Parse a configured datetime as HST without using the host timezone."""
+    parsed_time = parser.parse(str(value))
+    if parsed_time.tzinfo is None:
+        return parsed_time.replace(tzinfo=_HST_TZ)
+    return parsed_time.astimezone(_HST_TZ)
 
 
 def make_schedule_table(schedule):
@@ -240,8 +250,8 @@ def run(
     start_time_list = conf["qplan"].get("start_time", [])
     stop_time_list = conf["qplan"].get("stop_time", [])
 
-    today = date.today().strftime("%Y-%m-%d")
-    date_today = parser.parse(f"{today} 12:00 HST")
+    today = datetime.now(_HST_TZ).date().isoformat()
+    date_today = _parse_hst_datetime(f"{today} 12:00:00")
 
     obs_dates = sorted(conf["qplan"]["obs_dates"], key=lambda d: parser.parse(d))
     first_valid_date = None
@@ -250,7 +260,7 @@ def run(
     stop_time_list_daily = []
 
     for date_ in obs_dates:
-        date_t = parser.parse(f"{date_} 12:00 HST")
+        date_t = _parse_hst_datetime(f"{date_} 12:00:00")
 
         if date_today > date_t:
             # skip past dates
@@ -287,11 +297,10 @@ def run(
         )  # extend TW18 by 30 min for real operation, just in case
         
         # Ensure timezone-aware comparisons
-        hst_tz = ZoneInfo("US/Hawaii")
         if default_start_time.tzinfo is None:
-            default_start_time = default_start_time.replace(tzinfo=hst_tz)
+            default_start_time = default_start_time.replace(tzinfo=_HST_TZ)
         if default_stop_time.tzinfo is None:
-            default_stop_time = default_stop_time.replace(tzinfo=hst_tz)
+            default_stop_time = default_stop_time.replace(tzinfo=_HST_TZ)
 
         start_override = None
         stop_override = None
@@ -300,7 +309,7 @@ def run(
             next_date = (
                 datetime.strptime(date_, "%Y-%m-%d") + timedelta(days=1)
             ).strftime("%Y-%m-%d")
-            parsed_time = parser.parse(f"{item} HST").astimezone(hst_tz)
+            parsed_time = _parse_hst_datetime(item)
             if (date_ in item) and parsed_time >= default_start_time:
                 start_override = parsed_time
                 start_time_list.remove(item)
@@ -325,7 +334,7 @@ def run(
             next_date = (
                 datetime.strptime(date_, "%Y-%m-%d") + timedelta(days=1)
             ).strftime("%Y-%m-%d")
-            parsed_time = parser.parse(f"{item} HST").astimezone(hst_tz)
+            parsed_time = _parse_hst_datetime(item)
             if (date_ in item) and parsed_time >= default_start_time:
                 stop_override = parsed_time
                 stop_time_list.remove(item)

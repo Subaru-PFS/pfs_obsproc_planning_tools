@@ -269,7 +269,11 @@ def run(
 
     today = date.today().strftime("%Y%m%d")
     tb_queuedb_filename = os.path.join(output_dir, f"tgt_queueDB_{today}.csv")
-    proposal_ids = config["ppp"]["proposalIds"] + config["ppp"]["proposalIds_backup"]
+    proposal_ids = (
+        config["ppp"]["proposalIds"]
+        + config["ppp"]["proposalIds_backup"]
+    )
+    proposal_ids = list(dict.fromkeys(proposal_ids))
     tb_queuedb = query_queueDB(
         proposal_ids,
         config["queuedb"]["filepath"],

@@ -93,6 +93,7 @@ def query_target_from_db(tgt_db, proposal_ids):
         pd.to_numeric, errors="coerce"
     )
 
+    df_tgt.loc[df_tgt["equinox"].isna(), "equinox"] = "J2000.0"
     df_tgt.loc[df_tgt["pmra"].isna(), "pmra"] = 0.0
     df_tgt.loc[df_tgt["pmdec"].isna(), "pmdec"] = 0.0
     df_tgt.loc[df_tgt["parallax"].isna(), "parallax"] = 1.0e-7
@@ -162,7 +163,7 @@ def query_queueDB(psl_id_list, DBPath_qDB, tb_queuedb_filename):
     # connect() failed before mdb_client was assigned.
     try:
         qa = q_db.QueueAdapter(qdb)
-        qq = q_query.QueueQuery(qa, use_cache=False)
+        qq = q_query.QueueQuery(qa, use_cache=True)
 
         results = []
         counter = 0
@@ -172,6 +173,9 @@ def query_queueDB(psl_id_list, DBPath_qDB, tb_queuedb_filename):
             ex_obs_list = qq.get_executed_obs_by_proposal(psl_id)
             if not ex_obs_list:
                 continue
+
+            ex_obs_stats_list = qq.get_pfs_executed_ob_stats_by_proposal(psl_id)
+            obs = qq.get_obs_by_proposal(psl_id)
 
             for ex_ob in ex_obs_list:
                 ex_ob_stats = qq.get_pfs_executed_ob_stats_by_ob_key(ex_ob.ob_key)

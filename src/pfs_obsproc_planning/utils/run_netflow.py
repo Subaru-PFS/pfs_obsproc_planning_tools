@@ -42,12 +42,13 @@ _QUEUE_NETFLOW_PRIORITY_COSTS = {
     8: 20,
     9: 10,
 }
+_QUEUE_NETFLOW_PRIORITY_COST_DEFAULTS = _QUEUE_NETFLOW_PRIORITY_COSTS.copy()
 
 _QUEUE_NETFLOW_CLASSDICT_TEMPLATE = {
     **{
         f"sci_P{priority}": {
             "nonObservationCost": non_observation_cost,
-            "partialObservationCost": 200,
+            "partialObservationCost": 300,
             "calib": False,
         }
         for priority, non_observation_cost in _QUEUE_NETFLOW_PRIORITY_COSTS.items()
@@ -100,16 +101,36 @@ def set_bench(bench_model):
     bench = bench_model
 
 
-def set_netflow_params(conf):
+def set_netflow_params(conf=None):
     """Populate module-level netflow parameters from a config dict.
 
     Call this once before fiber_allocate() or fiber_allocation_classic() so
     that values from [netflow] in the TOML config are picked up automatically.
+    queue_netflow_priority_costs accepts partial overrides with priority keys;
+    omitted priority costs use the built-in defaults.
     """
     global cobraSafetyMargin, brokenCobrasMargin, avoidFiducials
-    cobraSafetyMargin = conf["netflow"].get("cobra_safety_margin", cobraSafetyMargin)
-    brokenCobrasMargin = conf["netflow"].get("broken_cobras_margin", brokenCobrasMargin)
-    avoidFiducials = conf["netflow"].get("avoidFiducials", avoidFiducials)
+    config = (conf or {}).get("netflow", {})
+    priority_costs = {
+        **_QUEUE_NETFLOW_PRIORITY_COST_DEFAULTS,
+        **{
+            int(priority): cost
+            for priority, cost in config.get("queue_netflow_priority_costs", {}).items()
+        },
+    }
+    cobraSafetyMargin = config.get("cobra_safety_margin", cobraSafetyMargin)
+    brokenCobrasMargin = config.get("broken_cobras_margin", brokenCobrasMargin)
+    avoidFiducials = config.get("avoidFiducials", avoidFiducials)
+    science_config = _QUEUE_NETFLOW_CLASSDICT_TEMPLATE["sci_P0"].copy()
+    for priority in _QUEUE_NETFLOW_PRIORITY_COSTS:
+        _QUEUE_NETFLOW_CLASSDICT_TEMPLATE.pop(f"sci_P{priority}")
+    _QUEUE_NETFLOW_PRIORITY_COSTS.clear()
+    _QUEUE_NETFLOW_PRIORITY_COSTS.update(priority_costs)
+    for priority, cost in priority_costs.items():
+        _QUEUE_NETFLOW_CLASSDICT_TEMPLATE[f"sci_P{priority}"] = {
+            **science_config,
+            "nonObservationCost": cost,
+        }
 
 
 def select_good_observation_time(
@@ -117,7 +138,7 @@ def select_good_observation_time(
     ppc_dec,
     dates_local=None,
     local_times_hst=None,
-    min_elevation=30.0,
+    min_elevation=32.0,
     max_elevation=75.0,
 ):
     """Pick a coarse but reasonable UTC observation time for one or more PPCs.
@@ -306,7 +327,7 @@ def _iter_classic_ppc_groups(tb_tgt, ppc_list):
 
     grouped_entries = []
     for group_number, group_indices in enumerate(ppc_index_groups, start=1):
-        ppc_group = np.asarray(ppc_list[group_indices], dtype=object)
+        ppc_group = np.asarray(ppc_list, dtype=object)[group_indices]
         tb_tgt_group = _select_classic_netflow_targets(tb_tgt, ppc_group)
         grouped_entries.append((group_number, group_indices, ppc_group, tb_tgt_group))
 

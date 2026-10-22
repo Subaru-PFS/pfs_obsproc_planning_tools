@@ -38,21 +38,77 @@ np.random.seed(0)
 
 _DEFAULT_PPP_WEIGHT_PARAMS = (2, 0, 0)
 _PPP_OBJECTIVE_LAMBDAS = {
-    "fh": 0.50,
-    "finish": 0.5,
-    "cont": 4.0,
-    "prio": 5.5,
-    "fill": 2.5,
-    "new": 0.50,
-    "over": 0.05,
+    "fh": 0.00,
+    "finish": 5.0,
+    "cont": 10.0,
+    "prio": 5,
+    "fill": 3,
+    "new": 2,
+    "over": 0,
 }
 _PPP_PRIORITY_VALUES = {0: 100.0, 1: 50, 2: 2, 3: 0.1, 4: 0.5, 5: 0.5, 6: 0.4, 9: 0.1}
 _PPP_TOTAL_FIBERS = 2394.0
-_PA_GRID_STEP_DEG = 10.0
+_PA_GRID_STEP_DEG = 100.0
 _PA_INR_NIGHT_STEP_MINUTES = 20
 _PA_INR_WRAP_EDGE_DEG = 170.0
+_PA_INR_LIMIT_DEG = 174.0
+_PPP_MAX_POINTINGS_PER_PROPOSAL = 30
+_PPP_OPTIMIZER_MAXITER = 30
+_PPP_OPTIMIZER_MAXFEV = 30
+_PPP_CENTER_SEARCH_RADIUS_DEG = 0.5
+_USE_CONFIG_POINTING_LIMIT = object()
 _HAWAII_TZ = ZoneInfo("US/Hawaii")
 _UTC_TZ = ZoneInfo("UTC")
+_PPP_PARAM_DEFAULTS = {
+    "weight_params": _DEFAULT_PPP_WEIGHT_PARAMS,
+    "objective_lambdas": _PPP_OBJECTIVE_LAMBDAS,
+    "priority_values": _PPP_PRIORITY_VALUES,
+    "total_fibers": _PPP_TOTAL_FIBERS,
+    "pa_grid_step_deg": _PA_GRID_STEP_DEG,
+    "pa_inr_night_step_minutes": _PA_INR_NIGHT_STEP_MINUTES,
+    "pa_inr_wrap_edge_deg": _PA_INR_WRAP_EDGE_DEG,
+    "pa_inr_limit_deg": _PA_INR_LIMIT_DEG,
+    "max_pointings_per_proposal": _PPP_MAX_POINTINGS_PER_PROPOSAL,
+    "optimizer_maxiter": _PPP_OPTIMIZER_MAXITER,
+    "optimizer_maxfev": _PPP_OPTIMIZER_MAXFEV,
+    "center_search_radius_deg": _PPP_CENTER_SEARCH_RADIUS_DEG,
+}
+
+
+def set_ppp_params(conf=None):
+    """Apply optional [ppp] settings from a parsed TOML config.
+
+    Call before planning. Missing settings use the built-in defaults;
+    objective_lambdas and priority_values may contain partial overrides.
+    max_pointings_per_proposal defaults to 30. Pointing optimization uses
+    optimizer_maxiter=30, optimizer_maxfev=30, center_search_radius_deg=0.5.
+    """
+    global _DEFAULT_PPP_WEIGHT_PARAMS, _PPP_OBJECTIVE_LAMBDAS, _PPP_PRIORITY_VALUES
+    global _PPP_TOTAL_FIBERS, _PA_GRID_STEP_DEG, _PA_INR_NIGHT_STEP_MINUTES
+    global _PA_INR_WRAP_EDGE_DEG, _PA_INR_LIMIT_DEG
+    global _PPP_MAX_POINTINGS_PER_PROPOSAL, _PPP_OPTIMIZER_MAXITER
+    global _PPP_OPTIMIZER_MAXFEV, _PPP_CENTER_SEARCH_RADIUS_DEG
+
+    config = (conf or {}).get("ppp", {})
+    params = {key: config.get(key, value) for key, value in _PPP_PARAM_DEFAULTS.items()}
+    _DEFAULT_PPP_WEIGHT_PARAMS = tuple(params["weight_params"])
+    _PPP_OBJECTIVE_LAMBDAS = {
+        **_PPP_PARAM_DEFAULTS["objective_lambdas"],
+        **params["objective_lambdas"],
+    }
+    _PPP_PRIORITY_VALUES = {
+        **_PPP_PARAM_DEFAULTS["priority_values"],
+        **{int(key): value for key, value in params["priority_values"].items()},
+    }
+    _PPP_TOTAL_FIBERS = params["total_fibers"]
+    _PA_GRID_STEP_DEG = params["pa_grid_step_deg"]
+    _PA_INR_NIGHT_STEP_MINUTES = params["pa_inr_night_step_minutes"]
+    _PA_INR_WRAP_EDGE_DEG = params["pa_inr_wrap_edge_deg"]
+    _PA_INR_LIMIT_DEG = params["pa_inr_limit_deg"]
+    _PPP_MAX_POINTINGS_PER_PROPOSAL = params["max_pointings_per_proposal"]
+    _PPP_OPTIMIZER_MAXITER = params["optimizer_maxiter"]
+    _PPP_OPTIMIZER_MAXFEV = params["optimizer_maxfev"]
+    _PPP_CENTER_SEARCH_RADIUS_DEG = params["center_search_radius_deg"]
 
 
 # -----------------------------------------------------------------------------
@@ -408,7 +464,7 @@ def objective_ppc_assignment(trial_ppc, _tb_tgt, ppc_pa=0.0):
     score, term_values = _score_single_ppc_assignment(_tb_tgt, assigned_target_ids)
     print(
         "{:.6f}, {:.6f}, {:.1f}, Nassigned = {:.0f}/{:.0f}, NP0 = {:.0f}, "
-        "NP1 = {:.0f}, Ncomplete = {:.0f}, Npartial = {:.0f}, FH = {:.3f}, "
+        "NP1 = {:.0f}, Ncomplete = {:.0f}, Npartial = {:.0f}, Ncontinue = {:.0f}, FH = {:.3f}, "
         "Finish = {:.3f}, Continue = {:.3f}, Prio = {:.3f}, Fill = {:.3f}, "
         "NewPartial = {:.3f}, Over = {:.3f}, Score = {:.3f}".format(
             ppc_ra,
@@ -420,6 +476,7 @@ def objective_ppc_assignment(trial_ppc, _tb_tgt, ppc_pa=0.0):
             term_values["n_p1"],
             term_values["n_finish"],
             term_values["n_partial"],
+            term_values["n_continue"],
             term_values["fh"],
             term_values["finish"],
             term_values["cont"],
@@ -638,15 +695,19 @@ def _build_ppc_list_table(final_ppc_records, _tb_tgt, backup):
 def PPP_centers(
     _tb_tgt,
     n_ppc,
-    weight_params=[2, 0, 0],
+    weight_params=None,
     random_seed=0,
     use_multiprocessing=True,
     backup=False,
     fixed_ppc_pa=None,
     config=None,
-    max_pointings_per_proposal=10,
+    max_pointings_per_proposal=_USE_CONFIG_POINTING_LIMIT,
 ):
     """Determine PPC centers for queue-mode planning across multiple proposals."""
+    if max_pointings_per_proposal is _USE_CONFIG_POINTING_LIMIT:
+        max_pointings_per_proposal = _PPP_MAX_POINTINGS_PER_PROPOSAL
+    if weight_params is None:
+        weight_params = _DEFAULT_PPP_WEIGHT_PARAMS
     start_time = time.time()
     rng = np.random.default_rng(random_seed)
     logger.info("[S2] Determine pointing centers started")
@@ -692,10 +753,10 @@ def PPP_centers(
             args=(tb_tgt_group_primary, seed_ppc_pa),
             method="Powell",
             bounds=[
-                (initial_ra - 0.50, initial_ra + 0.50),
-                (initial_dec - 0.50, initial_dec + 0.50),
+                (initial_ra - _PPP_CENTER_SEARCH_RADIUS_DEG, initial_ra + _PPP_CENTER_SEARCH_RADIUS_DEG),
+                (initial_dec - _PPP_CENTER_SEARCH_RADIUS_DEG, initial_dec + _PPP_CENTER_SEARCH_RADIUS_DEG),
             ],
-            options={"xatol": 0.01, "fatol": 0.01, "maxiter": 40, "maxfev": 40},
+            options={"xatol": 0.01, "fatol": 0.01, "maxiter": _PPP_OPTIMIZER_MAXITER, "maxfev": _PPP_OPTIMIZER_MAXFEV},
         )
         print(f"The optimal PPC center: {optimization_result.x}")
         #'''
@@ -816,6 +877,28 @@ def PPP_centers(
         print(
             f"PPC_{len(ppc_records):3d}: {len(_tb_tgt)-len(tb_tgt_remaining):5d}/{len(_tb_tgt):10d} targets are finished (score={ppc_score:.3f}, fh={ppc_term_values['fh']:.3f}). (partial = {n_partially_observed_before_filter}, {n_partially_observed_after_filter})"
         )
+        print(
+            "PPC_{:3d} selected assignment: Nassigned={:.0f}, NP0={:.0f}, "
+            "NP1={:.0f}, Ncomplete={:.0f}, Npartial={:.0f}, Ncontinue={:.0f}, "
+            "FH={:.3f}, Finish={:.3f}, Continue={:.3f}, Prio={:.3f}, "
+            "Fill={:.3f}, NewPartial={:.3f}, Over={:.3f}, Score={:.3f}".format(
+                len(ppc_records),
+                ppc_term_values["n_assigned"],
+                ppc_term_values["n_p0"],
+                ppc_term_values["n_p1"],
+                ppc_term_values["n_finish"],
+                ppc_term_values["n_partial"],
+                ppc_term_values["n_continue"],
+                ppc_term_values["fh"],
+                ppc_term_values["finish"],
+                ppc_term_values["cont"],
+                ppc_term_values["prio"],
+                ppc_term_values["fill"],
+                ppc_term_values["new_partial"],
+                ppc_term_values["overshoot"],
+                ppc_score,
+            )
+        )
         Table.pprint_all(tb_proposal_progress)
     if len(ppc_records) == 0:
         logger.warning("[S2] No valid PPC centers were determined")
@@ -865,7 +948,7 @@ def objective_single_program_ppc_assignment(trial_ppc, tb_tgt, ppc_pa=0.0):
     )
     print(
         "{:.6f}, {:.6f}, {:.1f}, Nassigned = {:.0f}/{:.0f}, NP0 = {:.0f}, "
-        "NP1 = {:.0f}, Ncomplete = {:.0f}, Npartial = {:.0f}, {}, FH = {:.3f}, "
+        "NP1 = {:.0f}, Ncomplete = {:.0f}, Npartial = {:.0f}, Ncontinue = {:.0f}, {}, FH = {:.3f}, "
         "Finish = {:.3f}, Continue = {:.3f}, Prio = {:.3f}, Fill = {:.3f}, "
         "NewPartial = {:.3f}, Over = {:.3f}, Score = {:.3f}".format(
             ppc_ra,
@@ -877,6 +960,7 @@ def objective_single_program_ppc_assignment(trial_ppc, tb_tgt, ppc_pa=0.0):
             term_values["n_p1"],
             term_values["n_finish"],
             term_values["n_partial"],
+            term_values["n_continue"],
             priority_summary,
             term_values["fh"],
             term_values["finish"],
@@ -938,7 +1022,7 @@ def _optimize_fixed_pa_single_program_pointing(
         n_total = len(assigned_ids)
         print(
             "Testing RA={:.6f}, Dec={:.6f}: P<= {} = {}/{}, Nassigned={}, "
-            "NP0={}, NP1={}, Ncomplete={}, Npartial={}, FH={:.3f}, "
+            "NP0={}, NP1={}, Ncomplete={}, Npartial={}, Ncontinue={}, FH={:.3f}, "
             "Finish={:.3f}, Continue={:.3f}, Prio={:.3f}, Fill={:.3f}, "
             "New={:.3f}, Over={:.3f}, Score={:.3f}".format(
                 test_ra,
@@ -951,6 +1035,7 @@ def _optimize_fixed_pa_single_program_pointing(
                 int(term_values["n_p1"]),
                 int(term_values["n_finish"]),
                 int(term_values["n_partial"]),
+                int(term_values["n_continue"]),
                 term_values["fh"],
                 term_values["finish"],
                 term_values["cont"],
@@ -972,10 +1057,10 @@ def _optimize_fixed_pa_single_program_pointing(
         [central_ra, central_dec],
         method="Powell",
         bounds=[
-            (central_ra - 0.50, central_ra + 0.50),
-            (central_dec - 0.50, central_dec + 0.50),
+            (central_ra - _PPP_CENTER_SEARCH_RADIUS_DEG, central_ra + _PPP_CENTER_SEARCH_RADIUS_DEG),
+            (central_dec - _PPP_CENTER_SEARCH_RADIUS_DEG, central_dec + _PPP_CENTER_SEARCH_RADIUS_DEG),
         ],
-        options={"xatol": 0.01, "fatol": 0.01, "maxiter": 40, "maxfev": 40},
+        options={"xatol": 0.01, "fatol": 0.01, "maxiter": _PPP_OPTIMIZER_MAXITER, "maxfev": _PPP_OPTIMIZER_MAXFEV},
         
     )
     #"""
@@ -998,10 +1083,10 @@ def _optimize_single_program_from_initial_guess(tb_tgt, initial_guess):
         initial_guess[:2],
         method="Powell",
         bounds=[
-            (initial_guess[0] - 0.50, initial_guess[0] + 0.50),
-            (initial_guess[1] - 0.50, initial_guess[1] + 0.50),
+            (initial_guess[0] - _PPP_CENTER_SEARCH_RADIUS_DEG, initial_guess[0] + _PPP_CENTER_SEARCH_RADIUS_DEG),
+            (initial_guess[1] - _PPP_CENTER_SEARCH_RADIUS_DEG, initial_guess[1] + _PPP_CENTER_SEARCH_RADIUS_DEG),
         ],
-        options={"xatol": 0.01, "fatol": 0.01, "maxiter": 40, "maxfev": 40},
+        options={"xatol": 0.01, "fatol": 0.01, "maxiter": _PPP_OPTIMIZER_MAXITER, "maxfev": _PPP_OPTIMIZER_MAXFEV},
     )
     print(result.x)
     #'''
@@ -1069,10 +1154,10 @@ def _determine_default_single_program_pointing(tb_tgt, fixed_ppc_pa):
         [peak_x, peak_y],
         method="Powell",
         bounds=[
-            (peak_x - 0.50, peak_x + 0.50),
-            (peak_y - 0.50, peak_y + 0.50),
+            (peak_x - _PPP_CENTER_SEARCH_RADIUS_DEG, peak_x + _PPP_CENTER_SEARCH_RADIUS_DEG),
+            (peak_y - _PPP_CENTER_SEARCH_RADIUS_DEG, peak_y + _PPP_CENTER_SEARCH_RADIUS_DEG),
         ],
-        options={"xatol": 0.01, "fatol": 0.01, "maxiter": 40, "maxfev": 40},
+        options={"xatol": 0.01, "fatol": 0.01, "maxiter": _PPP_OPTIMIZER_MAXITER, "maxfev": _PPP_OPTIMIZER_MAXFEV},
     )
     print(result.x)
     #'''
@@ -1266,7 +1351,7 @@ def _normalize_signed_angle_deg(angle_deg):
 
 
 def _evaluate_ppc_inr_continuity(ppc_ra, ppc_dec, ppc_pa, sample_times_utc):
-    """Check that one PPC does not cross the wrapped InR boundary overnight."""
+    """Check one PPC against the wrapped InR boundary and rotator limits."""
     from .validation import calc_inr
 
     inr_values = []
@@ -1281,15 +1366,22 @@ def _evaluate_ppc_inr_continuity(ppc_ra, ppc_dec, ppc_pa, sample_times_utc):
                 "max_jump": np.inf,
                 "inr_values": inr_values,
                 "wrap_crossings": [],
+                "limit_violations": [],
             }
         inr_values.append(_normalize_signed_angle_deg(inr_scalar))
 
     inr_values = np.asarray(inr_values, dtype=float)
+    limit_violations = [
+        (sample_index, float(inr_value))
+        for sample_index, inr_value in enumerate(inr_values)
+        if inr_value <= -_PA_INR_LIMIT_DEG or inr_value >= _PA_INR_LIMIT_DEG
+    ]
     if len(inr_values) <= 1:
-        return True, {
+        return len(limit_violations) == 0, {
             "max_jump": 0.0,
             "inr_values": inr_values,
             "wrap_crossings": [],
+            "limit_violations": limit_violations,
         }
 
     consecutive_pairs = np.column_stack((inr_values[:-1], inr_values[1:]))
@@ -1307,10 +1399,11 @@ def _evaluate_ppc_inr_continuity(ppc_ra, ppc_dec, ppc_pa, sample_times_utc):
             wrap_crossings.append((pair_index, float(inr_start), float(inr_stop)))
 
     max_jump = float(np.max(jump_sizes))
-    return len(wrap_crossings) == 0, {
+    return len(wrap_crossings) == 0 and len(limit_violations) == 0, {
         "max_jump": max_jump,
         "inr_values": inr_values,
         "wrap_crossings": wrap_crossings,
+        "limit_violations": limit_violations,
     }
 
 
@@ -1324,6 +1417,7 @@ def _evaluate_inr_continuity_for_ppc_list(ppc_list, observation_time):
     max_jump = 0.0
     failed_indices = []
     wrap_crossings_by_pointing = {}
+    limit_violations_by_pointing = {}
     for pointing_index, ppc_row in enumerate(ppc_array):
         is_continuous, metrics = _evaluate_ppc_inr_continuity(
             float(ppc_row[1]),
@@ -1335,12 +1429,16 @@ def _evaluate_inr_continuity_for_ppc_list(ppc_list, observation_time):
         if not is_continuous:
             failed_indices.append(pointing_index)
             wrap_crossings_by_pointing[pointing_index] = metrics["wrap_crossings"]
+            limit_violations_by_pointing[pointing_index] = metrics[
+                "limit_violations"
+            ]
 
     return len(failed_indices) == 0, {
         "failed_indices": failed_indices,
         "max_jump": max_jump,
         "sample_count": len(sample_times_utc),
         "wrap_crossings_by_pointing": wrap_crossings_by_pointing,
+        "limit_violations_by_pointing": limit_violations_by_pointing,
     }
 
 
@@ -1357,6 +1455,9 @@ def _evaluate_pa_constraints_for_ppc_list(ppc_list, observation_time):
         "failed_inr_indices": inr_metrics["failed_indices"],
         "sample_count": inr_metrics["sample_count"],
         "wrap_crossings_by_pointing": inr_metrics["wrap_crossings_by_pointing"],
+        "limit_violations_by_pointing": inr_metrics[
+            "limit_violations_by_pointing"
+        ],
     }
 
 
@@ -1386,6 +1487,9 @@ def _score_fixed_pointings_with_pa_constraints(
             "failed_inr_indices": pa_constraint_metrics["failed_inr_indices"],
             "wrap_crossings_by_pointing": pa_constraint_metrics[
                 "wrap_crossings_by_pointing"
+            ],
+            "limit_violations_by_pointing": pa_constraint_metrics[
+                "limit_violations_by_pointing"
             ],
         }
 
@@ -1519,8 +1623,10 @@ def _evaluate_bright_guidestar_constraints(
     }
 
 
-def _single_pointing_pa_candidates(initial_pa=None, pa_step_deg=_PA_GRID_STEP_DEG):
+def _single_pointing_pa_candidates(initial_pa=None, pa_step_deg=None):
     """Return the PA grid used for per-pointing optimization."""
+    if pa_step_deg is None:
+        pa_step_deg = _PA_GRID_STEP_DEG
     pa_candidates = np.arange(-90.0, 270.0, float(pa_step_deg), dtype=float)
     if _is_provided_ppc_pa_value(initial_pa):
         pa_candidates = np.concatenate((pa_candidates, [_normalize_ppc_pa(initial_pa)]))
@@ -1554,6 +1660,9 @@ def _score_single_pointing_pa(
             "failed_inr_indices": pa_constraint_metrics["failed_inr_indices"],
             "wrap_crossings_by_pointing": pa_constraint_metrics[
                 "wrap_crossings_by_pointing"
+            ],
+            "limit_violations_by_pointing": pa_constraint_metrics[
+                "limit_violations_by_pointing"
             ],
             "inr_ok": False,
             "guidestar_ok": True,
@@ -1636,10 +1745,11 @@ def _optimize_single_pointing_pa(
         )
         if not trial_result["inr_ok"]:
             logger.info(
-                "[S2] {} PA trial {:.1f} deg rejected by PA constraints: InR wrap crossing detected ({})".format(
+                "[S2] {} PA trial {:.1f} deg rejected by PA constraints: crossings={}, limit_violations={}".format(
                     label_text,
                     ppc_pa,
                     trial_result["wrap_crossings_by_pointing"],
+                    trial_result["limit_violations_by_pointing"],
                 )
             )
             continue
@@ -1691,7 +1801,7 @@ def optimize_shared_pa_for_fixed_pointings(
     tb_tgt,
     ppc_list,
     fixed_ppc_pa=None,
-    pa_step_deg=_PA_GRID_STEP_DEG,
+    pa_step_deg=None,
     label=None,
     config=None,
 ):
@@ -1700,6 +1810,8 @@ def optimize_shared_pa_for_fixed_pointings(
     The PA constraint checks in this routine are shared infrastructure for
     both queue and classic PA optimization paths.
     """
+    if pa_step_deg is None:
+        pa_step_deg = _PA_GRID_STEP_DEG
     ppc_array = _coerce_ppc_list_array(ppc_list)
     if ppc_array.size == 0:
         return ppc_array, {
@@ -1789,10 +1901,11 @@ def optimize_shared_pa_for_fixed_pointings(
         )
         if not trial_result["inr_ok"]:
             logger.info(
-                "[S2] Shared PA trial {:.1f} deg rejected by PA constraints: InR wrap crossing detected (failed_pointings={}, crossings={})".format(
+                "[S2] Shared PA trial {:.1f} deg rejected by PA constraints: failed_pointings={}, crossings={}, limit_violations={}".format(
                     shared_pa,
                     trial_result["failed_inr_indices"],
                     trial_result["wrap_crossings_by_pointing"],
+                    trial_result["limit_violations_by_pointing"],
                 )
             )
             continue
@@ -1957,13 +2070,15 @@ def optimize_missing_pa_for_fixed_pointings(
 def PPP_centers_for_single_program(
     _tb_tgt,
     n_ppc,
-    weight_para=_DEFAULT_PPP_WEIGHT_PARAMS,
+    weight_para=None,
     fixed_ppc_pa=None,
     write_ppc_list=True,
     output_dir=None,
     config=None,
 ):
     """Determine PPC centers for classic planning of a single proposal."""
+    if weight_para is None:
+        weight_para = _DEFAULT_PPP_WEIGHT_PARAMS
     time_start = time.time()
     logger.info("[S2] Determine pointing centers started")
     ppc_lst = []
@@ -1973,7 +2088,8 @@ def PPP_centers_for_single_program(
     tb_tgt = weight(tb_tgt, para_sci, para_exp, para_n)
     single_exptime = tb_tgt.meta["single_exptime"]
     print(single_exptime)
-    tb_tgt_current = tb_tgt[tb_tgt["exptime_PPP"] > 0]
+    tb_tgt_current = tb_tgt[tb_tgt["exptime_PPP"] > 0].copy(copy_data=True)
+    tb_tgt_current.meta = dict(tb_tgt.meta)
     tb_tgt_current["exptime_done"] = 0.0
     proposal_id = _single_program_proposal_id(tb_tgt)
     while len(tb_tgt_current) > 0 and len(ppc_lst) < n_ppc:
@@ -2041,6 +2157,9 @@ def PPP_centers_for_single_program(
             lst_tgtID_assign = fiber_allocate(
                 tb_tgt_current, single_ppc_mode=True, ppc_candidate=(ra, dec, pa)
             )
+        ppc_score, ppc_term_values = _score_single_ppc_assignment(
+            tb_tgt_current, lst_tgtID_assign
+        )
         tb_tgt_near_ppc = _filter_targets_near_ppc(
             tb_tgt_current,
             [(ra, dec)],
@@ -2065,13 +2184,13 @@ def PPP_centers_for_single_program(
             )
         )
         index_assign = np.isin(tb_tgt_current["identify_code"], lst_tgtID_assign)
-        from collections import Counter
 
+        from collections import Counter
         print(dict(Counter(tb_tgt_current["exptime_PPP"][index_in])))
         print(dict(Counter(tb_tgt_current["exptime_PPP"][index_assign])))
+
         tb_tgt_current["exptime_PPP"][index_assign] -= single_exptime
         tb_tgt_current["exptime_done"][index_assign] += single_exptime
-        #tb_tgt_current["priority"][tb_tgt_current["exptime_done"] > 0] = 999
         proposal_policy = _get_proposal_policy(proposal_id)
         remaining_priority_increment_value = proposal_policy.get(
             "remaining_priority_increment_value"
@@ -2091,6 +2210,28 @@ def PPP_centers_for_single_program(
                 )
             ] += remaining_priority_increment_value
         tb_tgt_current = tb_tgt_current[tb_tgt_current["exptime_PPP"] > 0]
+        print(
+            "Classic PPC_{:3d} selected assignment: Nassigned={:.0f}, NP0={:.0f}, "
+            "NP1={:.0f}, Ncomplete={:.0f}, Npartial={:.0f}, Ncontinue={:.0f}, "
+            "FH={:.3f}, Finish={:.3f}, Continue={:.3f}, Prio={:.3f}, "
+            "Fill={:.3f}, NewPartial={:.3f}, Over={:.3f}, Score={:.3f}".format(
+                len(ppc_lst),
+                ppc_term_values["n_assigned"],
+                ppc_term_values["n_p0"],
+                ppc_term_values["n_p1"],
+                ppc_term_values["n_finish"],
+                ppc_term_values["n_partial"],
+                ppc_term_values["n_continue"],
+                ppc_term_values["fh"],
+                ppc_term_values["finish"],
+                ppc_term_values["cont"],
+                ppc_term_values["prio"],
+                ppc_term_values["fill"],
+                ppc_term_values["new_partial"],
+                ppc_term_values["overshoot"],
+                ppc_score,
+            )
+        )
         #print(sum(tb_tgt_current["priority"] == 999))
     ppc_lst_fin = np.array(ppc_lst)
     ppcList = _build_classic_ppc_list_table(ppc_lst_fin, tb_tgt, n_ppc)
